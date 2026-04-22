@@ -1,12 +1,15 @@
 import argparse
 import sys
 
+from project_manager import check as check_mod
 from project_manager import config
 from project_manager.project import attach as attach_mod
+from project_manager.project import current
 from project_manager.project import delete as delete_mod
 from project_manager.project import detach as detach_mod
 from project_manager.project import ls as ls_mod
 from project_manager.project import new as new_mod
+from project_manager.project import status as status_mod
 from project_manager.project.errors import ProjectError
 
 
@@ -36,7 +39,8 @@ def _cmd_new(args: argparse.Namespace) -> int:
 def _cmd_attach(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
-        attached = attach_mod.attach(paths, args.name, _selected_repos(args))
+        project = current.resolve_project(paths, args.name)
+        attached = attach_mod.attach(paths, project, _selected_repos(args))
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
@@ -48,7 +52,8 @@ def _cmd_attach(args: argparse.Namespace) -> int:
 def _cmd_detach(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
-        released = detach_mod.detach(paths, args.name, _selected_repos(args))
+        project = current.resolve_project(paths, args.name)
+        released = detach_mod.detach(paths, project, _selected_repos(args))
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
@@ -61,7 +66,8 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     paths = config.load()
     repos = _parse_repos(args.repos) if args.repos else None
     try:
-        delete_mod.delete(paths, args.name, repos)
+        project = current.resolve_project(paths, args.name)
+        delete_mod.delete(paths, project, repos)
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
@@ -74,6 +80,25 @@ def _cmd_ls(_: argparse.Namespace) -> int:
     for row in rows:
         print(f"{row.project}\t{row.repo}\t{row.slot_uuid}\t{row.status}")
     return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    paths = config.load()
+    try:
+        project = current.resolve_project(paths, args.name)
+        rows = status_mod.status(paths, project)
+    except ProjectError as e:
+        print(f"pm: {e}", file=sys.stderr)
+        return 2
+    for row in rows:
+        f = row.finding
+        repo = row.repo if row.repo is not None else "-"
+        uuid = row.slot_uuid if row.slot_uuid is not None else "-"
+        forward = f.forward_path if f.forward_path is not None else "-"
+        slot = f.slot_path if f.slot_path is not None else "-"
+        print(f"{repo}\t{uuid}\t{f.kind.value}\t{forward}\t{slot}\t{f.detail}")
+    non_healthy = [r for r in rows if r.finding.kind != check_mod.Kind.ACTIVE]
+    return 1 if non_healthy else 0
 
 
 def _add_repos_or_all(parser: argparse.ArgumentParser) -> None:
@@ -92,23 +117,27 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     new.set_defaults(func=_cmd_new)
 
     attach = sub.add_parser("attach", help="re-attach a project (best-effort slot reclaim)")
-    attach.add_argument("name")
+    attach.add_argument("name", nargs="?")
     _add_repos_or_all(attach)
     attach.set_defaults(func=_cmd_attach)
 
     detach = sub.add_parser("detach", help="detach: unlink forward + release .owner")
-    detach.add_argument("name")
+    detach.add_argument("name", nargs="?")
     _add_repos_or_all(detach)
     detach.set_defaults(func=_cmd_detach)
 
     delete = sub.add_parser(
-        "delete", help="delete project (or --repos r1,r2 for per-repo delete)"
+        "delete", help="delete project (or --repos r1,r2 for per-repo delete)",
     )
-    delete.add_argument("name")
+    delete.add_argument("name", nargs="?")
     delete.add_argument(
-        "--repos", default=None, help="comma-separated repos to delete (omit for whole project)"
+        "--repos", default=None, help="comma-separated repos to delete (omit for whole project)",
     )
     delete.set_defaults(func=_cmd_delete)
 
     ls = sub.add_parser("ls", help="list projects")
     ls.set_defaults(func=_cmd_ls)
+
+    status = sub.add_parser("status", help="show health + db rows for a single project")
+    status.add_argument("name", nargs="?")
+    status.set_defaults(func=_cmd_status)

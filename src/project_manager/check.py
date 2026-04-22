@@ -6,7 +6,7 @@ from pathlib import Path
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
-from project_manager.project import db
+from project_manager.project import db, discovery
 
 
 class Kind(StrEnum):
@@ -22,27 +22,14 @@ class Kind(StrEnum):
 @dataclass(frozen=True)
 class Finding:
     kind: Kind
+    repo: str | None
     slot_path: Path | None
     forward_path: Path | None
     detail: str
 
 
-def _project_dbs(paths: Paths) -> list[tuple[str, Path]]:
-    """Return [(project_name, db_path), ...] for every project dir with a .pm.db."""
-    if not paths.projects.is_dir():
-        return []
-    out = []
-    for project_dir in sorted(paths.projects.iterdir()):
-        if not project_dir.is_dir():
-            continue
-        db_path = paths.project_db(project_dir.name)
-        if db_path.is_file():
-            out.append((project_dir.name, db_path))
-    return out
-
-
 def _row_findings(
-    paths: Paths, project: str, repo: str, slot_uuid: str
+    paths: Paths, project: str, repo: str, slot_uuid: str,
 ) -> Iterator[Finding]:
     forward = paths.forward(project, repo)
     if not forward.is_symlink():
@@ -52,6 +39,7 @@ def _row_findings(
     if not target.is_dir():
         yield Finding(
             kind=Kind.BROKEN,
+            repo=repo,
             slot_path=target,
             forward_path=forward,
             detail=f"forward → {target} does not exist",
@@ -63,6 +51,7 @@ def _row_findings(
     if owner is None or owner != forward:
         yield Finding(
             kind=Kind.STALE,
+            repo=repo,
             slot_path=target,
             forward_path=forward,
             detail=(
@@ -76,6 +65,7 @@ def _row_findings(
     if target.name != slot_uuid:
         yield Finding(
             kind=Kind.DRIFT,
+            repo=repo,
             slot_path=target,
             forward_path=forward,
             detail=f"db says slot_uuid={slot_uuid}, forward points at {target.name}",
@@ -84,6 +74,7 @@ def _row_findings(
 
     yield Finding(
         kind=Kind.ACTIVE,
+        repo=repo,
         slot_path=target,
         forward_path=forward,
         detail="healthy",
@@ -99,22 +90,27 @@ def _orphan_forwards(paths: Paths, project: str, db_rows: set[str]) -> Iterator[
             continue
         yield Finding(
             kind=Kind.ORPHAN_FORWARD,
+            repo=entry.name,
             slot_path=None,
             forward_path=entry,
             detail="forward symlink with no matching db row",
         )
 
 
-def _orphan_owners(paths: Paths, active_pairs: set[tuple[Path, Path]]) -> Iterator[Finding]:
-    """Emit ORPHAN_OWNER for any slot `.owner` that is not backing an active attachment.
+def _orphan_owners(
+    paths: Paths,
+    active_pairs: set[tuple[Path, Path]],
+    *,
+    scope: str | None = None,
+) -> Iterator[Finding]:
+    """Emit ORPHAN_OWNER for slots whose `.owner` is not in `active_pairs`.
 
-    An `(slot, forward)` pair is active iff all of:
-      - the forward symlink exists and resolves to the slot
-      - the forward's project has a `.pm.db` with a matching row
-      - that row was emitted as ACTIVE by `_row_findings` (hence in `active_pairs`)
+    If `scope` is given, only yield findings for slots whose `.owner` target lies
+    under `paths.project(scope)`. Otherwise scan all slots.
     """
     if not paths.worktrees.is_dir():
         return
+    scope_dir = paths.project(scope) if scope is not None else None
     for repo_dir in sorted(paths.worktrees.iterdir()):
         if not repo_dir.is_dir():
             continue
@@ -122,47 +118,79 @@ def _orphan_owners(paths: Paths, active_pairs: set[tuple[Path, Path]]) -> Iterat
             owner = s.owner_target()
             if owner is None:
                 continue
+            if scope_dir is not None and owner.parent != scope_dir:
+                continue
             if (s.path, owner) in active_pairs:
                 continue
             yield Finding(
                 kind=Kind.ORPHAN_OWNER,
+                repo=None,
                 slot_path=s.path,
                 forward_path=owner,
                 detail=".owner does not back any active db-tracked attachment",
             )
 
 
+def _project_findings(
+    paths: Paths, project: str,
+) -> tuple[list[Finding], set[tuple[Path, Path]]]:
+    """Row findings + orphan_forwards for one project, plus its active_pairs."""
+    db_path = discovery.require_project_db(paths, project)
+    with db.readonly(db_path) as conn:
+        rows = db.list_repos(conn)
+    db_rows = {name for name, _ in rows}
+
+    findings: list[Finding] = []
+    active_pairs: set[tuple[Path, Path]] = set()
+    for repo, slot_uuid in rows:
+        forward = paths.forward(project, repo)
+        if not forward.is_symlink():
+            findings.append(
+                Finding(
+                    kind=Kind.DETACHED,
+                    repo=repo,
+                    slot_path=paths.slot(repo, slot_uuid),
+                    forward_path=forward,
+                    detail=f"row for {repo} has no forward symlink",
+                ),
+            )
+            continue
+        row_findings = list(_row_findings(paths, project, repo, slot_uuid))
+        findings.extend(row_findings)
+        for rf in row_findings:
+            # ACTIVE and DRIFT both indicate the `.owner` is legitimately backing
+            # a project-tracked forward; only the db's memory may differ.
+            if rf.kind in (Kind.ACTIVE, Kind.DRIFT) and rf.slot_path is not None:
+                active_pairs.add((rf.slot_path, forward))
+    findings.extend(_orphan_forwards(paths, project, db_rows))
+    return findings, active_pairs
+
+
+def check_project(
+    paths: Paths, project: str, *, include_orphan_owners: bool = True,
+) -> list[Finding]:
+    """All findings for a single project.
+
+    Row-level findings + orphan_forwards always. When `include_orphan_owners`
+    is True, also yields ORPHAN_OWNER for slots whose `.owner` points into this
+    project's dir but isn't backing an active attachment.
+    """
+    findings, active_pairs = _project_findings(paths, project)
+    if include_orphan_owners:
+        findings.extend(_orphan_owners(paths, active_pairs, scope=project))
+    return findings
+
+
 def check(paths: Paths) -> list[Finding]:
     findings: list[Finding] = []
-    active_pairs: set[tuple[Path, Path]] = set()  # (slot_path, forward_path)
+    active_pairs: set[tuple[Path, Path]] = set()
 
-    for project, db_path in _project_dbs(paths):
-        with db.readonly(db_path) as conn:
-            rows = db.list_repos(conn)
-        db_rows = {name for name, _ in rows}
-        for repo, slot_uuid in rows:
-            forward = paths.forward(project, repo)
-            if not forward.is_symlink():
-                findings.append(
-                    Finding(
-                        kind=Kind.DETACHED,
-                        slot_path=paths.slot(repo, slot_uuid),
-                        forward_path=forward,
-                        detail=f"row for {repo} has no forward symlink",
-                    )
-                )
-                continue
-            row_findings = list(_row_findings(paths, project, repo, slot_uuid))
-            findings.extend(row_findings)
-            for rf in row_findings:
-                # ACTIVE and DRIFT both indicate the `.owner` is legitimately backing
-                # a project-tracked forward; only the db's memory may differ.
-                if rf.kind in (Kind.ACTIVE, Kind.DRIFT) and rf.slot_path is not None:
-                    active_pairs.add((rf.slot_path, forward))
-        findings.extend(_orphan_forwards(paths, project, db_rows))
+    for project, _ in discovery.list_project_dbs(paths):
+        project_findings, project_pairs = _project_findings(paths, project)
+        findings.extend(project_findings)
+        active_pairs |= project_pairs
 
     findings.extend(_orphan_owners(paths, active_pairs))
-
     return findings
 
 
