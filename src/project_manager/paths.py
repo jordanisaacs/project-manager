@@ -25,3 +25,6 @@ class Paths:
 
     def forward(self, project: str, repo: str) -> Path:
         return self.projects / project / repo
+
+    def project_db(self, project: str) -> Path:
+        return self.projects / project / ".pm.db"

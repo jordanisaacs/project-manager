@@ -1,9 +1,11 @@
 import contextlib
+import sqlite3
 from pathlib import Path
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
+from project_manager.project import db
 from project_manager.project.errors import ProjectError
 
 
@@ -12,7 +14,8 @@ def _claim_any_free(paths: Paths, repo: str, forward: Path, retries: int = 3) ->
         free = slot_mod.free_slots(paths, repo)
         if not free:
             raise PoolExhaustedError(
-                f"no free slots for repo '{repo}' — run `pm pool add {repo}` or release a project"
+                f"no free slots for repo '{repo}' — run `pm pool add {repo}` or "
+                f"detach/delete a project"
             )
         for s in free:
             try:
@@ -24,48 +27,58 @@ def _claim_any_free(paths: Paths, repo: str, forward: Path, retries: int = 3) ->
     raise SlotBusyError(f"lost {retries} claim races for repo '{repo}'")
 
 
-def _claim_one_repo(
-    paths: Paths, project: str, repo: str
+def _claim_one(
+    paths: Paths, project: str, repo: str, conn: sqlite3.Connection
 ) -> tuple[Slot, Path]:
+    if db.get_slot(conn, repo) is not None:
+        raise ProjectError(f"project '{project}' already has repo '{repo}'")
     forward = paths.forward(project, repo)
     if forward.is_symlink() or forward.exists():
         raise ProjectError(f"{forward} already exists")
-    slot = _claim_any_free(paths, repo, forward)
+    s = _claim_any_free(paths, repo, forward)
     try:
-        forward.symlink_to(slot.path)
+        forward.symlink_to(s.path)
+        db.add_repo(conn, repo, s.uuid)
     except BaseException:
-        slot_mod.release(slot)
+        slot_mod.release(s)
         raise
-    return slot, forward
+    return s, forward
 
 
 def new(paths: Paths, project: str, repos: list[str]) -> list[tuple[str, Slot]]:
-    """Claim a slot for each repo and create forward symlinks.
+    """Create a new project. Claim a slot for each repo, insert db rows, forward-link.
 
-    Best-effort rollback on any failure.
+    Best-effort rollback on any failure: db transaction rolls back via the context
+    manager; filesystem side-effects (symlinks, .owner markers) are unwound by the
+    outer except block.
+
     Returns [(repo, slot), ...] on success.
     """
     if not repos:
         raise ProjectError("must specify at least one repo")
 
     project_dir = paths.project(project)
-    created_project_dir = False
-    if not project_dir.exists():
-        project_dir.mkdir(parents=True)
-        created_project_dir = True
+    db_path = paths.project_db(project)
+    created_dir = not project_dir.exists()
+    db_existed = db_path.exists()
 
     claimed: list[tuple[str, Slot, Path]] = []
     try:
-        for repo in repos:
-            slot, forward = _claim_one_repo(paths, project, repo)
-            claimed.append((repo, slot, forward))
+        with db.transaction(db_path) as conn:
+            for repo in repos:
+                s, fwd = _claim_one(paths, project, repo, conn)
+                claimed.append((repo, s, fwd))
     except BaseException:
         for _repo, s, f in reversed(claimed):
             with contextlib.suppress(FileNotFoundError):
                 f.unlink()
             slot_mod.release(s)
-        if created_project_dir:
+        if not db_existed:
+            with contextlib.suppress(FileNotFoundError):
+                db_path.unlink()
+        if created_dir:
             with contextlib.suppress(OSError):
                 project_dir.rmdir()
         raise
+
     return [(r, s) for r, s, _ in claimed]

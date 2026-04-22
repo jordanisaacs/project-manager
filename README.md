@@ -5,8 +5,9 @@ A small CLI that manages a claim-release pool of git worktrees and binds them to
 ## What it does
 
 - **Pool**: stable UUID-named worktree slots under `~/.worktrees/<repo>/<uuid>/`. Reused across projects — checking out another branch does not re-incur cold-build cost.
-- **Projects**: a project is a directory of forward symlinks at `~/.projects/<project>/<repo>`, each pointing at a claimed pool slot.
-- **Atomic claim**: a slot is "owned" by the project whose forward symlink it's bound to. Ownership is recorded by a reverse symlink `<slot>/.owner` created via `ln -s`, which is POSIX-atomic — two concurrent claimers racing for the same slot, exactly one wins.
+- **Projects**: a project is a directory `~/.projects/<project>/` holding a per-project SQLite db (`.pm.db`) and, when attached, forward symlinks `<repo> -> <slot>`.
+- **Two sources of truth**: the db records *which repos belong to this project* and *which slot each was last bound to*. Symlinks record *currently attached*. Separating these lets `detach` cleanly unlink while `attach` still knows which slot to reclaim.
+- **Atomic claim**: ownership is recorded by a reverse symlink `<slot>/.owner` created via `ln -s`, which is POSIX-atomic — two concurrent claimers racing for the same slot, exactly one wins.
 - **No branch management**: `pm` does not touch branches or stacks. Whatever checkout state the slot already has is inherited. Layer `git-stack` / Rodrigo's `stacker` on top as you wish.
 
 ## Install
@@ -37,15 +38,18 @@ projects = "~/.projects"
 ## Commands
 
 ```
-pm project new <name> --repos r1,r2,...   # claim a free slot per repo
-pm project release <name>                 # drop .owner, keep forward symlinks
-pm project attach <name>                  # inverse of release: re-claim slots for existing forwards
-pm project delete <name>                  # release + remove forward symlinks + rmdir
-pm project ls                             # active projects and their bindings
-pm pool ls [<repo>]                       # pool slots with claim status
-pm pool add <repo>                        # mint a new slot (git worktree add --detach)
-pm check [--fix]                          # invariant scan; --fix reconciles orphans/broken
+pm project new <name> --repos r1,r2,...             # create project, claim slots, link
+pm project attach <name> {--repos r1,.. | --all}    # best-effort reclaim remembered slot
+pm project detach <name> {--repos r1,.. | --all}    # unlink forward + release .owner
+pm project delete <name> [--repos r1,..]            # per-repo (implicit detach + drop row)
+                                                    # or whole project (detach all, drop db, rmdir)
+pm project ls                                       # rows from each project's db + status
+pm pool ls [<repo>]                                 # pool slots with claim status
+pm pool add <repo>                                  # mint a new slot (git worktree add --detach)
+pm check [--fix]                                    # invariant scan; --fix reconciles
 ```
+
+`attach` and `detach` require exactly one of `--repos` or `--all`; there is no implicit default.
 
 ### Example
 
@@ -61,30 +65,41 @@ pm pool ls universe
 # Create a project using one slot
 pm project new my-feature --repos universe
 ls -la ~/.projects/my-feature/
-# my-feature/universe -> ~/.worktrees/universe/<uuid-1>
+# .pm.db
+# universe -> ~/.worktrees/universe/<uuid-1>
 
-# Release — slot is back in the pool, forward symlink stays for browsing
-pm project release my-feature
+# Detach — slot is back in the pool, forward symlink is unlinked; .pm.db stays
+pm project detach my-feature --all
 pm pool ls universe
 # universe <uuid-1> FREE
 # universe <uuid-2> FREE
+ls ~/.projects/my-feature/
+# .pm.db   (project dir now holds only the db)
 
-# Delete — remove the project entirely (fails if extra files exist)
+# Attach — best-effort reclaim of the remembered slot
+pm project attach my-feature --all
+# my-feature/universe -> ~/.worktrees/universe/<uuid-1>   (same slot: warm!)
+
+# Per-repo delete (implicit detach)
+pm project delete my-feature --repos universe
+
+# Whole-project delete (fails if non-pm entries exist)
 pm project delete my-feature
 ```
 
 ## Invariants (`pm check`)
 
-For every slot `S = <worktrees>/<repo>/<uuid>/`:
-- If `S/.owner` exists, it must point at a forward symlink that points back at `S`. Otherwise → **orphan**.
+For each project identified by presence of `<projects>/<name>/.pm.db`:
 
-For every forward `P = <projects>/<name>/<repo>`:
-- `P` must point at an existing slot `S`. Otherwise → **broken**.
-- If `S/.owner` points back at `P` → **active** (healthy).
-- If `S/.owner` is absent → **detached** (post-release state; intentional).
-- If `S/.owner` points at a different forward → **stale** (slot was re-claimed after this project released it).
-
-`pm check --fix` reconciles orphans and broken entries. Detached and stale are intentional states and left alone.
+| State | Meaning | `--fix` |
+|---|---|---|
+| **active** | db row + forward symlink + `.owner` matches; uuid matches db | — |
+| **detached** | db row, no forward symlink | — (intentional) |
+| **drift** | forward points at a different slot than db remembers; `.owner` matches | — (informational) |
+| **stale** | forward exists but `.owner` is missing or points at a different forward | unlink forward |
+| **broken** | forward points at a missing slot dir | unlink forward |
+| **orphan-forward** | forward exists with no db row in the project | unlink forward |
+| **orphan-owner** | slot `.owner` points at a forward not backed by any active db row | remove `.owner` |
 
 ## Testing
 
@@ -108,9 +123,11 @@ src/project_manager/
 ├── check.py          # invariant scan + --fix
 ├── project/
 │   ├── cli.py
-│   ├── new.py        # claim + forward-link with rollback
-│   ├── release.py    # drop .owner
-│   ├── delete.py     # release + remove forward symlinks + rmdir
+│   ├── db.py         # per-project sqlite helpers (transaction() ctx mgr)
+│   ├── new.py        # create db + rows, claim slots, forward-link, rollback
+│   ├── attach.py     # read db, best-effort reclaim remembered slot else fallback + UPDATE
+│   ├── detach.py     # unlink forward + release .owner; rows untouched
+│   ├── delete.py     # per-repo (detach + DELETE row) or whole (detach + drop db + rmdir)
 │   └── ls.py
 └── pool/
     ├── cli.py
