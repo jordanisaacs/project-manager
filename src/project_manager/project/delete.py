@@ -7,6 +7,7 @@ from project_manager.project import detach as detach_mod
 from project_manager.project.errors import ProjectError
 
 _DB_FILENAME = ".pm.db"
+_ALLOWED_EXTRAS = {_DB_FILENAME, "README.md"}
 
 
 def _is_pm_symlink(entry: Path, worktrees_root: Path) -> bool:
@@ -44,7 +45,8 @@ def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) 
     extras = [
         str(entry)
         for entry in project_dir.iterdir()
-        if entry.name != _DB_FILENAME and not _is_pm_symlink(entry, paths.worktrees)
+        if entry.name not in _ALLOWED_EXTRAS
+        and not _is_pm_symlink(entry, paths.worktrees)
     ]
     if extras:
         raise ProjectError(

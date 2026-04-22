@@ -61,6 +61,36 @@ def test_new_fails_if_project_already_has_repo(pm_env: Paths) -> None:
         new_mod.new(pm_env, "demo", ["foo"])
 
 
+def test_new_writes_readme(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    readme = pm_env.projects / "demo" / "README.md"
+    assert readme.is_file()
+    body = readme.read_text(encoding="utf-8")
+    assert "demo" in body
+    assert "not a git" in body
+    assert "pm project status" in body
+
+
+def test_new_does_not_overwrite_readme(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    _mk_pool(pm_env, "bar", ["x"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    readme = pm_env.projects / "demo" / "README.md"
+    readme.write_text("user edit", encoding="utf-8")
+    new_mod.new(pm_env, "demo", ["bar"])
+    assert readme.read_text(encoding="utf-8") == "user edit"
+
+
+def test_new_rollback_does_not_leave_readme(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    _mk_pool(pm_env, "bar", [])
+    with pytest.raises(PoolExhaustedError):
+        new_mod.new(pm_env, "demo", ["foo", "bar"])
+    assert not (pm_env.projects / "demo" / "README.md").exists()
+    assert not (pm_env.projects / "demo").exists()
+
+
 # --- detach ---
 
 
@@ -161,6 +191,14 @@ def test_delete_whole_removes_db_and_dir(pm_env: Paths) -> None:
     delete_mod.delete(pm_env, "demo", repos=None)
     assert not (pm_env.projects / "demo").exists()
     assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+
+
+def test_delete_whole_removes_readme(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    assert (pm_env.projects / "demo" / "README.md").is_file()
+    delete_mod.delete(pm_env, "demo", repos=None)
+    assert not (pm_env.projects / "demo").exists()
 
 
 def test_delete_per_repo_implicit_detach(pm_env: Paths) -> None:

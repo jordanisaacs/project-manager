@@ -8,6 +8,24 @@ from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import db
 from project_manager.project.errors import ProjectError
 
+_README_TEMPLATE = """\
+# {project}
+
+This directory is a **`pm`-managed project**, not a git repository.
+
+It is a container of symlinks into a shared worktree pool managed by `pm`.
+Each entry (besides `.pm.db` and this README) is a symlink to a worktree
+checkout living under the pool root.
+
+## Inspecting state
+
+- `ls` / `ls -l` — see attached repos (symlinks) at a glance.
+- `pm project status` — authoritative state from `.pm.db`.
+
+Do not `git init` here, do not commit this directory, and do not move the
+symlinks by hand — use `pm project attach|detach|delete`.
+"""
+
 
 def _claim_any_free(paths: Paths, repo: str, forward: Path, retries: int = 3) -> Slot:
     for _ in range(retries):
@@ -80,5 +98,9 @@ def new(paths: Paths, project: str, repos: list[str]) -> list[tuple[str, Slot]]:
             with contextlib.suppress(OSError):
                 project_dir.rmdir()
         raise
+
+    readme = project_dir / "README.md"
+    if not readme.exists():
+        readme.write_text(_README_TEMPLATE.format(project=project), encoding="utf-8")
 
     return [(r, s) for r, s, _ in claimed]
