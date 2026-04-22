@@ -2,6 +2,7 @@ import argparse
 import sys
 
 from project_manager import config
+from project_manager.project import attach as attach_mod
 from project_manager.project import delete as delete_mod
 from project_manager.project import ls as ls_mod
 from project_manager.project import new as new_mod
@@ -30,6 +31,18 @@ def _cmd_release(args: argparse.Namespace) -> int:
         print(f"pm: {e}", file=sys.stderr)
         return 2
     for slot in released:
+        print(f"{slot.repo}\t{slot.path}")
+    return 0
+
+
+def _cmd_attach(args: argparse.Namespace) -> int:
+    paths = config.load()
+    try:
+        attached = attach_mod.attach(paths, args.name)
+    except ProjectError as e:
+        print(f"pm: {e}", file=sys.stderr)
+        return 2
+    for slot in attached:
         print(f"{slot.repo}\t{slot.path}")
     return 0
 
@@ -64,6 +77,10 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     release = sub.add_parser("release", help="release ownership (keep forward symlinks)")
     release.add_argument("name")
     release.set_defaults(func=_cmd_release)
+
+    attach = sub.add_parser("attach", help="re-claim slots for an existing project's forwards")
+    attach.add_argument("name")
+    attach.set_defaults(func=_cmd_attach)
 
     delete = sub.add_parser("delete", help="release + remove forward symlinks + rmdir")
     delete.add_argument("name")

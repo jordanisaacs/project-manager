@@ -1,7 +1,10 @@
+import shutil
+
 import pytest
 
 from project_manager.paths import Paths
 from project_manager.pool.slot import PoolExhaustedError
+from project_manager.project import attach as attach_mod
 from project_manager.project import delete as delete_mod
 from project_manager.project import ls as ls_mod
 from project_manager.project import new as new_mod
@@ -115,6 +118,55 @@ def test_ls_status_detached_after_release(pm_env: Paths) -> None:
     release_mod.release(pm_env, "demo")
     rows = ls_mod.ls(pm_env)
     assert rows[0].status == "detached"
+
+
+def test_attach_detached_becomes_active(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    release_mod.release(pm_env, "demo")
+    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+    attach_mod.attach(pm_env, "demo")
+    owner = (pm_env.worktrees / "foo" / "a" / ".owner")
+    assert owner.is_symlink()
+    assert owner.readlink() == pm_env.forward("demo", "foo")
+
+
+def test_attach_idempotent_when_already_active(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    attached = attach_mod.attach(pm_env, "demo")
+    assert attached == []  # nothing newly claimed; already active
+
+
+def test_attach_refuses_stale_slot(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    release_mod.release(pm_env, "demo")
+    new_mod.new(pm_env, "other", ["foo"])  # steals the slot
+    with pytest.raises(ProjectError, match="claimed by"):
+        attach_mod.attach(pm_env, "demo")
+
+
+def test_attach_refuses_broken_forward(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    new_mod.new(pm_env, "demo", ["foo"])
+    # tear down the slot dir entirely
+    shutil.rmtree(pm_env.worktrees / "foo" / "a")
+    with pytest.raises(ProjectError, match="missing slot"):
+        attach_mod.attach(pm_env, "demo")
+
+
+def test_attach_multi_repo_rollback(pm_env: Paths) -> None:
+    _mk_pool(pm_env, "foo", ["a"])
+    _mk_pool(pm_env, "bar", ["x"])
+    new_mod.new(pm_env, "demo", ["foo", "bar"])
+    release_mod.release(pm_env, "demo")
+    # another project claims only `bar`, making `demo`'s bar forward stale
+    new_mod.new(pm_env, "other", ["bar"])
+    # attach should fail on `bar`, and also unroll the reattachment of `foo`
+    with pytest.raises(ProjectError):
+        attach_mod.attach(pm_env, "demo")
+    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
 
 
 def test_ls_status_stale(pm_env: Paths) -> None:

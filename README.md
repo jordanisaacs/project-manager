@@ -39,6 +39,7 @@ projects = "~/.projects"
 ```
 pm project new <name> --repos r1,r2,...   # claim a free slot per repo
 pm project release <name>                 # drop .owner, keep forward symlinks
+pm project attach <name>                  # inverse of release: re-claim slots for existing forwards
 pm project delete <name>                  # release + remove forward symlinks + rmdir
 pm project ls                             # active projects and their bindings
 pm pool ls [<repo>]                       # pool slots with claim status
