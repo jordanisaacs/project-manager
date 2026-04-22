@@ -1,0 +1,72 @@
+[project]
+name = "project-manager"
+version = "0.1.0"
+description = "Claim-release pool of git worktrees bound to named projects via symlinks."
+readme = "README.md"
+authors = [
+    { name = "Jordan Isaacs", email = "jordan.isaacs@databricks.com" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+pm = "project_manager.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "ty>=0.0.1a1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # Docstring enforcement across the project is noise for a small CLI.
+    "D",
+    # Trailing-comma rules conflict with the formatter.
+    "COM812",
+    # Copyright headers.
+    "CPY",
+    # print() is how the CLI talks to stdout.
+    "T201",
+    # Allow Exception subclasses without a trailing period in the message.
+    "EM101", "EM102",
+    # Allow implicit Optional via `X | None` — we already require 3.11.
+    "TC",
+    # Don't require from __future__ import annotations.
+    "FA",
+    # Too-long messages in raise — we prefer expressive errors.
+    "TRY003",
+    # Using assert in tests is fine.
+    "S101",
+    # subprocess calls are deliberate and vetted.
+    "S603", "S607",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "ANN",   # tests don't need full annotation coverage
+    "PLR2004",  # magic numbers in tests are expected
+    "SLF001",   # tests may poke at privates
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# ty is maximal via `[tool.ty.terminal] error-on-warning`. This picks up every
+# default-warn rule automatically, including any added in future ty releases —
+# no hand-maintained list to drift.
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
