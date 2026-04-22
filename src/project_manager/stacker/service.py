@@ -10,7 +10,7 @@ from tempfile import NamedTemporaryFile
 from urllib.parse import quote
 
 from .db import StackerDB
-from .models import OperationState, ParentLocator, RepoPRConfig, SelectorTarget, TrackedWorktree
+from .models import OperationState, ParentLocator, RepoPRConfig, SelectorTarget, TrackedBranch
 from . import gh, git, selectors
 
 
@@ -52,7 +52,7 @@ class StackerService:
         branch = git.current_branch(worktree_path)
         parent_head = git.rev_parse(parent.worktree_path, parent.branch)
         self.db.upsert_worktree(
-            TrackedWorktree(
+            TrackedBranch(
                 repo_root=target_repo_root,
                 worktree_path=worktree_path,
                 branch=branch,
@@ -66,11 +66,11 @@ class StackerService:
         )
         return worktree_path
 
-    def track(self, target: SelectorTarget, parent: ParentLocator) -> TrackedWorktree:
+    def track(self, target: SelectorTarget, parent: ParentLocator) -> TrackedBranch:
         if target.repo_root != parent.repo_root:
             raise git.GitError("Parent and child must be in the same repo.")
         base_commit = git.merge_base(target.repo_root, parent.branch, target.branch)
-        tracked = TrackedWorktree(
+        tracked = TrackedBranch(
             repo_root=target.repo_root,
             worktree_path=target.worktree_path,
             branch=target.branch,
@@ -154,7 +154,7 @@ class StackerService:
             )
         for child in self.db.get_children(tracked.repo_root, tracked.worktree_path, tracked.branch):
             self.db.upsert_worktree(
-                TrackedWorktree(
+                TrackedBranch(
                     repo_root=child.repo_root,
                     worktree_path=child.worktree_path,
                     branch=child.branch,
@@ -245,7 +245,7 @@ class StackerService:
             return "No tracked worktrees."
         current = self._current_context_or_none()
         tracked_index = {(item.worktree_path, item.branch): item for item in worktrees}
-        by_repo: dict[str, list[TrackedWorktree]] = {}
+        by_repo: dict[str, list[TrackedBranch]] = {}
         for item in worktrees:
             by_repo.setdefault(item.repo_root, []).append(item)
         lines: list[str] = []
@@ -343,7 +343,7 @@ class StackerService:
                 f"No repair needed for {selectors.selector_for(tracked.repo_root, tracked.branch)}.\n"
                 f"Stored base already matches {self._short(actual_base)}."
             )
-        repaired = TrackedWorktree(
+        repaired = TrackedBranch(
             repo_root=tracked.repo_root,
             worktree_path=tracked.worktree_path,
             branch=tracked.branch,
@@ -390,7 +390,7 @@ class StackerService:
         erase_stack_block: bool = False,
     ) -> str:
         logs: list[str] = []
-        queue: list[TrackedWorktree] = []
+        queue: list[TrackedBranch] = []
         tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
         if tracked:
             queue.append(tracked)
@@ -403,7 +403,7 @@ class StackerService:
             current_repo = gh.repo_info(cwd=target.repo_root)
         except git.GitError:
             current_repo = None
-        refresh_root: TrackedWorktree | None = None
+        refresh_root: TrackedBranch | None = None
         for item in queue:
             if not self._run_single_pp(item, logs, require_upstream_before=True):
                 return self._finish(logs, "PP complete.")
@@ -469,7 +469,7 @@ class StackerService:
             )
         return "Aborted operation."
 
-    def _run_single_pp(self, tracked: TrackedWorktree, logs: list[str], *, require_upstream_before: bool = False) -> bool:
+    def _run_single_pp(self, tracked: TrackedBranch, logs: list[str], *, require_upstream_before: bool = False) -> bool:
         label = selectors.selector_for(tracked.repo_root, tracked.branch)
         upstream = git.upstream_branch(tracked.worktree_path)
         if require_upstream_before and not upstream:
@@ -491,7 +491,7 @@ class StackerService:
             raise git.GitError(f"{label} has no upstream remote after git pp --force.")
         return True
 
-    def _only_child(self, target: SelectorTarget) -> TrackedWorktree:
+    def _only_child(self, target: SelectorTarget) -> TrackedBranch:
         children = self.db.get_children(target.repo_root, target.worktree_path, target.branch)
         if not children:
             raise git.GitError(
@@ -519,7 +519,7 @@ class StackerService:
 
     def _create_or_update_current_pr(
         self,
-        tracked: TrackedWorktree,
+        tracked: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
         *,
@@ -549,7 +549,7 @@ class StackerService:
 
     def _refresh_component_pr_bodies(
         self,
-        tracked: TrackedWorktree,
+        tracked: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
         current_pr: gh.PullRequest | None,
@@ -573,7 +573,7 @@ class StackerService:
 
     def _erase_component_pr_bodies(
         self,
-        tracked: TrackedWorktree,
+        tracked: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
         logs: list[str],
@@ -590,8 +590,8 @@ class StackerService:
                 gh.edit_pr(repo=self._target_repo_slug(config, current_repo), number=pr.number, body_file=body_file)
             self._record(logs, f"Erased stack block for PR #{pr.number} ({selectors.selector_for(node.repo_root, node.branch)})")
 
-    def _component_nodes(self, tracked: TrackedWorktree) -> list[TrackedWorktree]:
-        ancestors: list[TrackedWorktree] = []
+    def _component_nodes(self, tracked: TrackedBranch) -> list[TrackedBranch]:
+        ancestors: list[TrackedBranch] = []
         current = tracked
         while True:
             parent = self.db.get_worktree(current.parent_repo_root, current.parent_worktree_path, current.parent_branch)
@@ -604,7 +604,7 @@ class StackerService:
 
     def _open_pr_map(
         self,
-        component: list[TrackedWorktree],
+        component: list[TrackedBranch],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> dict[tuple[str, str], gh.PullRequest]:
@@ -616,7 +616,7 @@ class StackerService:
 
     def _find_open_pr(
         self,
-        tracked: TrackedWorktree,
+        tracked: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> gh.PullRequest | None:
@@ -633,7 +633,7 @@ class StackerService:
 
     def _pr_base_for_current_branch(
         self,
-        tracked: TrackedWorktree,
+        tracked: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> str:
@@ -654,7 +654,7 @@ class StackerService:
         parent_remote_branch = self._remote_branch_name(parent_tracked)
         return parent_remote_branch
 
-    def _remote_branch_name(self, tracked: TrackedWorktree) -> str:
+    def _remote_branch_name(self, tracked: TrackedBranch) -> str:
         remote_branch = git.upstream_branch_name(tracked.worktree_path)
         if not remote_branch:
             raise git.GitError(
@@ -671,7 +671,7 @@ class StackerService:
             return f"{current_repo.owner}:{remote_branch}"
         return remote_branch
 
-    def _first_commit_text(self, tracked: TrackedWorktree) -> tuple[str, str]:
+    def _first_commit_text(self, tracked: TrackedBranch) -> tuple[str, str]:
         title, body = git.first_commit_title_and_body(
             tracked.worktree_path,
             f"{tracked.managed_base_commit}..HEAD",
@@ -701,8 +701,8 @@ class StackerService:
 
     def _render_stack_block(
         self,
-        component: list[TrackedWorktree],
-        current_node: TrackedWorktree,
+        component: list[TrackedBranch],
+        current_node: TrackedBranch,
         pr_map: dict[tuple[str, str], gh.PullRequest],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
@@ -736,9 +736,9 @@ class StackerService:
 
     def _render_stack_lines(
         self,
-        component: list[TrackedWorktree],
-        node: TrackedWorktree,
-        current_node: TrackedWorktree,
+        component: list[TrackedBranch],
+        node: TrackedBranch,
+        current_node: TrackedBranch,
         pr_map: dict[tuple[str, str], gh.PullRequest],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
@@ -770,7 +770,7 @@ class StackerService:
 
     def _compare_url(
         self,
-        node: TrackedWorktree,
+        node: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
         pr_map: dict[tuple[str, str], gh.PullRequest],
@@ -802,7 +802,7 @@ class StackerService:
     def render_zsh(self) -> str:
         return (Path(__file__).with_name("stacker.zsh").read_text()).strip()
 
-    def _prepare_local_operation(self, tracked: TrackedWorktree, *, op_type: str, logs: list[str]) -> OperationState:
+    def _prepare_local_operation(self, tracked: TrackedBranch, *, op_type: str, logs: list[str]) -> OperationState:
         parent_head, start_head, commit_list = self._sync_plan(tracked)
         op = self.db.get_operation(tracked.repo_root)
         if op is None:
@@ -928,7 +928,7 @@ class StackerService:
             op.next_commit_index += 1
             self.db.put_operation(op)
         tracked = self._require_tracked(SelectorTarget(repo_root=repo_root, worktree_path=path, branch=op.worktree_branch or git.current_branch(path)))
-        updated = TrackedWorktree(
+        updated = TrackedBranch(
             repo_root=tracked.repo_root,
             worktree_path=tracked.worktree_path,
             branch=tracked.branch,
@@ -968,8 +968,8 @@ class StackerService:
             return 0
         return min(applied_count, len(op.commit_list))
 
-    def _toposorted_descendants(self, repo_root: str, path: str, branch: str) -> list[TrackedWorktree]:
-        ordered: list[TrackedWorktree] = []
+    def _toposorted_descendants(self, repo_root: str, path: str, branch: str) -> list[TrackedBranch]:
+        ordered: list[TrackedBranch] = []
 
         def walk(parent_path: str, parent_branch: str) -> None:
             children = self.db.get_children(repo_root, parent_path, parent_branch)
@@ -986,8 +986,8 @@ class StackerService:
         repo_root: str,
         path: str,
         branch: str,
-        items: list[TrackedWorktree],
-        tracked_index: dict[tuple[str, str], TrackedWorktree],
+        items: list[TrackedBranch],
+        tracked_index: dict[tuple[str, str], TrackedBranch],
         live_worktrees: dict[tuple[str, str], git.WorktreeInfo],
         prefix: str,
         is_last: bool,
@@ -1036,7 +1036,7 @@ class StackerService:
                 current,
             )
 
-    def _is_synced(self, tracked: TrackedWorktree) -> bool:
+    def _is_synced(self, tracked: TrackedBranch) -> bool:
         try:
             parent_head = git.rev_parse(tracked.parent_worktree_path, tracked.parent_branch)
         except git.GitError:
@@ -1045,7 +1045,7 @@ class StackerService:
 
     def _has_graph_blocking_changes(
         self,
-        tracked: TrackedWorktree,
+        tracked: TrackedBranch,
         live_worktrees: dict[tuple[str, str], git.WorktreeInfo],
     ) -> bool:
         if (tracked.worktree_path, tracked.branch) not in live_worktrees:
@@ -1075,7 +1075,7 @@ class StackerService:
         except Exception:
             return None
 
-    def _require_tracked(self, target: SelectorTarget) -> TrackedWorktree:
+    def _require_tracked(self, target: SelectorTarget) -> TrackedBranch:
         tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
         if not tracked:
             raise git.GitError(
@@ -1097,7 +1097,7 @@ class StackerService:
         parts.append("Next action: stacker continue or stacker abort")
         return "\n".join(parts)
 
-    def _sync_plan(self, tracked: TrackedWorktree) -> tuple[str, str, list[str]]:
+    def _sync_plan(self, tracked: TrackedBranch) -> tuple[str, str, list[str]]:
         parent_head = git.rev_parse(tracked.parent_worktree_path, tracked.parent_branch)
         start_head = git.rev_parse(tracked.worktree_path, "HEAD")
         commit_list = git.rev_list(tracked.worktree_path, f"{tracked.managed_base_commit}..{start_head}")

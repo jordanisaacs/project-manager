@@ -5,32 +5,28 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class RepoContext:
-    repo_root: str
+    repo_name: str
     worktree_path: str
     branch: str
 
 
 @dataclass(frozen=True)
 class SelectorTarget:
-    repo_root: str
-    worktree_path: str
+    repo_name: str
     branch: str
 
 
 @dataclass(frozen=True)
 class ParentLocator:
-    repo_root: str
-    worktree_path: str
+    repo_name: str
     branch: str
 
 
 @dataclass(frozen=True)
-class TrackedWorktree:
-    repo_root: str
-    worktree_path: str
+class TrackedBranch:
+    repo_name: str
     branch: str
-    parent_repo_root: str
-    parent_worktree_path: str
+    parent_repo_name: str
     parent_branch: str
     managed_base_commit: str
     last_synced_parent_commit: str | None
@@ -39,7 +35,7 @@ class TrackedWorktree:
 
 @dataclass(frozen=True)
 class RepoPRConfig:
-    repo_root: str
+    repo_name: str
     mode: str
     trunk_branch: str
     main_repo: str | None
@@ -47,17 +43,14 @@ class RepoPRConfig:
 
 @dataclass
 class OperationState:
-    repo_root: str
+    repo_name: str
     op_type: str
     status: str
-    root_path: str | None = None
+    branch: str | None = None
+    parent_branch: str | None = None
     root_branch: str | None = None
     queue: list[str] = field(default_factory=list)
     current_index: int = 0
-    worktree_path: str | None = None
-    worktree_branch: str | None = None
-    parent_path: str | None = None
-    parent_branch: str | None = None
     start_head: str | None = None
     target_parent_head: str | None = None
     commit_list: list[str] = field(default_factory=list)

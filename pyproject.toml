@@ -70,3 +70,6 @@ error-on-warning = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/stacker is vendored verbatim from upstream; Phase 1 rewrites it in the
+# final commit of the port. Exclude from collection until then.
+addopts = "--ignore=tests/stacker"
