@@ -7,6 +7,7 @@ class Paths:
     repos: Path
     worktrees: Path
     projects: Path
+    stacker_root: Path
 
     def repo(self, name: str) -> Path:
         return self.repos / name
@@ -28,3 +29,9 @@ class Paths:
 
     def project_db(self, project: str) -> Path:
         return self.projects / project / ".pm.db"
+
+    def stacker_db(self) -> Path:
+        return self.stacker_root / "db.sqlite"
+
+    def stacker_ops_marker(self) -> Path:
+        return self.stacker_root / "ops"
