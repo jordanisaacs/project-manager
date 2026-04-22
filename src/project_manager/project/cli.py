@@ -27,7 +27,7 @@ def _selected_repos(args: argparse.Namespace) -> list[str] | None:
 def _cmd_new(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
-        claimed = new_mod.new(paths, args.name, _parse_repos(args.repos))
+        claimed = new_mod.new(paths, args.project, _parse_repos(args.repos))
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
@@ -39,7 +39,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
 def _cmd_attach(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
-        project = current.resolve_project(paths, args.name)
+        project = current.resolve_project(paths, args.project)
         attached = attach_mod.attach(paths, project, _selected_repos(args))
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
@@ -52,7 +52,7 @@ def _cmd_attach(args: argparse.Namespace) -> int:
 def _cmd_detach(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
-        project = current.resolve_project(paths, args.name)
+        project = current.resolve_project(paths, args.project)
         released = detach_mod.detach(paths, project, _selected_repos(args))
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
@@ -66,7 +66,7 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     paths = config.load()
     repos = _parse_repos(args.repos) if args.repos else None
     try:
-        project = current.resolve_project(paths, args.name)
+        project = current.resolve_project(paths, args.project)
         delete_mod.delete(paths, project, repos)
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
@@ -85,7 +85,7 @@ def _cmd_ls(_: argparse.Namespace) -> int:
 def _cmd_status(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
-        project = current.resolve_project(paths, args.name)
+        project = current.resolve_project(paths, args.project)
         rows = status_mod.status(paths, project)
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
@@ -112,24 +112,24 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     sub = project.add_subparsers(dest="cmd", required=True)
 
     new = sub.add_parser("new", help="create a project and claim a slot per repo")
-    new.add_argument("name")
+    new.add_argument("project", metavar="<project>")
     new.add_argument("--repos", required=True, help="comma-separated repo names")
     new.set_defaults(func=_cmd_new)
 
     attach = sub.add_parser("attach", help="re-attach a project (best-effort slot reclaim)")
-    attach.add_argument("name", nargs="?")
+    attach.add_argument("project", nargs="?", metavar="<project>")
     _add_repos_or_all(attach)
     attach.set_defaults(func=_cmd_attach)
 
     detach = sub.add_parser("detach", help="detach: unlink forward + release .owner")
-    detach.add_argument("name", nargs="?")
+    detach.add_argument("project", nargs="?", metavar="<project>")
     _add_repos_or_all(detach)
     detach.set_defaults(func=_cmd_detach)
 
     delete = sub.add_parser(
         "delete", help="delete project (or --repos r1,r2 for per-repo delete)",
     )
-    delete.add_argument("name", nargs="?")
+    delete.add_argument("project", nargs="?", metavar="<project>")
     delete.add_argument(
         "--repos", default=None, help="comma-separated repos to delete (omit for whole project)",
     )
@@ -139,5 +139,5 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     ls.set_defaults(func=_cmd_ls)
 
     status = sub.add_parser("status", help="show health + db rows for a single project")
-    status.add_argument("name", nargs="?")
+    status.add_argument("project", nargs="?", metavar="<project>")
     status.set_defaults(func=_cmd_status)
