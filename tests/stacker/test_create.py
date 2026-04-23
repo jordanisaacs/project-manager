@@ -36,8 +36,8 @@ def test_init_new_branch_off_parent_tracks(
     assert tracked.managed_base_commit == main_head
 
 
+@pytest.mark.usefixtures("pm_env")
 def test_init_new_branch_with_copy_from_imports_commits(
-    pm_env: Paths,  # noqa: ARG001 — seeds pm env via the stacker_repo fixture chain
     stacker_repo: tuple[str, Path],
     three_slots: list[slot_mod.Slot],
     service: StackerService,

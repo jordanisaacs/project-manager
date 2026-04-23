@@ -60,9 +60,9 @@ def test_guard_no_rebase_noop_outside_pm(
     service.guard_no_rebase()
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_guard_no_rebase_noop_on_detached_head(
     monkeypatch: pytest.MonkeyPatch,
-    stacker_repo: tuple[str, Path],  # noqa: ARG001 — fixture seeds pm_env
     three_slots: list[slot_mod.Slot],
     service: StackerService,
 ) -> None:

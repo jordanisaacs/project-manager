@@ -60,8 +60,8 @@ def test_malformed_merge_returns_none(slot_on_branch: slot_mod.Slot) -> None:
     assert stacker_git.upstream_branch(slot_on_branch.path) is None
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_detached_head_returns_none(
-    stacker_repo: tuple[str, Path],  # noqa: ARG001
     three_slots: list[slot_mod.Slot],
 ) -> None:
     # three_slots fixture leaves slots detached by default.

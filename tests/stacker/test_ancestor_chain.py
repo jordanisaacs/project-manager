@@ -92,7 +92,7 @@ def test_pr_walks_ancestors_root_first(
         pp_order.append(tb.branch)
         return True
 
-    def _fake_acquire(_ctx: object, repo: str, branch: str) -> _Acquired:  # noqa: ARG001
+    def _fake_acquire(_ctx: object, _repo: str, _branch: str) -> _Acquired:
         return _Acquired(path=service.paths.repo("demo"), ops=None)
 
     def _fake_create(

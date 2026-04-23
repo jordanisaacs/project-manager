@@ -40,9 +40,9 @@ def test_resolve_target_requires_repo(pm_env: Paths) -> None:
         selectors.resolve_target(pm_env, "bare-branch")
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_resolve_target_repo_colon_branch(
     pm_env: Paths,
-    stacker_repo: tuple[str, Path],  # noqa: ARG001
 ) -> None:
     target = selectors.resolve_target(pm_env, "demo:feature-a")
     assert target.repo_name == "demo"

@@ -8,6 +8,9 @@ from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool.db import OwnerKind, PoolDB
 
+# Worktree paths are laid out as `worktrees/<repo>/<uuid>/...`.
+_WORKTREE_MIN_PARTS = 2
+
 
 def _cwd_candidates() -> list[Path]:
     """Logical ($PWD) and physical (os.getcwd) cwd paths, de-duped."""
@@ -43,7 +46,7 @@ def project_from_worktree_path(path: Path, paths: Paths) -> str | None:
         rel = path.relative_to(paths.worktrees)
     except ValueError:
         return None
-    if len(rel.parts) < 2:  # noqa: PLR2004
+    if len(rel.parts) < _WORKTREE_MIN_PARTS:
         return None
     repo, uuid = rel.parts[0], rel.parts[1]
     owner = PoolDB(paths.pool_db()).get_owner(repo, uuid)

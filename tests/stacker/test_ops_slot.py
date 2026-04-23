@@ -23,9 +23,9 @@ def _assert_owned_by_ops(slot: slot_mod.Slot, paths: Paths) -> None:
     assert _pooldb(paths).get_owner(slot.repo, slot.uuid) == OWNER_STACKER_OPS
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_claim_records_ops_ownership(
     pm_env: Paths,
-    stacker_repo: tuple[str, Path],  # noqa: ARG001
     three_slots: list[slot_mod.Slot],
 ) -> None:
     claimed = ops_slot.claim(pm_env, _pooldb(pm_env), "demo")

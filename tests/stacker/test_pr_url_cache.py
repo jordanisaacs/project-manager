@@ -80,9 +80,9 @@ def feature_a(
     return slot
 
 
+@pytest.mark.usefixtures("feature_a")
 def test_create_populates_pr_url_on_branch(
     service: StackerService,
-    feature_a: slot_mod.Slot,  # noqa: ARG001
 ) -> None:
     service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
     tracked = service.db.get_branch("demo", "feature-a")
@@ -91,10 +91,10 @@ def test_create_populates_pr_url_on_branch(
     assert tracked.pr_url.startswith("https://github.com/acme/widgets/pull/")
 
 
+@pytest.mark.usefixtures("feature_a")
 def test_second_run_is_cache_hit_no_search(
     service: StackerService,
     backend: RecordingPRBackend,
-    feature_a: slot_mod.Slot,  # noqa: ARG001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
@@ -119,10 +119,10 @@ def test_second_run_is_cache_hit_no_search(
     assert len(backend.edited) >= 1
 
 
+@pytest.mark.usefixtures("feature_a")
 def test_search_hit_writes_url_back_for_future_runs(
     service: StackerService,
     backend: RecordingPRBackend,
-    feature_a: slot_mod.Slot,  # noqa: ARG001
 ) -> None:
     """If the DB was dropped / populated by another tool, a search hit
     should persist the URL so subsequent runs go cache-first."""

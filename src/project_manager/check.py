@@ -30,14 +30,13 @@ class Finding:
     detail: str
 
 
-def _row_findings(  # noqa: PLR0913
+def _row_findings(
     paths: Paths,
     pooldb: PoolDB,
     project: str,
-    wt: str,
-    repo: str,
-    slot_uuid: str,
+    row: tuple[str, str, str],
 ) -> Iterator[Finding]:
+    wt, repo, slot_uuid = row
     forward = paths.forward(project, wt)
     if not forward.is_symlink():
         return  # detached — caller emits DETACHED
@@ -188,7 +187,7 @@ def _project_findings(
             )
             continue
         row_findings = list(
-            _row_findings(paths, pooldb, project, wt, repo, slot_uuid)
+            _row_findings(paths, pooldb, project, (wt, repo, slot_uuid))
         )
         findings.extend(row_findings)
         for rf in row_findings:

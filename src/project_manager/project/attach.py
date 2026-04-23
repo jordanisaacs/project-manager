@@ -27,6 +27,13 @@ class AttachResult:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _AttachCtx:
+    paths: Paths
+    pooldb: PoolDB
+    conn: sqlite3.Connection
+
+
 def _resolve_wts(
     project: str,
     wts: list[str] | None,
@@ -79,43 +86,40 @@ def _claim_fallback(
     raise SlotBusyError(f"lost {retries} claim races for repo '{repo}'")
 
 
-def _attach_one(  # noqa: PLR0913
-    paths: Paths,
-    pooldb: PoolDB,
+def _attach_one(
+    ctx: _AttachCtx,
     project: str,
     wt: str,
     repo: str,
     remembered_uuid: str,
-    conn: sqlite3.Connection,
 ) -> Slot | None:
     """Attach a single worktree. Returns the newly-claimed slot, or None if already attached."""
-    forward = paths.forward(project, wt)
+    forward = ctx.paths.forward(project, wt)
     owner = Owner(OwnerKind.PROJECT, project)
 
     if forward.is_symlink():
         target = forward.readlink()
-        existing = pooldb.get_owner(repo, target.name)
+        existing = ctx.pooldb.get_owner(repo, target.name)
         if existing == owner:
             return None  # already active (idempotent)
         raise ProjectError(
             f"{forward} exists but is not owned by this project — run `pm check`"
         )
 
-    s = _try_reclaim(paths, pooldb, owner, repo, remembered_uuid)
+    s = _try_reclaim(ctx.paths, ctx.pooldb, owner, repo, remembered_uuid)
     if s is None:
-        s = _claim_fallback(paths, pooldb, owner, repo)
-        db.update_slot(conn, wt, s.uuid)
+        s = _claim_fallback(ctx.paths, ctx.pooldb, owner, repo)
+        db.update_slot(ctx.conn, wt, s.uuid)
     try:
         forward.symlink_to(s.path)
     except BaseException:
-        pooldb.release(repo, s.uuid)
+        ctx.pooldb.release(repo, s.uuid)
         raise
     return s
 
 
-def _maybe_restore_branch(  # noqa: PLR0913
-    paths: Paths,
-    conn: sqlite3.Connection,
+def _maybe_restore_branch(
+    ctx: _AttachCtx,
     wt: str,
     repo: str,
     slot_path: Path,
@@ -129,12 +133,12 @@ def _maybe_restore_branch(  # noqa: PLR0913
     Returns a human-readable warning string if restoration was skipped, else
     None.
     """
-    saved = db.get_branch(conn, wt)
+    saved = db.get_branch(ctx.conn, wt)
     if saved is None:
         return None
     warning: str | None = None
     if not no_branch:
-        outcome = branch_mod.restore(slot_path, paths.repo(repo), saved)
+        outcome = branch_mod.restore(slot_path, ctx.paths.repo(repo), saved)
         if outcome.result == RestoreResult.SKIPPED_IN_USE:
             warning = (
                 f"{wt}: saved branch '{saved}' already checked out at "
@@ -145,7 +149,7 @@ def _maybe_restore_branch(  # noqa: PLR0913
                 f"{wt}: saved branch '{saved}' no longer exists; "
                 f"slot left on default"
             )
-    db.set_branch(conn, wt, None)
+    db.set_branch(ctx.conn, wt, None)
     return warning
 
 
@@ -177,12 +181,13 @@ def attach(
     warnings: list[str] = []
     try:
         with db.transaction(db_path) as conn:
+            ctx = _AttachCtx(paths=paths, pooldb=pooldb, conn=conn)
             to_attach = _resolve_wts(project, wts, db.list_wts(conn))
             for wt, repo, remembered in to_attach:
-                s = _attach_one(paths, pooldb, project, wt, repo, remembered, conn)
+                s = _attach_one(ctx, project, wt, repo, remembered)
                 if s is not None:
                     warning = _maybe_restore_branch(
-                        paths, conn, wt, repo, s.path, no_branch=no_branch,
+                        ctx, wt, repo, s.path, no_branch=no_branch,
                     )
                     if warning:
                         warnings.append(warning)

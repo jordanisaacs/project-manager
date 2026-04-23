@@ -31,13 +31,13 @@ def _parse_wt_spec(value: str) -> list[tuple[str, str]]:
         item = raw.strip()
         if not item:
             raise ProjectError(f"empty worktree entry in spec: {value!r}")
-        parts = item.split(":")
-        if len(parts) == 1:
-            wt = repo = parts[0].strip()
-        elif len(parts) == 2:  # noqa: PLR2004
-            wt, repo = parts[0].strip(), parts[1].strip()
-        else:
-            raise ProjectError(f"worktree entry has too many colons: {item!r}")
+        match item.split(":"):
+            case [only]:
+                wt = repo = only.strip()
+            case [a, b]:
+                wt, repo = a.strip(), b.strip()
+            case _:
+                raise ProjectError(f"worktree entry has too many colons: {item!r}")
         if not wt or not repo:
             raise ProjectError(f"worktree entry has empty name or repo: {item!r}")
         if wt in seen:

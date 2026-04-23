@@ -1,4 +1,4 @@
-import os
+import multiprocessing as mp
 
 import pytest
 
@@ -59,55 +59,52 @@ def test_release_idempotent(pm_env: Paths) -> None:
     pooldb.release(slots[0].repo, slots[0].uuid)
 
 
+def _claim_child(
+    paths: Paths, repo: str, uuid: str, index: int, queue: "mp.Queue[str]",
+) -> None:
+    """Run in a spawned child; report outcome to `queue`."""
+    pooldb = PoolDB(paths.pool_db())
+    try:
+        pooldb.claim(repo, uuid, Owner(OwnerKind.PROJECT, f"p{index}"))
+    except SlotBusyError:
+        queue.put("L")
+    except Exception as e:  # noqa: BLE001 — child reports any failure via queue
+        queue.put(f"E{e}")
+    else:
+        queue.put(f"W{index}")
+
+
 def test_concurrent_claim_exactly_one_wins(pm_env: Paths) -> None:
     slots = _mk_pool(pm_env, "foo", ["a"])
     s = slots[0]
-    # Prime the schema from the parent before fork to avoid a "CREATE TABLE"
-    # race producing duplicate IntegrityErrors across forked children.
+    # Prime the schema from the parent before spawning to avoid a "CREATE TABLE"
+    # race producing duplicate IntegrityErrors across children.
     _pooldb(pm_env).is_free(s.repo, s.uuid)
 
+    # `spawn` starts a fresh Python in each child — no fork-from-threaded-process
+    # hazard (pytest-xdist workers are multi-threaded).
+    ctx = mp.get_context("spawn")
+    queue: mp.Queue[str] = ctx.Queue()
     n = 8
-    pipes = [os.pipe() for _ in range(n)]
-    pids: list[int] = []
-    for i in range(n):
-        pid = os.fork()
-        if pid == 0:
-            for j, (r, w) in enumerate(pipes):
-                if j != i:
-                    os.close(r)
-                    os.close(w)
-            r, w = pipes[i]
-            os.close(r)
-            try:
-                pooldb = _pooldb(pm_env)
-                pooldb.claim(s.repo, s.uuid, Owner(OwnerKind.PROJECT, f"p{i}"))
-                os.write(w, f"W{i}".encode())
-            except SlotBusyError:
-                os.write(w, b"L")
-            except Exception as e:  # noqa: BLE001 — child reports any failure via pipe
-                os.write(w, f"E{e}".encode())
-            os.close(w)
-            os._exit(0)
-        pids.append(pid)
+    procs = [
+        ctx.Process(target=_claim_child, args=(pm_env, s.repo, s.uuid, i, queue))
+        for i in range(n)
+    ]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join()
 
-    for pid in pids:
-        os.waitpid(pid, 0)
-
-    results = []
-    for r, w in pipes:
-        os.close(w)
-        results.append(os.read(r, 128))
-        os.close(r)
-
-    wins = [r for r in results if r.startswith(b"W")]
-    losses = [r for r in results if r == b"L"]
-    errors = [r for r in results if not (r.startswith(b"W") or r == b"L")]
+    results = [queue.get() for _ in range(n)]
+    wins = [r for r in results if r.startswith("W")]
+    losses = [r for r in results if r == "L"]
+    errors = [r for r in results if not (r.startswith("W") or r == "L")]
 
     assert errors == [], f"unexpected errors: {errors}"
     assert len(wins) == 1, f"expected 1 winner, got {len(wins)} (results={results})"
     assert len(losses) == n - 1
 
-    winner_idx = int(wins[0][1:].decode())
+    winner_idx = int(wins[0][1:])
     assert _pooldb(pm_env).get_owner(s.repo, s.uuid) == Owner(
         OwnerKind.PROJECT, f"p{winner_idx}"
     )

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+
+import pytest
 
 from project_manager.stacker.service import StackerService
 
@@ -83,8 +84,8 @@ def test_ls_json_details_all_includes_pr_fields(
         assert "last_clean_head" in entry
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_ls_empty_repo_has_no_tracked_branches(
-    stacker_repo: tuple[str, Path],  # noqa: ARG001 — seeds pm env
     service: StackerService,
 ) -> None:
     assert service.ls_text("demo") == "No tracked branches."

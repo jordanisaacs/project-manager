@@ -1,5 +1,6 @@
 import contextlib
 import sqlite3
+from dataclasses import dataclass
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
@@ -27,6 +28,13 @@ symlinks by hand — use `pm project wt attach|detach|delete`.
 """
 
 
+@dataclass(frozen=True)
+class _CreateCtx:
+    paths: Paths
+    pooldb: PoolDB
+    conn: sqlite3.Connection
+
+
 def _claim_any_free(
     paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, retries: int = 3,
 ) -> Slot:
@@ -47,26 +55,24 @@ def _claim_any_free(
     raise SlotBusyError(f"lost {retries} claim races for repo '{repo}'")
 
 
-def _claim_one(  # noqa: PLR0913
-    paths: Paths,
-    pooldb: PoolDB,
+def _claim_one(
+    ctx: _CreateCtx,
     project: str,
     wt: str,
     repo: str,
-    conn: sqlite3.Connection,
 ) -> Slot:
-    if db.get_slot(conn, wt) is not None:
+    if db.get_slot(ctx.conn, wt) is not None:
         raise ProjectError(f"project '{project}' already has worktree '{wt}'")
-    forward = paths.forward(project, wt)
+    forward = ctx.paths.forward(project, wt)
     if forward.is_symlink() or forward.exists():
         raise ProjectError(f"{forward} already exists")
     owner = Owner(OwnerKind.PROJECT, project)
-    s = _claim_any_free(paths, pooldb, owner, repo)
+    s = _claim_any_free(ctx.paths, ctx.pooldb, owner, repo)
     try:
         forward.symlink_to(s.path)
-        db.add_wt(conn, wt, repo, s.uuid)
+        db.add_wt(ctx.conn, wt, repo, s.uuid)
     except BaseException:
-        pooldb.release(repo, s.uuid)
+        ctx.pooldb.release(repo, s.uuid)
         raise
     return s
 
@@ -98,8 +104,9 @@ def create(
     claimed: list[tuple[str, Slot]] = []
     try:
         with db.transaction(db_path) as conn:
+            ctx = _CreateCtx(paths=paths, pooldb=pooldb, conn=conn)
             for wt, repo in wts:
-                s = _claim_one(paths, pooldb, project, wt, repo, conn)
+                s = _claim_one(ctx, project, wt, repo)
                 claimed.append((wt, s))
     except BaseException:
         for wt, s in reversed(claimed):

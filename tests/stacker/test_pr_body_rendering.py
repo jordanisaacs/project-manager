@@ -30,11 +30,15 @@ def _set_config(service: StackerService, repo: str, mode: str) -> None:
     service.db.set_config(repo, "pr.trunk", "main")
 
 
-def _build_branch(  # noqa: PLR0913 (test helper)
+def _build_branch(
     repo_path: Path, slot_path: Path, branch: str, parent: str,
-    content: str, commit_msg: str,
+    commit: tuple[str, str],
 ) -> None:
-    """Create `branch` off `parent`'s tip and add one commit."""
+    """Create `branch` off `parent`'s tip and add one commit.
+
+    `commit` is `(file_content, commit_message)`.
+    """
+    content, commit_msg = commit
     parent_head = stacker_git.rev_parse(repo_path, parent)
     stacker_git.git(slot_path, "checkout", "-b", branch, parent_head)
     (slot_path / f"{branch}.txt").write_text(content)
@@ -83,7 +87,7 @@ def _two_branch_stack(
     slot_a, slot_b = three_slots[0], three_slots[1]
 
     _build_branch(repo_path, slot_a.path, "feature-a", "main",
-                  "A\n", "A: first commit\n\nExtra body for A.")
+                  ("A\n", "A: first commit\n\nExtra body for A."))
     _setup_fake_upstream(slot_a.path, "feature-a")
     service.init_adopt_branch(
         WorktreeInit(
@@ -93,7 +97,7 @@ def _two_branch_stack(
     )
 
     _build_branch(repo_path, slot_b.path, "feature-b", "feature-a",
-                  "B\n", "B: second commit\n\nExtra body for B.")
+                  ("B\n", "B: second commit\n\nExtra body for B."))
     _setup_fake_upstream(slot_b.path, "feature-b")
     service.init_adopt_branch(
         WorktreeInit(

@@ -71,9 +71,9 @@ def test_resolve_repo_uses_cwd_slot_when_args_empty(
     assert _common.resolve_repo(args, pm_env) == repo_name
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_resolve_repo_prefers_explicit_arg(
     pm_env: Paths,
-    stacker_repo: tuple[str, Path],  # noqa: ARG001 (creates repo)
     three_slots: list[slot_mod.Slot],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -91,9 +91,9 @@ def test_resolve_repo_errors_when_outside_slot_and_no_arg(
         _common.resolve_repo(args, pm_env)
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_resolve_branch_uses_cwd_current_branch(
     pm_env: Paths,
-    stacker_repo: tuple[str, Path],  # noqa: ARG001
     three_slots: list[slot_mod.Slot],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -104,9 +104,9 @@ def test_resolve_branch_uses_cwd_current_branch(
     assert _common.resolve_branch(args, pm_env) == "feature-cwd"
 
 
+@pytest.mark.usefixtures("stacker_repo")
 def test_resolve_branch_errors_on_detached_head(
     pm_env: Paths,
-    stacker_repo: tuple[str, Path],  # noqa: ARG001
     three_slots: list[slot_mod.Slot],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -122,11 +122,7 @@ def _files_url(node: TrackedBranch, render_ctx: _StackRender) -> str | None:
 @contextlib.contextmanager
 def body_file(body: str) -> Iterator[Path]:
     """Yield a path to a temp file holding `body`; unlinked on exit."""
-    file = NamedTemporaryFile("w", delete=False, encoding="utf-8")  # noqa: SIM115
-    try:
-        file.write(body)
-        file.flush()
-        file.close()
-        yield Path(file.name)
-    finally:
-        Path(file.name).unlink(missing_ok=True)
+    with NamedTemporaryFile("w", encoding="utf-8") as f:
+        f.write(body)
+        f.flush()
+        yield Path(f.name)
