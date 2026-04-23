@@ -30,10 +30,10 @@ class RestoreOutcome:
     conflict_path: Path | None = None
 
 
-def ensure_clean(slot_path: Path, repo: str) -> None:
+def ensure_clean(slot_path: Path, wt: str) -> None:
     blocker = cleanliness_blocker(slot_path)
     if blocker is not None:
-        raise ProjectError(f"repo '{repo}' at {slot_path} {blocker}")
+        raise ProjectError(f"worktree '{wt}' at {slot_path} {blocker}")
 
 
 def cleanliness_blocker(slot_path: Path) -> str | None:

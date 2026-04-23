@@ -21,8 +21,8 @@ class Paths:
     def project(self, name: str) -> Path:
         return self.projects / name
 
-    def forward(self, project: str, repo: str) -> Path:
-        return self.projects / project / repo
+    def forward(self, project: str, wt: str) -> Path:
+        return self.projects / project / wt
 
     def project_db(self, project: str) -> Path:
         return self.projects / project / ".pm.db"

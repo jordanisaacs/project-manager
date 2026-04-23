@@ -14,25 +14,33 @@ from project_manager.project.branch import RestoreResult
 
 
 @dataclass(frozen=True)
+class AttachedWt:
+    wt: str
+    repo: str
+    uuid: str
+    path: Path
+
+
+@dataclass(frozen=True)
 class AttachResult:
-    newly_claimed: list[Slot] = field(default_factory=list)
+    newly_claimed: list[AttachedWt] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
-def _resolve_repos(
+def _resolve_wts(
     project: str,
-    repos: list[str] | None,
-    all_rows: list[tuple[str, str]],
-) -> list[tuple[str, str]]:
-    if repos is None:
+    wts: list[str] | None,
+    all_rows: list[tuple[str, str, str]],
+) -> list[tuple[str, str, str]]:
+    if wts is None:
         return all_rows
-    known = dict(all_rows)
-    missing = [r for r in repos if r not in known]
+    known = {name: (repo, uuid) for name, repo, uuid in all_rows}
+    missing = [w for w in wts if w not in known]
     if missing:
         raise ProjectError(
-            f"project '{project}' has no such repo(s): {', '.join(missing)}"
+            f"project '{project}' has no such worktree(s): {', '.join(missing)}"
         )
-    return [(r, known[r]) for r in repos]
+    return [(w, *known[w]) for w in wts]
 
 
 def _try_reclaim(
@@ -75,12 +83,13 @@ def _attach_one(  # noqa: PLR0913
     paths: Paths,
     pooldb: PoolDB,
     project: str,
+    wt: str,
     repo: str,
     remembered_uuid: str,
     conn: sqlite3.Connection,
 ) -> Slot | None:
-    """Attach a single repo. Returns the newly-claimed slot, or None if already attached."""
-    forward = paths.forward(project, repo)
+    """Attach a single worktree. Returns the newly-claimed slot, or None if already attached."""
+    forward = paths.forward(project, wt)
     owner = Owner(OwnerKind.PROJECT, project)
 
     if forward.is_symlink():
@@ -95,7 +104,7 @@ def _attach_one(  # noqa: PLR0913
     s = _try_reclaim(paths, pooldb, owner, repo, remembered_uuid)
     if s is None:
         s = _claim_fallback(paths, pooldb, owner, repo)
-        db.update_slot(conn, repo, s.uuid)
+        db.update_slot(conn, wt, s.uuid)
     try:
         forward.symlink_to(s.path)
     except BaseException:
@@ -104,9 +113,10 @@ def _attach_one(  # noqa: PLR0913
     return s
 
 
-def _maybe_restore_branch(
+def _maybe_restore_branch(  # noqa: PLR0913
     paths: Paths,
     conn: sqlite3.Connection,
+    wt: str,
     repo: str,
     slot_path: Path,
     *,
@@ -119,7 +129,7 @@ def _maybe_restore_branch(
     Returns a human-readable warning string if restoration was skipped, else
     None.
     """
-    saved = db.get_branch(conn, repo)
+    saved = db.get_branch(conn, wt)
     if saved is None:
         return None
     warning: str | None = None
@@ -127,35 +137,35 @@ def _maybe_restore_branch(
         outcome = branch_mod.restore(slot_path, paths.repo(repo), saved)
         if outcome.result == RestoreResult.SKIPPED_IN_USE:
             warning = (
-                f"{repo}: saved branch '{saved}' already checked out at "
+                f"{wt}: saved branch '{saved}' already checked out at "
                 f"{outcome.conflict_path}; slot left on default"
             )
         elif outcome.result == RestoreResult.SKIPPED_MISSING_BRANCH:
             warning = (
-                f"{repo}: saved branch '{saved}' no longer exists; "
+                f"{wt}: saved branch '{saved}' no longer exists; "
                 f"slot left on default"
             )
-    db.set_branch(conn, repo, None)
+    db.set_branch(conn, wt, None)
     return warning
 
 
 def attach(
     paths: Paths,
     project: str,
-    repos: list[str] | None,
+    wts: list[str] | None,
     *,
     no_branch: bool = False,
 ) -> AttachResult:
-    """Attach the given repos (or all if `repos is None`).
+    """Attach the given worktrees (or all if `wts is None`).
 
-    For each repo row in the db: try the remembered `slot_uuid`. If the slot is missing
-    or not free, claim any free slot and UPDATE the row. Best-effort rollback across
-    repos on failure.
+    For each row in the db: try the remembered `slot_uuid`. If the slot is missing
+    or not free, claim any free slot and UPDATE the row. Best-effort rollback
+    across worktrees on failure.
 
     After a fresh claim, restore the saved branch (unless `no_branch=True`). The
     saved branch field is unconditionally cleared on successful attach.
 
-    Returns AttachResult with newly-claimed slots and any per-repo warnings
+    Returns AttachResult with newly-claimed worktrees and any per-wt warnings
     (e.g., saved branch already checked out elsewhere).
     """
     db_path = paths.project_db(project)
@@ -163,25 +173,31 @@ def attach(
         raise ProjectError(f"project '{project}' does not exist")
 
     pooldb = PoolDB(paths.pool_db())
-    attached: list[tuple[str, Slot]] = []
+    attached: list[tuple[str, str, Slot]] = []  # (wt, repo, slot)
     warnings: list[str] = []
     try:
         with db.transaction(db_path) as conn:
-            to_attach = _resolve_repos(project, repos, db.list_repos(conn))
-            for repo, remembered in to_attach:
-                s = _attach_one(paths, pooldb, project, repo, remembered, conn)
+            to_attach = _resolve_wts(project, wts, db.list_wts(conn))
+            for wt, repo, remembered in to_attach:
+                s = _attach_one(paths, pooldb, project, wt, repo, remembered, conn)
                 if s is not None:
                     warning = _maybe_restore_branch(
-                        paths, conn, repo, s.path, no_branch=no_branch,
+                        paths, conn, wt, repo, s.path, no_branch=no_branch,
                     )
                     if warning:
                         warnings.append(warning)
-                    attached.append((repo, s))
+                    attached.append((wt, repo, s))
     except BaseException:
-        for repo, s in reversed(attached):
-            forward = paths.forward(project, repo)
+        for wt, repo, s in reversed(attached):
+            forward = paths.forward(project, wt)
             with contextlib.suppress(FileNotFoundError):
                 forward.unlink()
             pooldb.release(repo, s.uuid)
         raise
-    return AttachResult(newly_claimed=[s for _, s in attached], warnings=warnings)
+    return AttachResult(
+        newly_claimed=[
+            AttachedWt(wt=wt, repo=repo, uuid=s.uuid, path=s.path)
+            for wt, repo, s in attached
+        ],
+        warnings=warnings,
+    )

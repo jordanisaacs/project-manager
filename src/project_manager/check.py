@@ -23,20 +23,22 @@ class Kind(StrEnum):
 @dataclass(frozen=True)
 class Finding:
     kind: Kind
-    repo: str | None
+    wt: str | None   # worktree name (symlink name under projects/<project>/)
+    repo: str | None  # pool repo key (may be None when unknowable, e.g. bare orphan forward)
     slot_path: Path | None
     forward_path: Path | None
     detail: str
 
 
-def _row_findings(
+def _row_findings(  # noqa: PLR0913
     paths: Paths,
     pooldb: PoolDB,
     project: str,
+    wt: str,
     repo: str,
     slot_uuid: str,
 ) -> Iterator[Finding]:
-    forward = paths.forward(project, repo)
+    forward = paths.forward(project, wt)
     if not forward.is_symlink():
         return  # detached — caller emits DETACHED
 
@@ -44,6 +46,7 @@ def _row_findings(
     if not target.is_dir():
         yield Finding(
             kind=Kind.BROKEN,
+            wt=wt,
             repo=repo,
             slot_path=target,
             forward_path=forward,
@@ -57,6 +60,7 @@ def _row_findings(
     if owner != expected:
         yield Finding(
             kind=Kind.STALE,
+            wt=wt,
             repo=repo,
             slot_path=target,
             forward_path=forward,
@@ -71,6 +75,7 @@ def _row_findings(
     if uuid != slot_uuid:
         yield Finding(
             kind=Kind.DRIFT,
+            wt=wt,
             repo=repo,
             slot_path=target,
             forward_path=forward,
@@ -80,6 +85,7 @@ def _row_findings(
 
     yield Finding(
         kind=Kind.ACTIVE,
+        wt=wt,
         repo=repo,
         slot_path=target,
         forward_path=forward,
@@ -87,16 +93,22 @@ def _row_findings(
     )
 
 
-def _orphan_forwards(paths: Paths, project: str, db_rows: set[str]) -> Iterator[Finding]:
+def _orphan_forwards(
+    paths: Paths, project: str, db_wts: set[str],
+) -> Iterator[Finding]:
     project_dir = paths.project(project)
     for entry in sorted(project_dir.iterdir()):
         if not entry.is_symlink():
             continue
-        if entry.name in db_rows:
+        if entry.name in db_wts:
             continue
+        # If the symlink target is reachable, its parent dir name is the repo.
+        target = entry.readlink()
+        repo = target.parent.name if target.parent.is_dir() else None
         yield Finding(
             kind=Kind.ORPHAN_FORWARD,
-            repo=entry.name,
+            wt=entry.name,
+            repo=repo,
             slot_path=None,
             forward_path=entry,
             detail="forward symlink with no matching db row",
@@ -126,6 +138,7 @@ def _classify_pool_rows(
                 continue
             yield Finding(
                 kind=Kind.OPS_OWNED,
+                wt=None,
                 repo=repo,
                 slot_path=slot_path,
                 forward_path=None,
@@ -138,7 +151,8 @@ def _classify_pool_rows(
             continue
         yield Finding(
             kind=Kind.ORPHAN_OWNER,
-            repo=None,
+            wt=None,
+            repo=repo,
             slot_path=slot_path,
             forward_path=None,
             detail=(
@@ -154,32 +168,39 @@ def _project_findings(
     """Row findings + orphan_forwards for one project, plus legit (project, repo, uuid) triples."""
     db_path = discovery.require_project_db(paths, project)
     with db.readonly(db_path) as conn:
-        rows = db.list_repos(conn)
-    db_rows = {name for name, _ in rows}
+        rows = db.list_wts(conn)
+    db_wts = {wt for wt, _, _ in rows}
 
     findings: list[Finding] = []
     legit: set[tuple[str, str, str]] = set()
-    for repo, slot_uuid in rows:
-        forward = paths.forward(project, repo)
+    for wt, repo, slot_uuid in rows:
+        forward = paths.forward(project, wt)
         if not forward.is_symlink():
             findings.append(
                 Finding(
                     kind=Kind.DETACHED,
+                    wt=wt,
                     repo=repo,
                     slot_path=paths.slot(repo, slot_uuid),
                     forward_path=forward,
-                    detail=f"row for {repo} has no forward symlink",
+                    detail=f"row for {wt} has no forward symlink",
                 ),
             )
             continue
-        row_findings = list(_row_findings(paths, pooldb, project, repo, slot_uuid))
+        row_findings = list(
+            _row_findings(paths, pooldb, project, wt, repo, slot_uuid)
+        )
         findings.extend(row_findings)
         for rf in row_findings:
             # ACTIVE and DRIFT both indicate the pool row is legitimately backing
             # a project-tracked forward; only the db's memory may differ.
-            if rf.kind in (Kind.ACTIVE, Kind.DRIFT) and rf.slot_path is not None:
-                legit.add((project, repo, rf.slot_path.name))
-    findings.extend(_orphan_forwards(paths, project, db_rows))
+            if (
+                rf.kind in (Kind.ACTIVE, Kind.DRIFT)
+                and rf.slot_path is not None
+                and rf.repo is not None
+            ):
+                legit.add((project, rf.repo, rf.slot_path.name))
+    findings.extend(_orphan_forwards(paths, project, db_wts))
     return findings, legit
 
 

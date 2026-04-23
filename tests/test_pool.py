@@ -8,7 +8,7 @@ from project_manager.paths import Paths
 from project_manager.pool import add as add_mod
 from project_manager.pool import ls as ls_mod
 from project_manager.pool import worktree as wt_mod
-from project_manager.project import new as new_mod
+from project_manager.project import create as create_mod
 
 
 def _init_repo(path: Path, branch: str = "main") -> None:
@@ -66,7 +66,7 @@ def test_pool_ls_free_and_claimed(pm_env: Paths) -> None:
     assert len(rows_before) == 2
     assert all(r.status == "FREE" for r in rows_before)
 
-    new_mod.new(pm_env, "demo", ["foo"])
+    create_mod.create(pm_env, "demo", [("foo", "foo")])
     rows_after = ls_mod.ls(pm_env, "foo")
     statuses = sorted(r.status for r in rows_after)
     assert statuses == ["FREE", "demo"]

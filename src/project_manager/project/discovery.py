@@ -29,8 +29,8 @@ def require_project_db(paths: Paths, project: str) -> Path:
     return db_path
 
 
-def read_repos(paths: Paths, project: str) -> list[tuple[str, str]]:
-    """Return the project's (repo, slot_uuid) rows. Raises ProjectError if missing."""
+def read_wts(paths: Paths, project: str) -> list[tuple[str, str, str]]:
+    """Return the project's (wt, repo, slot_uuid) rows. Raises ProjectError if missing."""
     db_path = require_project_db(paths, project)
     with db.readonly(db_path) as conn:
-        return db.list_repos(conn)
+        return db.list_wts(conn)

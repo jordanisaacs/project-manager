@@ -9,8 +9,9 @@ from project_manager.project import discovery
 
 @dataclass(frozen=True)
 class StatusRow:
+    wt: str | None
     repo: str | None
-    slot_uuid: str | None  # from db; None for findings without a repo row (orphan owner)
+    slot_uuid: str | None  # from db; None for findings without a wt row (orphan owner)
     finding: check_mod.Finding
 
 
@@ -19,13 +20,17 @@ def status(paths: Paths, project: str) -> list[StatusRow]:
 
     Raises ProjectError if the project doesn't exist.
     """
-    db_rows = dict(discovery.read_repos(paths, project))
+    wt_rows = {w: (r, u) for w, r, u in discovery.read_wts(paths, project)}
     findings = check_mod.check_project(paths, project)
-    return [
-        StatusRow(
-            repo=f.repo,
-            slot_uuid=db_rows.get(f.repo) if f.repo is not None else None,
-            finding=f,
+    out: list[StatusRow] = []
+    for f in findings:
+        repo = f.repo
+        slot_uuid: str | None = None
+        if f.wt is not None and f.wt in wt_rows:
+            row_repo, row_uuid = wt_rows[f.wt]
+            slot_uuid = row_uuid
+            repo = repo or row_repo
+        out.append(
+            StatusRow(wt=f.wt, repo=repo, slot_uuid=slot_uuid, finding=f)
         )
-        for f in findings
-    ]
+    return out

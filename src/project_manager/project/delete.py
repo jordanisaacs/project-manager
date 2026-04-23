@@ -25,12 +25,12 @@ def _is_pm_symlink(entry: Path, worktrees_root: Path) -> bool:
     return True
 
 
-def delete(paths: Paths, project: str, repos: list[str] | None) -> None:
-    """Delete repo(s) from a project.
+def delete(paths: Paths, project: str, wts: list[str] | None) -> None:
+    """Delete worktree(s) from a project.
 
-    - `repos is None`: whole-project delete. Project-level extras check, then
-      per-repo delete for every repo, then remove README + drop db + rmdir.
-    - `repos is not None`: per-repo delete. Detach (inherits cleanliness
+    - `wts is None`: whole-project delete. Project-level extras check, then
+      per-wt delete for every wt, then remove README + drop db + rmdir.
+    - `wts is not None`: per-wt delete. Detach (inherits cleanliness
       protections), then drop the db row. Saved branch is lost.
     """
     project_dir = paths.project(project)
@@ -38,26 +38,26 @@ def delete(paths: Paths, project: str, repos: list[str] | None) -> None:
     if not db_path.is_file():
         raise ProjectError(f"project '{project}' does not exist")
 
-    if repos is None:
+    if wts is None:
         _delete_whole(paths, project, project_dir, db_path)
     else:
-        _delete_repos(paths, project, repos, db_path)
+        _delete_wts(paths, project, wts, db_path)
 
 
-def _delete_repos(
-    paths: Paths, project: str, repos: list[str], db_path: Path
+def _delete_wts(
+    paths: Paths, project: str, wts: list[str], db_path: Path,
 ) -> None:
-    """Per-repo delete helper. Detach each repo (cleanliness-checked), drop rows."""
+    """Per-wt delete helper. Detach each wt (cleanliness-checked), drop rows."""
     with db.transaction(db_path) as conn:
-        known = {name for name, _ in db.list_repos(conn)}
-        missing = [r for r in repos if r not in known]
+        known = {name for name, _, _ in db.list_wts(conn)}
+        missing = [w for w in wts if w not in known]
         if missing:
             raise ProjectError(
-                f"project '{project}' has no such repo(s): {', '.join(missing)}"
+                f"project '{project}' has no such worktree(s): {', '.join(missing)}"
             )
-        detach_mod.detach(paths, project, repos=repos)
-        for r in repos:
-            db.remove_repo(conn, r)
+        detach_mod.detach(paths, project, wts=wts)
+        for w in wts:
+            db.remove_wt(conn, w)
 
 
 def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) -> None:
@@ -74,9 +74,9 @@ def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) 
         )
 
     with db.transaction(db_path) as conn:
-        all_repos = [name for name, _ in db.list_repos(conn)]
-    if all_repos:
-        _delete_repos(paths, project, all_repos, db_path)
+        all_wts = [name for name, _, _ in db.list_wts(conn)]
+    if all_wts:
+        _delete_wts(paths, project, all_wts, db_path)
 
     with contextlib.suppress(FileNotFoundError):
         (project_dir / _README_FILENAME).unlink()
@@ -94,7 +94,7 @@ class DeletePlan:
     whole: bool
     extras: list[Path]
     detach_plan: detach_mod.DetachPlan
-    drop_rows: list[str]
+    drop_rows: list[str]  # wt names
     remove_readme: bool
     drop_db: bool
     rmdir: bool
@@ -105,7 +105,7 @@ class DeletePlan:
 
 
 def plan_delete(
-    paths: Paths, project: str, repos: list[str] | None
+    paths: Paths, project: str, wts: list[str] | None,
 ) -> DeletePlan:
     """Describe what `delete` would do without mutating state."""
     project_dir = paths.project(project)
@@ -113,7 +113,7 @@ def plan_delete(
     if not db_path.is_file():
         raise ProjectError(f"project '{project}' does not exist")
 
-    whole = repos is None
+    whole = wts is None
     extras: list[Path] = []
     if whole:
         extras = [
@@ -123,18 +123,18 @@ def plan_delete(
             and not _is_pm_symlink(entry, paths.worktrees)
         ]
         with db.readonly(db_path) as conn:
-            planned_repos = [name for name, _ in db.list_repos(conn)]
+            planned_wts = [name for name, _, _ in db.list_wts(conn)]
     else:
-        assert repos is not None
-        planned_repos = list(repos)
+        assert wts is not None
+        planned_wts = list(wts)
 
-    detach_plan = detach_mod.plan_detach(paths, project, planned_repos)
+    detach_plan = detach_mod.plan_detach(paths, project, planned_wts)
     return DeletePlan(
         project=project,
         whole=whole,
         extras=extras,
         detach_plan=detach_plan,
-        drop_rows=planned_repos,
+        drop_rows=planned_wts,
         remove_readme=whole,
         drop_db=whole,
         rmdir=whole,
