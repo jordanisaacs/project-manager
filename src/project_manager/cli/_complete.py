@@ -73,6 +73,10 @@ def worktrees(*, project: str | None = None) -> int:
 
 _HELPERS = r"""
 # --- pm dynamic completion helpers (appended by pm __complete zsh-script) ---
+# Cyclopts's generated script ends with `}` and no self-invocation. Under
+# zsh-style autoload that means the first TAB only redefines _pm; the user
+# would need a second TAB to trigger completion. Invoking _pm at the end
+# of the file body (so on first load it runs once) fixes that.
 
 _pm_extract_flag() {
   # _pm_extract_flag --flag [--alias ...]
@@ -109,6 +113,8 @@ _pm_wt_list() {
   items=(${(f)"$(command pm __complete worktrees $args 2>/dev/null)"})
   _values -s , 'worktree' $items
 }
+
+_pm "$@"
 """
 
 
