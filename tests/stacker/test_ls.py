@@ -237,12 +237,14 @@ def test_ls_no_banner_when_cwd_outside_a_slot(
     assert "(on tracked branch" not in out
 
 
-def test_ls_legend_prepended_in_text_mode(
+def test_ls_legend_appended_in_text_mode(
     tracked_stack: TrackedStack,
     service: StackerService,
 ) -> None:
     out = service.ls_text(tracked_stack.repo_name, LsOptions(legend=True))
-    assert out.startswith("Legend:")
+    # Tree renders first; legend is a trailing reference block.
+    assert "demo" in out.split("Legend:")[0]
+    assert "Legend:" in out
     # Offline icons are always in the legend; each name → glyph pair.
     for glyph, word in (("·", "local only"), ("○", "pushed"), ("●", "PR open")):
         assert glyph in out
@@ -257,11 +259,12 @@ def test_ls_legend_hides_icon_row_when_icons_off(
         tracked_stack.repo_name,
         LsOptions(legend=True, render=RenderOptions(icons=False)),
     )
-    assert out.startswith("Legend:")
-    assert "Icons:" not in out
-    # Commit-group + suffix sections stay — they're icon-independent.
-    assert "Group:" in out
-    assert "Suffix:" in out
+    assert "Legend:" in out
+    # Icon rows elided; commit-group + suffix sections stay.
+    legend = out.split("Legend:", 1)[1]
+    assert "Icons:" not in legend
+    assert "Group:" in legend
+    assert "Suffix:" in legend
 
 
 def test_ls_legend_includes_online_row_only_under_online(

@@ -96,7 +96,7 @@ def ls_text(
         )
     )
     if options.legend:
-        return graph.render_legend(options.render) + "\n\n" + body
+        return body + "\n\n" + graph.render_legend(options.render)
     return body
 
 
