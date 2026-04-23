@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import re
-import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import quote
 
+from project_manager import output
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 
@@ -1376,28 +1375,4 @@ class StackerService:
         return "\n".join([*logs, final_message]) if logs else final_message
 
     def _style(self, text: str, *, fg: str | None = None, bold: bool = False) -> str:
-        if not self._use_color():
-            return text
-        codes: list[str] = []
-        if bold:
-            codes.append("1")
-        colors = {
-            "blue": "34",
-            "green": "32",
-            "yellow": "33",
-            "magenta": "35",
-            "cyan": "36",
-            "red": "31",
-        }
-        if fg and fg in colors:
-            codes.append(colors[fg])
-        if not codes:
-            return text
-        return f"\033[{';'.join(codes)}m{text}\033[0m"
-
-    def _use_color(self) -> bool:
-        if os.environ.get("NO_COLOR"):
-            return False
-        if os.environ.get("CLICOLOR_FORCE"):
-            return True
-        return sys.stdout.isatty()
+        return output.style(text, fg=fg, bold=bold)

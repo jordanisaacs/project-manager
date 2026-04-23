@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import git
+from project_manager.errors import CommandError
+from project_manager.subprocess_run import run
 
 
 @dataclass(frozen=True)
@@ -50,15 +50,13 @@ def repo_info(*, cwd: Path | None = None, repo: str | None = None) -> RepoInfo:
     cmd = ["gh", "repo", "view", "--json", "name,owner"]
     if repo:
         cmd.extend(["--repo", repo])
-    proc = git.run(cmd, cwd=cwd, check=False)
-    if proc.returncode != 0:
-        raise git.GitError(_format_failure(cmd, proc))
+    proc = run(cmd, cwd=cwd)
     payload = json.loads(proc.stdout or "{}")
     owner = payload.get("owner", {})
     owner_login = owner.get("login", "") if isinstance(owner, dict) else str(owner)
     name = payload.get("name", "")
     if not owner_login or not name:
-        raise git.GitError("Could not determine GitHub repository owner/name.")
+        raise CommandError("Could not determine GitHub repository owner/name.")
     return RepoInfo(name_with_owner=f"{owner_login}/{name}", owner=owner_login, name=name)
 
 
@@ -76,9 +74,7 @@ def list_open_prs(
         cmd.extend(["--head", head])
     if search:
         cmd.extend(["--search", search])
-    proc = git.run(cmd, check=False)
-    if proc.returncode != 0:
-        raise git.GitError(_format_failure(cmd, proc))
+    proc = run(cmd)
     payload = json.loads(proc.stdout or "[]")
     return [_to_pr(item) for item in payload]
 
@@ -94,10 +90,7 @@ def create_pr(request: CreatePRRequest) -> str:
     ]
     if request.draft:
         cmd.append("--draft")
-    proc = git.run(cmd, check=False)
-    if proc.returncode != 0:
-        raise git.GitError(_format_failure(cmd, proc))
-    return proc.stdout.strip()
+    return run(cmd).stdout.strip()
 
 
 def edit_pr(request: EditPRRequest) -> None:
@@ -108,9 +101,7 @@ def edit_pr(request: EditPRRequest) -> None:
         cmd.extend(["--body-file", str(request.body_file)])
     if request.base is not None:
         cmd.extend(["--base", request.base])
-    proc = git.run(cmd, check=False)
-    if proc.returncode != 0:
-        raise git.GitError(_format_failure(cmd, proc))
+    run(cmd)
 
 
 def _to_pr(item: dict) -> PullRequest:
@@ -124,12 +115,3 @@ def _to_pr(item: dict) -> PullRequest:
         state=item.get("state", ""),
         is_draft=bool(item.get("isDraft", False)),
     )
-
-
-def _format_failure(cmd: list[str], proc: subprocess.CompletedProcess[str]) -> str:
-    pieces = ["command failed:", " ".join(cmd)]
-    if proc.stdout.strip():
-        pieces.append(proc.stdout.strip())
-    if proc.stderr.strip():
-        pieces.append(proc.stderr.strip())
-    return "\n".join(pieces)

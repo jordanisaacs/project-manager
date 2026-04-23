@@ -3,23 +3,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
-class GitError(Exception):
-    pass
+from project_manager.errors import CommandError
+from project_manager.subprocess_run import run
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if check and result.returncode != 0:
-        raise GitError(
-            f"git -C {repo} {' '.join(args)} failed ({result.returncode}):\n{result.stderr}"
-        )
-    return result
+    return run(["git", "-C", str(repo), *args], check=check)
 
 
 def default_branch(repo: Path) -> str:
@@ -35,7 +24,7 @@ def default_branch(repo: Path) -> str:
     result = _git(repo, "branch", "--show-current", check=False)
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
-    raise GitError(f"could not determine default branch for {repo}")
+    raise CommandError(f"could not determine default branch for {repo}")
 
 
 def worktree_add_detached(repo: Path, slot: Path, branch: str) -> None:
@@ -74,7 +63,7 @@ def init_submodules(main_repo: Path, worktree: Path) -> None:
         main_sub = main_repo / path
         worktree_sub = worktree / path
         if not (main_sub / ".git").exists():
-            raise GitError(
+            raise CommandError(
                 f"submodule '{path}' is not initialized in main repo {main_repo}; "
                 f"run `git -C {main_repo} submodule update --init --recursive` first"
             )

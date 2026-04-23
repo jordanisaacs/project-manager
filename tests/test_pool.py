@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from project_manager.errors import CommandError
 from project_manager.paths import Paths
 from project_manager.pool import add as add_mod
 from project_manager.pool import ls as ls_mod
@@ -94,5 +95,5 @@ def test_pool_add_copies_untracked_claude_md(pm_env: Paths) -> None:
 
 
 def test_pool_add_errors_on_missing_repo(pm_env: Paths) -> None:
-    with pytest.raises(wt_mod.GitError):
+    with pytest.raises(CommandError):
         add_mod.add(pm_env, "nonexistent")

@@ -4,8 +4,8 @@ import contextlib
 import os
 from pathlib import Path
 
+from project_manager.errors import ProjectError
 from project_manager.paths import Paths
-from project_manager.project.errors import ProjectError
 
 
 def _cwd_candidates() -> list[Path]:

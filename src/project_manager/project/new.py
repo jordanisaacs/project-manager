@@ -2,11 +2,11 @@ import contextlib
 import sqlite3
 from pathlib import Path
 
+from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import db
-from project_manager.project.errors import ProjectError
 
 _README_TEMPLATE = """\
 # {project}

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from project_manager.errors import CommandError
+from project_manager.subprocess_run import run
 
-class GitError(RuntimeError):
-    pass
+# Re-export `run` so `git.run(...)` call sites keep working.
+__all__ = ["run"]
+
+# Historical alias: stacker uses `GitError` for both subprocess failures and
+# semantic validation errors. Keep the name so existing `except git.GitError`
+# and `raise git.GitError(...)` sites continue to work.
+GitError = CommandError
 
 
 @dataclass(frozen=True)
@@ -26,29 +32,6 @@ class GitContext:
     repo_root: Path
     worktree_path: Path
     branch: str
-
-
-def run(
-    cmd: list[str],
-    *,
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    full_env = os.environ.copy()
-    if env:
-        full_env.update(env)
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd is not None else None,
-        env=full_env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if check and proc.returncode != 0:
-        raise GitError(_format_failure(cmd, proc))
-    return proc
 
 
 def git(path: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -239,10 +222,3 @@ def guess_trunk_branch(repo_root: Path) -> str:
     raise GitError(f"Could not determine a trunk branch for {repo_root}.")
 
 
-def _format_failure(cmd: list[str], proc: subprocess.CompletedProcess[str]) -> str:
-    pieces = ["command failed:", " ".join(cmd)]
-    if proc.stdout.strip():
-        pieces.append(proc.stdout.strip())
-    if proc.stderr.strip():
-        pieces.append(proc.stderr.strip())
-    return "\n".join(pieces)

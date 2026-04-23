@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
+from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.project import db
-from project_manager.project.errors import ProjectError
 
 
 def list_project_dbs(paths: Paths) -> list[tuple[str, Path]]:

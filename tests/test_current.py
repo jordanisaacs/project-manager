@@ -1,10 +1,10 @@
 import pytest
 
+from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.project import current
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
-from project_manager.project.errors import ProjectError
 
 
 def _mk_pool(paths: Paths, repo: str, uuids: list[str]) -> None:

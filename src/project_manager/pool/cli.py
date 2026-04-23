@@ -2,9 +2,9 @@ import argparse
 import sys
 
 from project_manager import config
+from project_manager.errors import CommandError
 from project_manager.pool import add as add_mod
 from project_manager.pool import ls as ls_mod
-from project_manager.pool import worktree as wt
 from project_manager.stacker import cli as stacker_cli
 
 
@@ -12,7 +12,7 @@ def _cmd_add(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
         slot = add_mod.add(paths, args.repo)
-    except wt.GitError as e:
+    except CommandError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
     print(f"{slot.repo}\t{slot.uuid}\t{slot.path}")

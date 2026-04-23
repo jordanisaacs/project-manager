@@ -10,6 +10,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from project_manager import sqlite_db
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS repos (
     name TEXT PRIMARY KEY,
@@ -20,33 +22,14 @@ CREATE TABLE IF NOT EXISTS repos (
 
 @contextmanager
 def transaction(db_path: Path) -> Iterator[sqlite3.Connection]:
-    """Open the project db, begin a transaction, and yield the connection.
-
-    Commits on clean exit, rolls back on exception, closes in all cases.
-    The schema-init statement runs and is committed before the transaction begins
-    so a rollback doesn't drop the table on first use.
-    """
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(_SCHEMA)
-        conn.commit()
-        with conn:
-            yield conn
-    finally:
-        conn.close()
+    with sqlite_db.transaction(db_path, schema=_SCHEMA) as conn:
+        yield conn
 
 
 @contextmanager
 def readonly(db_path: Path) -> Iterator[sqlite3.Connection]:
-    """Open the project db for reads only. No transaction; closes on exit."""
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(_SCHEMA)
-        conn.commit()
+    with sqlite_db.readonly(db_path, schema=_SCHEMA) as conn:
         yield conn
-    finally:
-        conn.close()
 
 
 def add_repo(conn: sqlite3.Connection, name: str, slot_uuid: str) -> None:

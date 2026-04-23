@@ -1,10 +1,10 @@
 import contextlib
 from pathlib import Path
 
+from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.project import db
 from project_manager.project import detach as detach_mod
-from project_manager.project.errors import ProjectError
 
 _DB_FILENAME = ".pm.db"
 _ALLOWED_EXTRAS = {_DB_FILENAME, "README.md"}

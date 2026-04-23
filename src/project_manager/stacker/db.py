@@ -2,64 +2,62 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
+from project_manager import sqlite_db
+
 from .models import OperationState, RepoPRConfig, TrackedBranch
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tracked_branches (
+    repo_name                 TEXT NOT NULL,
+    branch                    TEXT NOT NULL,
+    parent_repo_name          TEXT NOT NULL,
+    parent_branch             TEXT NOT NULL,
+    managed_base_commit       TEXT NOT NULL,
+    last_synced_parent_commit TEXT,
+    last_clean_head           TEXT,
+    updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo_name, branch)
+);
+
+CREATE TABLE IF NOT EXISTS operations (
+    repo_name          TEXT PRIMARY KEY,
+    op_type            TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    branch             TEXT,
+    parent_branch      TEXT,
+    root_branch        TEXT,
+    queue_json         TEXT,
+    current_index      INTEGER NOT NULL DEFAULT 0,
+    start_head         TEXT,
+    target_parent_head TEXT,
+    commit_list_json   TEXT,
+    next_commit_index  INTEGER NOT NULL DEFAULT 0,
+    error_message      TEXT,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS repo_pr_config (
+    repo_name    TEXT PRIMARY KEY,
+    mode         TEXT NOT NULL,
+    trunk_branch TEXT NOT NULL,
+    main_repo    TEXT,
+    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
 
 class StackerDB:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
 
-    def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self) -> None:
-        with self.connect() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS tracked_branches (
-                    repo_name                 TEXT NOT NULL,
-                    branch                    TEXT NOT NULL,
-                    parent_repo_name          TEXT NOT NULL,
-                    parent_branch             TEXT NOT NULL,
-                    managed_base_commit       TEXT NOT NULL,
-                    last_synced_parent_commit TEXT,
-                    last_clean_head           TEXT,
-                    updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (repo_name, branch)
-                );
-
-                CREATE TABLE IF NOT EXISTS operations (
-                    repo_name          TEXT PRIMARY KEY,
-                    op_type            TEXT NOT NULL,
-                    status             TEXT NOT NULL,
-                    branch             TEXT,
-                    parent_branch      TEXT,
-                    root_branch        TEXT,
-                    queue_json         TEXT,
-                    current_index      INTEGER NOT NULL DEFAULT 0,
-                    start_head         TEXT,
-                    target_parent_head TEXT,
-                    commit_list_json   TEXT,
-                    next_commit_index  INTEGER NOT NULL DEFAULT 0,
-                    error_message      TEXT,
-                    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS repo_pr_config (
-                    repo_name    TEXT PRIMARY KEY,
-                    mode         TEXT NOT NULL,
-                    trunk_branch TEXT NOT NULL,
-                    main_repo    TEXT,
-                    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                """
-            )
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        with sqlite_db.transaction(self.db_path, schema=_SCHEMA, row_factory=sqlite3.Row) as conn:
+            yield conn
 
     def upsert_branch(self, tracked: TrackedBranch) -> None:
         with self.connect() as conn:

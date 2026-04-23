@@ -1,6 +1,7 @@
 import subprocess
 import uuid as uuid_mod
 
+from project_manager.errors import CommandError
 from project_manager.paths import Paths
 from project_manager.pool import worktree as wt
 from project_manager.pool.slot import Slot
@@ -16,7 +17,7 @@ def add(paths: Paths, repo: str) -> Slot:
     """
     main_repo = paths.repo(repo)
     if not (main_repo / ".git").exists():
-        raise wt.GitError(f"no git repo at {main_repo}")
+        raise CommandError(f"no git repo at {main_repo}")
 
     pool_dir = paths.pool(repo)
     pool_dir.mkdir(parents=True, exist_ok=True)
