@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
 from project_manager.stacker import cli
+from project_manager.stacker import git as stacker_git
 
 
 @pytest.fixture
@@ -54,6 +56,64 @@ def test_resolve_claims_fresh_slot_when_cwd_outside_pool(  # noqa: PLR0913 (fixt
     # Cleanup releases it.
     cleanup()
     assert pooldb.get_owner(repo_name, worktree.name) is None
+
+
+def test_resolve_repo_uses_cwd_slot_when_args_empty(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_name, _ = stacker_repo
+    monkeypatch.chdir(three_slots[0].path)
+    args = argparse.Namespace(repo=None)
+    assert cli._resolve_repo(args, pm_env) == repo_name
+
+
+def test_resolve_repo_prefers_explicit_arg(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],  # noqa: ARG001 (creates repo)
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(three_slots[0].path)
+    args = argparse.Namespace(repo="explicit")
+    assert cli._resolve_repo(args, pm_env) == "explicit"
+
+
+def test_resolve_repo_errors_when_outside_slot_and_no_arg(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(repo=None)
+    with pytest.raises(stacker_git.GitError, match="pass --repo"):
+        cli._resolve_repo(args, pm_env)
+
+
+def test_resolve_branch_uses_cwd_current_branch(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],  # noqa: ARG001
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slot = three_slots[0]
+    stacker_git.git(slot.path, "checkout", "-b", "feature-cwd")
+    monkeypatch.chdir(slot.path)
+    args = argparse.Namespace(branch=None)
+    assert cli._resolve_branch(args, pm_env) == "feature-cwd"
+
+
+def test_resolve_branch_errors_on_detached_head(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],  # noqa: ARG001
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slot = three_slots[0]
+    monkeypatch.chdir(slot.path)  # three_slots creates them detached
+    args = argparse.Namespace(branch=None)
+    with pytest.raises(stacker_git.GitError, match="detached"):
+        cli._resolve_branch(args, pm_env)
 
 
 def test_resolve_claims_fresh_slot_when_cwd_is_in_different_repo(

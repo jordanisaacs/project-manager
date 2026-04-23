@@ -21,8 +21,46 @@ def _service(paths: Paths) -> StackerService:
     return StackerService(db, paths)
 
 
-def _target(args: argparse.Namespace) -> SelectorTarget:
-    return SelectorTarget(repo_name=args.repo, branch=args.branch)
+def _target(args: argparse.Namespace, paths: Paths) -> SelectorTarget:
+    return SelectorTarget(
+        repo_name=_resolve_repo(args, paths),
+        branch=_resolve_branch(args, paths),
+    )
+
+
+def _resolve_repo(args: argparse.Namespace, paths: Paths) -> str:
+    if getattr(args, "repo", None):
+        return args.repo
+    here = locate.slot_for_cwd(paths)
+    if here is None:
+        raise git.GitError(
+            "pass --repo <name> (or run from inside a pm worktree slot)."
+        )
+    return here.repo_name
+
+
+def _resolve_repo_optional(args: argparse.Namespace, paths: Paths) -> str | None:
+    """Like _resolve_repo but returns None if neither args nor cwd provide one."""
+    if getattr(args, "repo", None):
+        return args.repo
+    here = locate.slot_for_cwd(paths)
+    return here.repo_name if here is not None else None
+
+
+def _resolve_branch(args: argparse.Namespace, paths: Paths) -> str:
+    if getattr(args, "branch", None):
+        return args.branch
+    here = locate.slot_for_cwd(paths)
+    if here is None:
+        raise git.GitError(
+            "pass <branch> (or run from inside a pm worktree slot)."
+        )
+    current = git.current_branch(here.path)
+    if not current:
+        raise git.GitError(
+            f"worktree {here.path} is detached; pass <branch> explicitly."
+        )
+    return current
 
 
 def _require_base(base: str | None) -> str:
@@ -36,12 +74,13 @@ def _cmd_create(args: argparse.Namespace) -> int:
     service = _service(paths)
     pooldb = PoolDB(paths.pool_db())
     try:
+        repo_name = _resolve_repo(args, paths)
         base = _require_base(args.base)
-        parent = selectors.resolve_parent_for_base(paths, args.repo, base)
-        worktree_path, cleanup = _resolve_create_slot(paths, pooldb, args.repo)
+        parent = selectors.resolve_parent_for_base(paths, repo_name, base)
+        worktree_path, cleanup = _resolve_create_slot(paths, pooldb, repo_name)
         try:
             service.initialize_worktree(
-                repo_name=args.repo,
+                repo_name=repo_name,
                 worktree_path=worktree_path,
                 branch=args.branch,
                 create_branch=True,
@@ -86,8 +125,9 @@ def _cmd_track(args: argparse.Namespace) -> int:
     paths = config.load()
     service = _service(paths)
     try:
-        parent = selectors.resolve_parent_for_base(paths, args.repo, args.parent)
-        tracked = service.track(_target(args), parent)
+        repo_name = _resolve_repo(args, paths)
+        parent = selectors.resolve_parent_for_base(paths, repo_name, args.parent)
+        tracked = service.track(_target(args, paths), parent)
     except git.GitError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
@@ -96,89 +136,101 @@ def _cmd_track(args: argparse.Namespace) -> int:
 
 
 def _cmd_untrack(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.untrack(_target(args)))
+    return _run(lambda svc: svc.untrack(_target(args, svc.paths)))
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.sync(_target(args)))
+    return _run(lambda svc: svc.sync(_target(args, svc.paths)))
 
 
 def _cmd_push(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.push(_target(args)))
+    return _run(lambda svc: svc.push(_target(args, svc.paths)))
 
 
 def _cmd_pr(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.pr(_target(args), draft=args.draft))
+    return _run(lambda svc: svc.pr(_target(args, svc.paths), draft=args.draft))
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.status_text(_target(args)))
+    return _run(lambda svc: svc.status_text(_target(args, svc.paths)))
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.log_text(_target(args)))
+    return _run(lambda svc: svc.log_text(_target(args, svc.paths)))
 
 
 def _cmd_graph(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.graph_text(args.repo))
+    return _run(lambda svc: svc.graph_text(_resolve_repo_optional(args, svc.paths)))
 
 
 def _cmd_continue(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.continue_operation(args.repo))
+    return _run(lambda svc: svc.continue_operation(_resolve_repo(args, svc.paths)))
 
 
 def _cmd_abort(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.abort_operation(args.repo))
+    return _run(lambda svc: svc.abort_operation(_resolve_repo(args, svc.paths)))
 
 
 def _cmd_config(args: argparse.Namespace) -> int:
-    service = _service(config.load())
+    paths = config.load()
+    service = _service(paths)
     try:
-        return _dispatch_config(service, args)
+        repo_name = _resolve_repo(args, paths)
+        return _dispatch_config(service, args, repo_name)
     except git.GitError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
 
 
-def _dispatch_config(service: StackerService, args: argparse.Namespace) -> int:
+def _dispatch_config(
+    service: StackerService, args: argparse.Namespace, repo_name: str
+) -> int:
     if args.list:
-        return _config_list(service, args)
+        return _config_list(service, args, repo_name)
     if args.unset:
-        return _config_unset(service, args)
+        return _config_unset(service, args, repo_name)
     if args.key is None:
         print("pm: config requires a key (or --list / --unset).", file=sys.stderr)
         return 2
     if args.value is None:
-        return _config_get(service, args)
-    return _config_set(service, args)
+        return _config_get(service, args, repo_name)
+    return _config_set(service, args, repo_name)
 
 
-def _config_list(service: StackerService, args: argparse.Namespace) -> int:
+def _config_list(
+    service: StackerService, args: argparse.Namespace, repo_name: str
+) -> int:
     if args.key is not None or args.value is not None:
         print("pm: --list takes no key/value arguments.", file=sys.stderr)
         return 2
-    for key, value in service.list_config(args.repo):
+    for key, value in service.list_config(repo_name):
         print(f"{key}={value}")
     return 0
 
 
-def _config_unset(service: StackerService, args: argparse.Namespace) -> int:
+def _config_unset(
+    service: StackerService, args: argparse.Namespace, repo_name: str
+) -> int:
     if args.key is None or args.value is not None:
         print("pm: --unset requires exactly one key.", file=sys.stderr)
         return 2
-    return 0 if service.unset_config(args.repo, args.key) else 1
+    return 0 if service.unset_config(repo_name, args.key) else 1
 
 
-def _config_get(service: StackerService, args: argparse.Namespace) -> int:
-    current = service.get_config(args.repo, args.key)
+def _config_get(
+    service: StackerService, args: argparse.Namespace, repo_name: str
+) -> int:
+    current = service.get_config(repo_name, args.key)
     if current is None:
         return 1
     print(current)
     return 0
 
 
-def _config_set(service: StackerService, args: argparse.Namespace) -> int:
-    for note in service.set_config(args.repo, args.key, args.value):
+def _config_set(
+    service: StackerService, args: argparse.Namespace, repo_name: str
+) -> int:
+    for note in service.set_config(repo_name, args.key, args.value):
         print(note, file=sys.stderr)
     return 0
 
@@ -205,15 +257,15 @@ def _add_branch_subcommand(
     help_text: str,
 ) -> argparse.ArgumentParser:
     p = sub.add_parser(name, help=help_text)
-    p.add_argument("--repo", required=True)
-    p.add_argument("branch")
+    p.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
+    p.add_argument("branch", nargs="?", default=None, help="defaults to the cwd's current branch")
     p.set_defaults(func=handler)
     return p
 
 
 def _add_stacker_commands(sub: argparse._SubParsersAction) -> None:
     create = sub.add_parser("create", help="claim a slot, create branch off --base, track it")
-    create.add_argument("--repo", required=True)
+    create.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
     create.add_argument("-b", "--branch", required=True)
     create.add_argument("--base", help="parent branch (or repo:parent)")
     create.set_defaults(func=_cmd_create)
@@ -252,13 +304,13 @@ def _add_repo_only_commands(sub: argparse._SubParsersAction) -> None:
         ("abort", _cmd_abort, "abort a paused stacker operation and reset state"),
     ):
         p = sub.add_parser(name, help=help_text)
-        p.add_argument("--repo", required=True)
+        p.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
         p.set_defaults(func=handler)
 
 
 def _add_config_command(sub: argparse._SubParsersAction) -> None:
     cfg = sub.add_parser("config", help="get/set per-repo stacker config (git-config style)")
-    cfg.add_argument("--repo", required=True)
+    cfg.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
     group = cfg.add_mutually_exclusive_group()
     group.add_argument("--list", action="store_true", help="list all set keys")
     group.add_argument("--unset", action="store_true", help="remove a key")
