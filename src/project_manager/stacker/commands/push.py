@@ -1,38 +1,40 @@
-from __future__ import annotations
+"""`pm stacker push`."""
+from typing import Annotated
 
-import argparse
+from cyclopts import Parameter
 
+from project_manager import config
+from project_manager.cli._shared import StackerScope
 from project_manager.stacker.models import PushOptions
 
-from . import _common
+from . import _common, stacker_app
 
 
-def add(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("push", help="force-push + create/update PRs for a scope")
-    _common.add_repo_branch(p)
-    _common.add_scope_flags(p)
-    p.add_argument(
-        "--only", action="store_true",
-        help="push only the target branch (no lineage walk)",
-    )
-    draft_group = p.add_mutually_exclusive_group()
-    draft_group.add_argument("--draft", action="store_true", help="every PR draft")
-    draft_group.add_argument(
-        "--publish", action="store_true", help="every PR published (not draft)",
-    )
-    p.add_argument(
-        "--create-pr", dest="create_pr",
-        default=True, type=_common.parse_bool,
-        help="create/update PRs (default: true); pass false to only force-push",
-    )
-    p.set_defaults(func=run)
+@stacker_app.command
+def push(
+    branch: str | None = None,
+    scope: StackerScope = StackerScope(),
+    *,
+    only: Annotated[bool, Parameter(negative="")] = False,
+    draft: Annotated[bool, Parameter(negative="")] = False,
+    publish: Annotated[bool, Parameter(negative="")] = False,
+    create_pr: bool = True,
+) -> int:
+    """Force-push + create/update PRs for a scope.
 
-
-def run(args: argparse.Namespace) -> int:
+    `--draft` / `--publish` are mutually exclusive. `--no-create-pr` force-pushes
+    without touching PRs.
+    """
+    if draft and publish:
+        raise ValueError("--draft and --publish are mutually exclusive.")
+    paths = config.load()
+    svc = _common.service(paths)
     options = PushOptions(
-        scope=_common.scope_spec(args, include_only=True),
-        draft=args.draft,
-        publish=args.publish,
-        create_pr=args.create_pr,
+        scope=_common.scope_spec(scope, only=only),
+        draft=draft,
+        publish=publish,
+        create_pr=create_pr,
     )
-    return _common.run(lambda svc: svc.push(_common.target(args, svc.paths), options))
+    return _common.emit(
+        svc.push(_common.target(scope.repo, branch, paths), options)
+    )

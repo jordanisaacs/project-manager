@@ -1,44 +1,23 @@
-"""One-file-per-command argparse wiring for `pm stacker`."""
-from __future__ import annotations
+"""`pm stacker` sub-app and per-command module registration."""
+from cyclopts import App
 
-import argparse
+from project_manager.cli._shared import root
 
-from . import (
-    abort,
-    config,
-    create,
-    guard,
-    log,
-    ls,
-    push,
-    remove,
-    rename,
-    repair,
-    reparent,
-    split,
-    sync,
-)
-from . import (
-    continue_ as continue_cmd,
+stacker_app = root.command(
+    App(name="stacker", help="branch-stack tracking against pm's pool"),
 )
 
-
-def add_subparser(subparsers: argparse._SubParsersAction) -> None:
-    stacker = subparsers.add_parser(
-        "stacker", help="branch-stack tracking against pm's pool"
-    )
-    sub = stacker.add_subparsers(dest="cmd", required=True)
-    create.add(sub)
-    sync.add(sub)
-    push.add(sub)
-    ls.add(sub)
-    remove.add(sub)
-    reparent.add(sub)
-    split.add(sub)
-    rename.add(sub)
-    repair.add(sub)
-    log.add(sub)
-    continue_cmd.add(sub)
-    abort.add(sub)
-    config.add(sub)
-    guard.add(sub)
+from . import abort as _abort  # noqa: F401,E402
+from . import config as _config  # noqa: F401,E402
+from . import continue_ as _continue  # noqa: F401,E402
+from . import create as _create  # noqa: F401,E402
+from . import guard as _guard  # noqa: F401,E402
+from . import log as _log  # noqa: F401,E402
+from . import ls as _ls  # noqa: F401,E402
+from . import push as _push  # noqa: F401,E402
+from . import remove as _remove  # noqa: F401,E402
+from . import rename as _rename  # noqa: F401,E402
+from . import repair as _repair  # noqa: F401,E402
+from . import reparent as _reparent  # noqa: F401,E402
+from . import split as _split  # noqa: F401,E402
+from . import sync as _sync  # noqa: F401,E402

@@ -1,15 +1,13 @@
-from __future__ import annotations
+"""`pm stacker log`."""
+from project_manager import config
+from project_manager.cli._shared import RepoFlag
 
-import argparse
-
-from . import _common
-
-
-def add(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("log", help="show commits since the branch's managed base")
-    _common.add_repo_branch(p)
-    p.set_defaults(func=run)
+from . import _common, stacker_app
 
 
-def run(args: argparse.Namespace) -> int:
-    return _common.run(lambda svc: svc.log_text(_common.target(args, svc.paths)))
+@stacker_app.command
+def log(branch: str | None = None, flag: RepoFlag = RepoFlag()) -> int:
+    """Show commits since the branch's managed base."""
+    paths = config.load()
+    svc = _common.service(paths)
+    return _common.emit(svc.log_text(_common.target(flag.repo, branch, paths)))

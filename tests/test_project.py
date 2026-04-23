@@ -1,21 +1,24 @@
-import argparse
 import sqlite3
 from pathlib import Path
 
 import pytest
 
+# Import for side-effect: registers project sub-app on the root.
+import project_manager.cli  # noqa: F401
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot
 from project_manager.project import attach as attach_mod
 from project_manager.project import branch as branch_mod
-from project_manager.project import cli as project_cli
 from project_manager.project import create as create_mod
 from project_manager.project import db
 from project_manager.project import delete as delete_mod
 from project_manager.project import detach as detach_mod
 from project_manager.project import ls as ls_mod
+from project_manager.project.cli.delete import delete as cli_project_delete
+from project_manager.project.cli.wt.detach import detach as cli_wt_detach
+from project_manager.project.spec import parse_wt_spec
 from tests.helpers import git_in_slot, git_pool, head_ref, write_git_sentinel
 
 
@@ -696,10 +699,12 @@ def test_plan_delete_per_wt(pm_env: Paths) -> None:
 def test_cli_wt_detach_dry_run_exits_zero_when_clean(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
-    args = argparse.Namespace(
-        project="demo", all=True, wt=None, dry_run=True, no_branch=False,
+    from project_manager.cli._shared import ProjectFlag, WtSelection
+    rc = cli_wt_detach(
+        flag=ProjectFlag(project="demo"),
+        sel=WtSelection(all=True),
+        dry_run=True,
     )
-    rc = project_cli._cmd_wt_detach(args)
     assert rc == 0
     assert _forward(pm_env, "demo", "foo").is_symlink()
 
@@ -711,10 +716,12 @@ def test_cli_wt_detach_dry_run_exits_one_on_blocker(
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "scratch.log").write_text("noise\n")
-    args = argparse.Namespace(
-        project="demo", all=True, wt=None, dry_run=True, no_branch=False,
+    from project_manager.cli._shared import ProjectFlag, WtSelection
+    rc = cli_wt_detach(
+        flag=ProjectFlag(project="demo"),
+        sel=WtSelection(all=True),
+        dry_run=True,
     )
-    rc = project_cli._cmd_wt_detach(args)
     assert rc == 1
     err = capsys.readouterr().err
     assert "BLOCKED" in err
@@ -725,8 +732,7 @@ def test_cli_project_delete_dry_run_exits_one_on_extras(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
     (pm_env.projects / "demo" / "notes.txt").write_text("hi")
-    args = argparse.Namespace(project="demo", dry_run=True)
-    rc = project_cli._cmd_project_delete(args)
+    rc = cli_project_delete("demo", dry_run=True)
     assert rc == 1
     assert (pm_env.projects / "demo" / "notes.txt").exists()
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
@@ -736,11 +742,11 @@ def test_cli_project_delete_dry_run_exits_one_on_extras(pm_env: Paths) -> None:
 
 
 def test_parse_wt_spec_bare_repo() -> None:
-    assert project_cli._parse_wt_spec("foo") == [("foo", "foo")]
+    assert parse_wt_spec("foo") == [("foo", "foo")]
 
 
 def test_parse_wt_spec_named_and_bare() -> None:
-    assert project_cli._parse_wt_spec("foo,bar:baz,qux") == [
+    assert parse_wt_spec("foo,bar:baz,qux") == [
         ("foo", "foo"),
         ("bar", "baz"),
         ("qux", "qux"),
@@ -749,19 +755,19 @@ def test_parse_wt_spec_named_and_bare() -> None:
 
 def test_parse_wt_spec_rejects_duplicates() -> None:
     with pytest.raises(ProjectError, match="duplicate worktree"):
-        project_cli._parse_wt_spec("foo,foo:bar")
+        parse_wt_spec("foo,foo:bar")
 
 
 def test_parse_wt_spec_rejects_empty_side() -> None:
     with pytest.raises(ProjectError, match="empty name or repo"):
-        project_cli._parse_wt_spec("foo,:bar")
+        parse_wt_spec("foo,:bar")
     with pytest.raises(ProjectError, match="empty name or repo"):
-        project_cli._parse_wt_spec("foo,bar:")
+        parse_wt_spec("foo,bar:")
 
 
 def test_parse_wt_spec_rejects_extra_colons() -> None:
     with pytest.raises(ProjectError, match="too many colons"):
-        project_cli._parse_wt_spec("foo:bar:baz")
+        parse_wt_spec("foo:bar:baz")
 
 
 # --- db migration from legacy `repos` table ---

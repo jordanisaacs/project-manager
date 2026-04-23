@@ -7,7 +7,9 @@ authors = [
     { name = "Jordan Isaacs", email = "jordan.isaacs@databricks.com" }
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "cyclopts>=4.10,<5",
+]
 
 [project.scripts]
 pm = "project_manager.cli:main"
@@ -53,6 +55,9 @@ ignore = [
     "S101",
     # subprocess calls are deliberate and vetted.
     "S603", "S607",
+    # Cyclopts commands pass frozen dataclasses as defaults; B008 would flag
+    # the `RepoFlag()` / `StackerScope()` pattern that cyclopts requires.
+    "B008",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -60,7 +65,14 @@ ignore = [
     "ANN",   # tests don't need full annotation coverage
     "PLR2004",  # magic numbers in tests are expected
     "SLF001",   # tests may poke at privates
+    "PLC0415",  # inline imports are fine in tests
 ]
+# Cyclopts handlers naturally take many typed parameters (scope dataclass +
+# individual flags) and receive bool flags via keyword-only args; the lint
+# rules below are designed for conventional functions and produce noise here.
+"src/project_manager/*/cli/**" = ["PLR0913"]
+"src/project_manager/cli/*" = ["PLR0913"]
+"src/project_manager/stacker/commands/*" = ["PLR0913", "C901", "FBT001", "FBT002"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

@@ -1,52 +1,46 @@
-from __future__ import annotations
+"""`pm stacker ls`."""
+from typing import Annotated, Literal
 
-import argparse
-import sys
+from cyclopts import Parameter
 
 from project_manager import config
-from project_manager.stacker import git
-from project_manager.stacker.models import Details, Scope
+from project_manager.cli._shared import StackerScope
+from project_manager.stacker.models import Details
 
-from . import _common
+from . import _common, stacker_app
 
-_DETAILS_CHOICES: tuple[Details, ...] = ("none", "status", "status-counts", "all")
-
-
-def add(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("ls", help="render the stack tree")
-    _common.add_repo_branch(p)
-    _common.add_scope_flags(p)
-    p.add_argument(
-        "--details", default="status-counts", choices=_DETAILS_CHOICES,
-        help="per-branch detail level (default: status-counts)",
-    )
-    p.add_argument("--json", action="store_true", help="machine-readable output")
-    p.set_defaults(func=run)
+_DetailsLit = Literal["none", "status", "status-counts", "all"]
 
 
-def run(args: argparse.Namespace) -> int:
+@stacker_app.command
+def ls(
+    branch: str | None = None,
+    scope: StackerScope = StackerScope(),
+    *,
+    details: _DetailsLit = "status-counts",
+    json: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
+    """Render the stack tree."""
     paths = config.load()
-    scope: Scope = _common.scope(args)
-    if scope == "current":
-        try:
-            target = _common.target(args, paths)
-        except git.GitError as e:
-            print(f"pm: {e}", file=sys.stderr)
-            return 2
-        return _common.run(
-            lambda svc: svc.ls_text(
+    svc = _common.service(paths)
+    current_scope = _common.scope_of(scope)
+    details_cast: Details = details
+    if current_scope == "current":
+        target = _common.target(scope.repo, branch, paths)
+        return _common.emit(
+            svc.ls_text(
                 target.repo_name,
                 target_branch=target.branch,
                 scope="current",
-                details=args.details,
-                json_output=args.json,
+                details=details_cast,
+                json_output=json,
             )
         )
-    return _common.run(
-        lambda svc: svc.ls_text(
-            _common.resolve_repo_optional(args, svc.paths),
+    return _common.emit(
+        svc.ls_text(
+            _common.resolve_repo_optional(scope.repo, paths),
             scope="all",
-            details=args.details,
-            json_output=args.json,
+            details=details_cast,
+            json_output=json,
         )
     )

@@ -1,19 +1,13 @@
-from __future__ import annotations
+"""`pm stacker abort`."""
+from project_manager import config
+from project_manager.cli._shared import RepoFlag
 
-import argparse
-
-from . import _common
-
-
-def add(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser(
-        "abort", help="abort a paused stacker operation and reset state"
-    )
-    p.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
-    p.set_defaults(func=run)
+from . import _common, stacker_app
 
 
-def run(args: argparse.Namespace) -> int:
-    return _common.run(
-        lambda svc: svc.abort_operation(_common.resolve_repo(args, svc.paths))
-    )
+@stacker_app.command
+def abort(flag: RepoFlag = RepoFlag()) -> int:
+    """Abort a paused stacker operation and reset state."""
+    paths = config.load()
+    svc = _common.service(paths)
+    return _common.emit(svc.abort_operation(_common.resolve_repo(flag.repo, paths)))

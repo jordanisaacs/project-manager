@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 import pytest
@@ -67,8 +66,7 @@ def test_resolve_repo_uses_cwd_slot_when_args_empty(
 ) -> None:
     repo_name, _ = stacker_repo
     monkeypatch.chdir(three_slots[0].path)
-    args = argparse.Namespace(repo=None)
-    assert _common.resolve_repo(args, pm_env) == repo_name
+    assert _common.resolve_repo(None, pm_env) == repo_name
 
 
 @pytest.mark.usefixtures("stacker_repo")
@@ -78,17 +76,15 @@ def test_resolve_repo_prefers_explicit_arg(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(three_slots[0].path)
-    args = argparse.Namespace(repo="explicit")
-    assert _common.resolve_repo(args, pm_env) == "explicit"
+    assert _common.resolve_repo("explicit", pm_env) == "explicit"
 
 
 def test_resolve_repo_errors_when_outside_slot_and_no_arg(
     pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    args = argparse.Namespace(repo=None)
     with pytest.raises(stacker_git.GitError, match="pass --repo"):
-        _common.resolve_repo(args, pm_env)
+        _common.resolve_repo(None, pm_env)
 
 
 @pytest.mark.usefixtures("stacker_repo")
@@ -100,8 +96,7 @@ def test_resolve_branch_uses_cwd_current_branch(
     slot = three_slots[0]
     stacker_git.git(slot.path, "checkout", "-b", "feature-cwd")
     monkeypatch.chdir(slot.path)
-    args = argparse.Namespace(branch=None)
-    assert _common.resolve_branch(args, pm_env) == "feature-cwd"
+    assert _common.resolve_branch(None, pm_env) == "feature-cwd"
 
 
 @pytest.mark.usefixtures("stacker_repo")
@@ -112,9 +107,8 @@ def test_resolve_branch_errors_on_detached_head(
 ) -> None:
     slot = three_slots[0]
     monkeypatch.chdir(slot.path)  # three_slots creates them detached
-    args = argparse.Namespace(branch=None)
     with pytest.raises(stacker_git.GitError, match="detached"):
-        _common.resolve_branch(args, pm_env)
+        _common.resolve_branch(None, pm_env)
 
 
 def test_resolve_claims_fresh_slot_when_cwd_is_in_different_repo(

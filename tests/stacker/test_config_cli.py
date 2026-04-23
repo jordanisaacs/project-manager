@@ -1,12 +1,9 @@
-from __future__ import annotations
-
-import argparse
-
 import pytest
 
 from project_manager import config as pm_config
+from project_manager.cli._shared import RepoFlag
 from project_manager.paths import Paths
-from project_manager.stacker.commands import config as config_cmd
+from project_manager.stacker.commands.config import config as config_cmd
 
 
 @pytest.fixture(autouse=True)
@@ -15,46 +12,44 @@ def _wire_config_load(pm_env: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pm_config, "load", lambda: pm_env)
 
 
-def _ns(**kwargs: object) -> argparse.Namespace:
-    return argparse.Namespace(**kwargs)
-
-
-def _run(args: argparse.Namespace) -> int:
-    return config_cmd.run(args)
+def _run(**kwargs) -> int:
+    flag = RepoFlag(repo=kwargs.pop("repo", "demo"))
+    return config_cmd(flag=flag, **kwargs)
 
 
 def test_get_unset_key_exits_1() -> None:
-    code = _run(_ns(repo="demo", list=False, unset=False, key="pr.mode", value=None))
-    assert code == 1
+    assert _run(key="pr.mode") == 1
 
 
 def test_set_then_get(capsys: pytest.CaptureFixture[str]) -> None:
-    assert _run(_ns(repo="demo", list=False, unset=False, key="pr.trunk", value="master")) == 0
+    assert _run(key="pr.trunk", value="master") == 0
     capsys.readouterr()
-    assert _run(_ns(repo="demo", list=False, unset=False, key="pr.trunk", value=None)) == 0
+    assert _run(key="pr.trunk") == 0
     assert capsys.readouterr().out.strip() == "master"
 
 
 def test_list_prints_sorted_key_equals_value(capsys: pytest.CaptureFixture[str]) -> None:
-    _run(_ns(repo="demo", list=False, unset=False, key="pr.trunk", value="master"))
-    _run(_ns(repo="demo", list=False, unset=False, key="pr.mode", value="repo-pr"))
+    _run(key="pr.trunk", value="master")
+    _run(key="pr.mode", value="repo-pr")
     capsys.readouterr()
-    assert _run(_ns(repo="demo", list=True, unset=False, key=None, value=None)) == 0
+    assert _run(list_=True) == 0
     out = capsys.readouterr().out.splitlines()
     assert out == ["pr.mode=repo-pr", "pr.trunk=master"]
 
 
 def test_unset_missing_key_exits_1() -> None:
-    assert _run(_ns(repo="demo", list=False, unset=True, key="pr.trunk", value=None)) == 1
+    assert _run(unset=True, key="pr.trunk") == 1
 
 
 def test_unset_existing_key_exits_0_and_clears() -> None:
-    _run(_ns(repo="demo", list=False, unset=False, key="pr.trunk", value="master"))
-    assert _run(_ns(repo="demo", list=False, unset=True, key="pr.trunk", value=None)) == 0
-    assert _run(_ns(repo="demo", list=False, unset=False, key="pr.trunk", value=None)) == 1
+    _run(key="pr.trunk", value="master")
+    assert _run(unset=True, key="pr.trunk") == 0
+    assert _run(key="pr.trunk") == 1
 
 
 def test_unknown_key_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
-    code = _run(_ns(repo="demo", list=False, unset=False, key="nope", value="x"))
+    # Routed through `main()` to exercise the global CommandError handler.
+    from project_manager.cli import main
+    code = main(["stacker", "config", "--repo", "demo", "nope", "x"])
     assert code == 2
     assert "Unknown config key" in capsys.readouterr().err

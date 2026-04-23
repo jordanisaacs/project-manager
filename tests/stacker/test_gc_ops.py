@@ -7,8 +7,8 @@ from project_manager.pool import slot as slot_mod
 from project_manager.pool import worktree as wt
 from project_manager.pool.db import PoolDB
 from project_manager.stacker import ops_slot
-from project_manager.stacker.cli import gc_ops
 from project_manager.stacker.db import StackerDB
+from project_manager.stacker.gc import gc_ops
 from project_manager.stacker.models import OperationState
 
 

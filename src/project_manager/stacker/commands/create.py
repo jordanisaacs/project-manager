@@ -1,100 +1,83 @@
-from __future__ import annotations
-
-import argparse
-import sys
+"""`pm stacker create`."""
 from collections.abc import Callable
 from pathlib import Path
+from typing import Annotated
+
+from cyclopts import Parameter
 
 from project_manager import config
+from project_manager.cli._shared import RepoFlag
 from project_manager.paths import Paths
-from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import PoolDB
 from project_manager.stacker import git, locate, ops_slot, selectors
 from project_manager.stacker.models import SelectorTarget, WorktreeInit
 
-from . import _common
+from . import _common, stacker_app
 
 
-def add(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser(
-        "create",
-        help="create or adopt a tracked branch (optionally in a pool slot)",
-    )
-    p.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
-    p.add_argument("branch", help="new branch name (or existing branch, with --replace)")
-    p.add_argument(
-        "--on", default=None,
-        help="parent: keyword 'current'/'parent', or a branch name (default: current)",
-    )
-    p.add_argument(
-        "--copy", default=None,
-        help="copy commits from this branch when creating the new one",
-    )
-    p.add_argument(
-        "--replace", action="store_true",
-        help="adopt an existing branch instead of creating a new one",
-    )
-    p.add_argument(
-        "--no-checkout", action="store_true",
-        help="do not claim a worktree slot; create the branch ref only",
-    )
-    p.set_defaults(func=run)
+@stacker_app.command
+def create(
+    branch: str,
+    *,
+    flag: RepoFlag = RepoFlag(),
+    on: str | None = None,
+    copy: str | None = None,
+    replace: Annotated[bool, Parameter(negative="")] = False,
+    no_checkout: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
+    """Create or adopt a tracked branch (optionally in a pool slot).
 
-
-def run(args: argparse.Namespace) -> int:
+    --on: parent — keyword 'current'/'parent', or a branch name (default: current).
+    --copy: copy commits from this branch when creating the new one.
+    --replace: adopt an existing branch instead of creating a new one.
+    --no-checkout: do not claim a worktree slot; create the branch ref only.
+    """
     paths = config.load()
-    service = _common.service(paths)
+    svc = _common.service(paths)
     pooldb = PoolDB(paths.pool_db())
+    repo_name = _common.resolve_repo(flag.repo, paths)
+    on_spec = _on_spec_for_create(on, replace)
+    parent = _common.resolve_on_spec(
+        paths, repo_name, on_spec,
+        fallback_branch=branch if replace else None,
+    )
+    if replace:
+        target = SelectorTarget(repo_name=repo_name, branch=branch)
+        tracked = svc.track(target, parent)
+        print(selectors.selector_for(tracked.repo_name, tracked.branch))
+        return 0
+    if no_checkout:
+        svc.create_tracked_branch(repo_name, branch, parent, copy_from=copy)
+        print(selectors.selector_for(repo_name, branch))
+        return 0
+    worktree_path, cleanup = _resolve_create_slot(paths, pooldb, repo_name)
     try:
-        repo_name = _common.resolve_repo(args, paths)
-        on_spec = _on_spec_for_create(args)
-        parent = _common.resolve_on_spec(
-            paths, repo_name, on_spec,
-            fallback_branch=args.branch if args.replace else None,
+        svc.init_new_branch(
+            WorktreeInit(
+                repo_name=repo_name,
+                worktree_path=worktree_path,
+                branch=branch,
+                parent=parent,
+                copy_from=copy,
+            )
         )
-        if args.replace:
-            target = SelectorTarget(repo_name=repo_name, branch=args.branch)
-            tracked = service.track(target, parent)
-            print(selectors.selector_for(tracked.repo_name, tracked.branch))
-            return 0
-        if args.no_checkout:
-            service.create_tracked_branch(
-                repo_name, args.branch, parent, copy_from=args.copy,
-            )
-            print(selectors.selector_for(repo_name, args.branch))
-            return 0
-        worktree_path, cleanup = _resolve_create_slot(paths, pooldb, repo_name)
-        try:
-            service.init_new_branch(
-                WorktreeInit(
-                    repo_name=repo_name,
-                    worktree_path=worktree_path,
-                    branch=args.branch,
-                    parent=parent,
-                    copy_from=args.copy,
-                )
-            )
-        except Exception:
-            cleanup()
-            raise
-    except (git.GitError, slot_mod.PoolExhaustedError) as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
+    except Exception:
+        cleanup()
+        raise
     print(worktree_path)
     return 0
 
 
-def _on_spec_for_create(args: argparse.Namespace) -> str:
-    """Return the resolved --on keyword, erroring when replace needs an explicit value."""
-    if args.on:
-        return args.on
-    if args.replace:
+def _on_spec_for_create(on: str | None, replace: bool) -> str:
+    if on:
+        return on
+    if replace:
         raise git.GitError("--replace requires --on <parent-branch>.")
     return "current"
 
 
 def _resolve_create_slot(
-    paths: Paths, pooldb: PoolDB, repo_name: str
+    paths: Paths, pooldb: PoolDB, repo_name: str,
 ) -> tuple[Path, Callable[[], None]]:
     """Pick the worktree to create the new branch in.
 

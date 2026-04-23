@@ -1,20 +1,18 @@
-from __future__ import annotations
+"""`pm stacker rename`."""
+from project_manager import config
+from project_manager.cli._shared import RepoFlag
 
-import argparse
-
-from . import _common
-
-
-def add(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser("rename", help="rename the current branch")
-    p.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
-    p.add_argument("--branch", dest="branch", default=None,
-                   help="branch to rename (defaults to cwd's current branch)")
-    p.add_argument("new_name", help="new branch name")
-    p.set_defaults(func=run)
+from . import _common, stacker_app
 
 
-def run(args: argparse.Namespace) -> int:
-    return _common.run(
-        lambda svc: svc.rename(_common.target(args, svc.paths), args.new_name)
+@stacker_app.command
+def rename(new_name: str, *, branch: str | None = None, flag: RepoFlag = RepoFlag()) -> int:
+    """Rename the current branch.
+
+    --branch picks a different source branch (defaults to cwd's current branch).
+    """
+    paths = config.load()
+    svc = _common.service(paths)
+    return _common.emit(
+        svc.rename(_common.target(flag.repo, branch, paths), new_name)
     )
