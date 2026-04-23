@@ -692,6 +692,27 @@ class StackerService:
     def _push_remote_slug(self, repo_name: str) -> str:
         return self.pr_backend.repo_info(cwd=self.paths.repo(repo_name)).name_with_owner
 
+    def _head_repo_for_branch(self, tracked: TrackedBranch) -> str | None:
+        """Return the `owner/name` slug of the repo the branch is pushed to.
+
+        Detects cross-repo same-owner fork setups (like
+        databricks-eng/universe-dev → databricks-eng/universe), which
+        `gh pr create` cannot handle (cli/cli#10093). Returns None when the
+        upstream isn't set, the remote URL can't be parsed, or we're in a
+        test fixture without a real git remote — callers fall back to the
+        default `gh pr create` path.
+        """
+        path = locate.locate_worktree(self.paths, tracked.repo_name, tracked.branch)
+        if path is None:
+            return None
+        remote = git.upstream_remote_name(path)
+        if not remote:
+            return None
+        url = git.remote_url(path, remote)
+        if not url:
+            return None
+        return git.parse_github_slug(url)
+
     def _create_or_update_current_pr(
         self,
         tracked: TrackedBranch,
@@ -703,6 +724,7 @@ class StackerService:
     ) -> gh.PullRequest:
         target_repo = self._target_repo_slug(config)
         remote_branch = self._remote_branch_name(tracked)
+        head_repo = self._head_repo_for_branch(tracked)
         title, first_body = self._first_commit_text(tracked)
         body = self._compose_body_with_block(first_body, "")
         base = self._pr_base_for_current_branch(tracked, config, current_repo)
@@ -727,6 +749,7 @@ class StackerService:
                         title=title,
                         body_file=body_file,
                         draft=draft,
+                        head_repo=head_repo,
                     )
                 )
         refreshed = self._find_open_pr(tracked, config, current_repo)

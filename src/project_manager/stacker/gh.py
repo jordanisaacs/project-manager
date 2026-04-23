@@ -35,6 +35,11 @@ class CreatePRRequest:
     title: str
     body_file: Path
     draft: bool
+    # When `head_repo` is set and differs from `repo`, the PR is created via
+    # GraphQL so that cross-repo same-owner forks (e.g. databricks-eng/universe
+    # ← databricks-eng/universe-dev) work. `gh pr create` cannot do this:
+    # https://github.com/cli/cli/issues/10093
+    head_repo: str | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,8 @@ def list_open_prs(
 
 
 def create_pr(request: CreatePRRequest) -> str:
+    if request.head_repo and request.head_repo != request.repo:
+        return _create_pr_graphql(request)
     cmd = [
         "gh", "pr", "create",
         "--repo", request.repo,
@@ -91,6 +98,66 @@ def create_pr(request: CreatePRRequest) -> str:
     if request.draft:
         cmd.append("--draft")
     return run(cmd).stdout.strip()
+
+
+def _create_pr_graphql(request: CreatePRRequest) -> str:
+    assert request.head_repo is not None
+    base_id = _repo_id(request.repo)
+    head_id = _repo_id(request.head_repo)
+    mutation = (
+        "mutation($baseId:ID!,$headId:ID!,$base:String!,$head:String!,"
+        "$title:String!,$body:String,$draft:Boolean){"
+        "createPullRequest(input:{"
+        "repositoryId:$baseId,headRepositoryId:$headId,"
+        "baseRefName:$base,headRefName:$head,"
+        "title:$title,body:$body,draft:$draft"
+        "}){pullRequest{url}}}"
+    )
+    data = _graphql(
+        mutation,
+        baseId=base_id,
+        headId=head_id,
+        base=request.base,
+        head=request.head,
+        title=request.title,
+        body=request.body_file,   # read from file via `-f body=@<path>`
+        draft=request.draft,
+    )
+    return data["createPullRequest"]["pullRequest"]["url"]
+
+
+def _repo_id(slug: str) -> str:
+    owner, name = slug.split("/", 1)
+    data = _graphql(
+        "query($o:String!,$n:String!){repository(owner:$o,name:$n){id}}",
+        o=owner,
+        n=name,
+    )
+    return data["repository"]["id"]
+
+
+def _graphql(query: str, **variables: object) -> dict:
+    """Invoke `gh api graphql` and return the `data` payload.
+
+    Each kwarg becomes a GraphQL variable. Bools are passed via `-F` so gh
+    types them correctly; Path values use `-f <name>=@<path>` so gh reads
+    the file contents (needed for multi-line PR bodies); everything else is
+    a string via `-f`.
+    """
+    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if isinstance(value, bool):
+            cmd.extend(["-F", f"{key}={'true' if value else 'false'}"])
+        elif isinstance(value, Path):
+            cmd.extend(["-f", f"{key}=@{value}"])
+        else:
+            cmd.extend(["-f", f"{key}={value}"])
+    proc = run(cmd)
+    payload = json.loads(proc.stdout or "{}")
+    if payload.get("errors"):
+        msgs = "; ".join(e.get("message", str(e)) for e in payload["errors"])
+        raise CommandError(f"GraphQL error: {msgs}")
+    return payload["data"]
 
 
 def edit_pr(request: EditPRRequest) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +78,43 @@ def upstream_branch_name(path: Path) -> str | None:
     if not upstream or "/" not in upstream:
         return None
     return upstream.split("/", 1)[1]
+
+
+def upstream_remote_name(path: Path) -> str | None:
+    """Return the remote name the current branch is pushed to (e.g. "origin").
+
+    Reads `branch.<current>.remote` from git config rather than resolving
+    `@{upstream}`, so this works even before `git fetch` has materialized a
+    remote-tracking ref — useful immediately after a push.
+    """
+    branch = current_branch(path)
+    if not branch:
+        return None
+    proc = git(path, "config", "--get", f"branch.{branch}.remote", check=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def remote_url(path: Path, remote: str) -> str | None:
+    proc = git(path, "remote", "get-url", remote, check=False)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+_GITHUB_SLUG_RE = re.compile(r"[:/]([^/:]+)/([^/:]+?)(?:\.git)?/?$")
+
+
+def parse_github_slug(url: str) -> str | None:
+    """Extract `owner/repo` from a git remote URL.
+
+    Handles SSH (`git@github.com:org/repo.git`), HTTPS
+    (`https://github.com/org/repo.git`), and the custom SSH form Databricks
+    uses (`org-NNNNN@github.com:org/repo.git`). Returns None on no match.
+    """
+    match = _GITHUB_SLUG_RE.search(url)
+    return f"{match.group(1)}/{match.group(2)}" if match else None
 
 
 def branch_exists(repo_root: Path, branch: str) -> bool:
