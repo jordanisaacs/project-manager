@@ -7,14 +7,14 @@
 # `pm stacker guard no-rebase` whether the current branch is tracked by pm
 # stacker. If so, the command is blocked with a guidance message.
 
-if [[ -n "${_PM_GIT_GUARD_LOADED:-}" ]]; then
+if [[ -n "${__PM_GIT_GUARD_LOADED:-}" ]]; then
   return 0
 fi
-typeset -g _PM_GIT_GUARD_LOADED=1
+typeset -g __PM_GIT_GUARD_LOADED=1
 
-_pm_git_guard_parse() {
-  typeset -g _pm_git_guard_cwd="$PWD"
-  typeset -g _pm_git_guard_subcommand=""
+__pm_git_guard_parse() {
+  typeset -g __pm_git_guard_cwd="$PWD"
+  typeset -g __pm_git_guard_subcommand=""
 
   local cwd="$PWD"
   local i=1
@@ -48,7 +48,7 @@ _pm_git_guard_parse() {
       --)
         (( i += 1 ))
         if (( i <= $# )); then
-          typeset -g _pm_git_guard_subcommand="${@[i]}"
+          typeset -g __pm_git_guard_subcommand="${@[i]}"
         fi
         break
         ;;
@@ -56,16 +56,16 @@ _pm_git_guard_parse() {
         (( i += 1 ))
         ;;
       *)
-        typeset -g _pm_git_guard_subcommand="$arg"
+        typeset -g __pm_git_guard_subcommand="$arg"
         break
         ;;
     esac
   done
 
-  typeset -g _pm_git_guard_cwd="$cwd"
+  typeset -g __pm_git_guard_cwd="$cwd"
 }
 
-_pm_git_guard_should_block() {
+__pm_git_guard_should_block() {
   case "$1" in
     pull|rebase)
       return 0
@@ -76,7 +76,7 @@ _pm_git_guard_should_block() {
   esac
 }
 
-_pm_git_guard_check() {
+__pm_git_guard_check() {
   local guard_cwd="$1"
 
   command -v pm >/dev/null 2>&1 || return 0
@@ -98,9 +98,9 @@ _pm_git_guard_check() {
 }
 
 git() {
-  _pm_git_guard_parse "$@"
-  if _pm_git_guard_should_block "$_pm_git_guard_subcommand"; then
-    _pm_git_guard_check "$_pm_git_guard_cwd" || return $?
+  __pm_git_guard_parse "$@"
+  if __pm_git_guard_should_block "$__pm_git_guard_subcommand"; then
+    __pm_git_guard_check "$__pm_git_guard_cwd" || return $?
   fi
   command git "$@"
 }
