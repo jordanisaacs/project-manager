@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,13 @@ from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot
 from project_manager.project import attach as attach_mod
 from project_manager.project import branch as branch_mod
+from project_manager.project import cli as project_cli
 from project_manager.project import db
 from project_manager.project import delete as delete_mod
 from project_manager.project import detach as detach_mod
 from project_manager.project import ls as ls_mod
 from project_manager.project import new as new_mod
-from tests.helpers import git_in_slot, git_pool, head_ref
+from tests.helpers import git_in_slot, git_pool, head_ref, write_git_sentinel
 
 
 def _mk_pool(paths: Paths, repo: str, uuids: list[str]) -> None:
@@ -448,3 +450,244 @@ def test_branch_ensure_clean_raises_when_dirty(pm_env: Paths) -> None:
     git_in_slot(slots[0].path, "add", "README.md")
     with pytest.raises(ProjectError, match="uncommitted changes"):
         branch_mod.ensure_clean(slots[0].path, "foo")
+
+
+# --- cleanliness: untracked, ignored, stash, in-progress ops ---
+
+
+def test_detach_blocks_on_untracked(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    (slot / "scratch.log").write_text("noise\n")
+    uuid = _current_uuid(pm_env, "demo", "foo")
+    with pytest.raises(ProjectError, match="untracked"):
+        detach_mod.detach(pm_env, "demo", repos=None)
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+    assert _pool_owner(pm_env, "foo", uuid) == Owner(OwnerKind.PROJECT, "demo")
+
+
+def test_detach_allows_ignored_files(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    (slot / ".gitignore").write_text("*.log\n")
+    git_in_slot(slot, "add", ".gitignore")
+    git_in_slot(slot, "-c", "user.email=t@t", "-c", "user.name=t",
+                "-c", "commit.gpgsign=false", "commit", "-m", "ignore logs")
+    (slot / "build.log").write_text("ignored\n")
+    detach_mod.detach(pm_env, "demo", repos=None)
+    assert not _forward(pm_env, "demo", "foo").exists()
+
+
+def test_detach_allows_stash(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    git_in_slot(slot, "checkout", "-b", "feature-x")
+    (slot / "README.md").write_text("stashable\n")
+    git_in_slot(slot, "stash", "push", "-m", "wip")
+    detach_mod.detach(pm_env, "demo", repos=None)
+    assert not _forward(pm_env, "demo", "foo").exists()
+
+
+@pytest.mark.parametrize(
+    ("marker", "expected"),
+    [
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("MERGE_HEAD", "merge"),
+        ("REVERT_HEAD", "revert"),
+        ("BISECT_LOG", "bisect"),
+        ("rebase-merge", "rebase"),
+        ("rebase-apply", "rebase"),
+    ],
+)
+def test_detach_blocks_on_in_progress_op(
+    pm_env: Paths, marker: str, expected: str,
+) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    write_git_sentinel(slot, marker)
+    with pytest.raises(ProjectError, match=f"{expected} in progress"):
+        detach_mod.detach(pm_env, "demo", repos=None)
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+
+
+# --- delete layered on detach ---
+
+
+def test_delete_per_repo_blocks_on_dirty(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    (slot / "README.md").write_text("dirty\n")
+    git_in_slot(slot, "add", "README.md")
+    with pytest.raises(ProjectError, match="uncommitted changes"):
+        delete_mod.delete(pm_env, "demo", repos=["foo"])
+    assert _db_rows(pm_env, "demo") == [("foo", _current_uuid(pm_env, "demo", "foo"))]
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+
+
+def test_delete_whole_blocks_on_dirty(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    (slot / "README.md").write_text("dirty\n")
+    git_in_slot(slot, "add", "README.md")
+    with pytest.raises(ProjectError, match="uncommitted changes"):
+        delete_mod.delete(pm_env, "demo", repos=None)
+    assert (pm_env.projects / "demo" / ".pm.db").is_file()
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+
+
+def test_delete_whole_blocks_on_untracked(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    (slot / "scratch.log").write_text("noise\n")
+    with pytest.raises(ProjectError, match="untracked"):
+        delete_mod.delete(pm_env, "demo", repos=None)
+    assert (pm_env.projects / "demo" / ".pm.db").is_file()
+
+
+def test_delete_whole_blocks_on_in_progress_rebase(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    write_git_sentinel(slot, "rebase-merge")
+    with pytest.raises(ProjectError, match="rebase in progress"):
+        delete_mod.delete(pm_env, "demo", repos=None)
+    assert (pm_env.projects / "demo" / ".pm.db").is_file()
+
+
+# --- dry-run: plan_detach, plan_delete ---
+
+
+def test_plan_detach_clean_project(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    git_pool(pm_env, "bar", n=1)
+    new_mod.new(pm_env, "demo", ["foo", "bar"])
+    plan = detach_mod.plan_detach(pm_env, "demo", repos=None)
+    assert not plan.has_blocker
+    kinds = {a.repo: a.kind for a in plan.actions}
+    assert kinds == {"foo": "detach", "bar": "detach"}
+    assert all(a.blocker is None for a in plan.actions)
+    # unchanged:
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+    assert _forward(pm_env, "demo", "bar").is_symlink()
+
+
+def test_plan_detach_reports_blockers_without_mutating(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    git_pool(pm_env, "bar", n=1)
+    new_mod.new(pm_env, "demo", ["foo", "bar"])
+    foo_slot = _forward(pm_env, "demo", "foo").resolve()
+    (foo_slot / "scratch.log").write_text("noise\n")
+    bar_slot = _forward(pm_env, "demo", "bar").resolve()
+    write_git_sentinel(bar_slot, "CHERRY_PICK_HEAD")
+    plan = detach_mod.plan_detach(pm_env, "demo", repos=None)
+    assert plan.has_blocker
+    by_repo = {a.repo: a for a in plan.actions}
+    assert by_repo["foo"].blocker is not None
+    assert "untracked" in by_repo["foo"].blocker
+    assert by_repo["bar"].blocker is not None
+    assert "cherry-pick" in by_repo["bar"].blocker
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+    assert _forward(pm_env, "demo", "bar").is_symlink()
+
+
+def test_plan_detach_noop_for_already_detached(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    detach_mod.detach(pm_env, "demo", repos=None)
+    plan = detach_mod.plan_detach(pm_env, "demo", repos=None)
+    assert not plan.has_blocker
+    assert plan.actions[0].kind == "noop"
+    assert plan.actions[0].blocker is None
+
+
+def test_plan_delete_whole_reports_extras(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    (pm_env.projects / "demo" / "notes.txt").write_text("hi")
+    plan = delete_mod.plan_delete(pm_env, "demo", repos=None)
+    assert plan.has_blocker
+    assert any(p.name == "notes.txt" for p in plan.extras)
+    # plan still describes the full intent:
+    assert plan.remove_readme
+    assert plan.drop_db
+    assert plan.rmdir
+    assert (pm_env.projects / "demo" / "notes.txt").exists()
+
+
+def test_plan_delete_whole_clean(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    plan = delete_mod.plan_delete(pm_env, "demo", repos=None)
+    assert not plan.has_blocker
+    assert plan.whole
+    assert plan.drop_rows == ["foo"]
+    assert plan.remove_readme
+    assert plan.drop_db
+    assert plan.rmdir
+    # nothing mutated
+    assert (pm_env.projects / "demo" / ".pm.db").is_file()
+
+
+def test_plan_delete_per_repo(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    git_pool(pm_env, "bar", n=1)
+    new_mod.new(pm_env, "demo", ["foo", "bar"])
+    plan = delete_mod.plan_delete(pm_env, "demo", repos=["foo"])
+    assert not plan.whole
+    assert plan.drop_rows == ["foo"]
+    assert not plan.remove_readme
+    assert not plan.drop_db
+    assert not plan.rmdir
+    # bar untouched in plan:
+    assert [a.repo for a in plan.detach_plan.actions] == ["foo"]
+
+
+# --- dry-run CLI exit codes ---
+
+
+def test_cli_detach_dry_run_exits_zero_when_clean(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    args = argparse.Namespace(
+        project="demo", all=True, repos=None, dry_run=True,
+    )
+    rc = project_cli._cmd_detach(args)
+    assert rc == 0
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+
+
+def test_cli_detach_dry_run_exits_one_on_blocker(
+    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    slot = _forward(pm_env, "demo", "foo").resolve()
+    (slot / "scratch.log").write_text("noise\n")
+    args = argparse.Namespace(
+        project="demo", all=True, repos=None, dry_run=True,
+    )
+    rc = project_cli._cmd_detach(args)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "BLOCKED" in err
+    assert _forward(pm_env, "demo", "foo").is_symlink()
+
+
+def test_cli_delete_dry_run_exits_one_on_extras(pm_env: Paths) -> None:
+    git_pool(pm_env, "foo", n=1)
+    new_mod.new(pm_env, "demo", ["foo"])
+    (pm_env.projects / "demo" / "notes.txt").write_text("hi")
+    args = argparse.Namespace(
+        project="demo", repos=None, dry_run=True,
+    )
+    rc = project_cli._cmd_delete(args)
+    assert rc == 1
+    assert (pm_env.projects / "demo" / "notes.txt").exists()
+    assert (pm_env.projects / "demo" / ".pm.db").is_file()

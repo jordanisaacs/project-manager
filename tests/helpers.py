@@ -66,3 +66,27 @@ def head_ref(slot_path: Path) -> str | None:
         text=True,
     ).stdout.strip()
     return out or None
+
+
+def write_git_sentinel(slot_path: Path, name: str) -> Path:
+    """Synthesize an in-progress op sentinel inside the slot's git-dir.
+
+    Uses `git rev-parse --git-path <name>` so main-repo and worktree layouts
+    both resolve correctly. Writes a file (or creates a dir for rebase-*).
+    Returns the resolved path.
+    """
+    resolved = subprocess.run(
+        ["git", "-C", str(slot_path), "rev-parse", "--git-path", name],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    p = Path(resolved)
+    if not p.is_absolute():
+        p = slot_path / p
+    if name in ("rebase-merge", "rebase-apply"):
+        p.mkdir(parents=True, exist_ok=True)
+    else:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("0" * 40 + "\n")
+    return p

@@ -213,6 +213,37 @@ def cherry_pick_in_progress(path: Path) -> bool:
     return Path(cherry_pick_head).exists()
 
 
+def has_untracked_files(path: Path) -> bool:
+    """True if there are untracked, non-ignored files in the worktree."""
+    out = git(path, "ls-files", "--others", "--exclude-standard", "-z").stdout
+    return bool(out)
+
+
+# Ordered so the most disruptive / most common states are reported first.
+_IN_PROGRESS_MARKERS: tuple[tuple[str, str], ...] = (
+    ("rebase", "rebase-merge"),
+    ("rebase", "rebase-apply"),
+    ("cherry-pick", "CHERRY_PICK_HEAD"),
+    ("merge", "MERGE_HEAD"),
+    ("revert", "REVERT_HEAD"),
+    ("bisect", "BISECT_LOG"),
+)
+
+
+def in_progress_operation(path: Path) -> str | None:
+    """Return the name of an in-progress git operation, or None.
+
+    Covers rebase (interactive + am-style), cherry-pick, merge with unresolved
+    conflict, revert, and bisect. Uses `rev-parse --git-path` so the right
+    directory is consulted in both main repos and worktrees.
+    """
+    for name, marker in _IN_PROGRESS_MARKERS:
+        resolved = git(path, "rev-parse", "--git-path", marker).stdout.strip()
+        if Path(resolved).exists():
+            return name
+    return None
+
+
 def reset_hard(path: Path, target: str) -> None:
     git(path, "reset", "--hard", target)
 

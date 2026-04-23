@@ -31,11 +31,27 @@ class RestoreOutcome:
 
 
 def ensure_clean(slot_path: Path, repo: str) -> None:
+    blocker = cleanliness_blocker(slot_path)
+    if blocker is not None:
+        raise ProjectError(f"repo '{repo}' at {slot_path} {blocker}")
+
+
+def cleanliness_blocker(slot_path: Path) -> str | None:
+    """Return a human-readable reason the slot isn't detach-clean, or None.
+
+    Shared between `ensure_clean` (raises) and planners (collect + report).
+    Order: in-progress ops first, then tracked changes, then untracked files.
+    """
+    op = git.in_progress_operation(slot_path)
+    if op is not None:
+        return f"has {op} in progress; abort or complete it before detaching"
     if git.has_tracked_changes(slot_path):
-        raise ProjectError(
-            f"repo '{repo}' at {slot_path} has uncommitted changes; "
-            f"commit or discard them before detaching"
+        return "has uncommitted changes; commit or discard them before detaching"
+    if git.has_untracked_files(slot_path):
+        return (
+            "has untracked files; commit, remove, or gitignore them before detaching"
         )
+    return None
 
 
 def read_current_branch(slot_path: Path) -> str | None:

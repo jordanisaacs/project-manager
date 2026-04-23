@@ -4,6 +4,7 @@ import sys
 from project_manager import check as check_mod
 from project_manager import config
 from project_manager.errors import ProjectError
+from project_manager.paths import Paths
 from project_manager.project import attach as attach_mod
 from project_manager.project import current
 from project_manager.project import delete as delete_mod
@@ -55,9 +56,14 @@ def _cmd_attach(args: argparse.Namespace) -> int:
 
 def _cmd_detach(args: argparse.Namespace) -> int:
     paths = config.load()
+    selected = _selected_repos(args)
     try:
         project = current.resolve_project(paths, args.project)
-        released = detach_mod.detach(paths, project, _selected_repos(args))
+        if args.dry_run:
+            plan = detach_mod.plan_detach(paths, project, selected)
+            _print_detach_plan(plan)
+            return 1 if plan.has_blocker else 0
+        released = detach_mod.detach(paths, project, selected)
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
@@ -71,11 +77,43 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     repos = _parse_repos(args.repos) if args.repos else None
     try:
         project = current.resolve_project(paths, args.project)
+        if args.dry_run:
+            plan = delete_mod.plan_delete(paths, project, repos)
+            _print_delete_plan(plan, paths)
+            return 1 if plan.has_blocker else 0
         delete_mod.delete(paths, project, repos)
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
     return 0
+
+
+def _print_detach_plan(plan: detach_mod.DetachPlan) -> None:
+    for action in plan.actions:
+        if action.blocker is not None:
+            print(
+                f"dry-run: would detach {action.repo}\tBLOCKED: {action.blocker}",
+                file=sys.stderr,
+            )
+            continue
+        if action.kind == "noop":
+            print(f"dry-run: {action.repo} already detached")
+            continue
+        print(f"dry-run: would detach {action.repo}\trelease slot {action.slot_uuid}")
+
+
+def _print_delete_plan(plan: delete_mod.DeletePlan, paths: Paths) -> None:
+    for extra in plan.extras:
+        print(f"dry-run: BLOCKED: non-pm entry {extra}", file=sys.stderr)
+    _print_detach_plan(plan.detach_plan)
+    for repo in plan.drop_rows:
+        print(f"dry-run: would drop db row {repo}")
+    if plan.remove_readme:
+        print(f"dry-run: would remove {paths.project(plan.project) / 'README.md'}")
+    if plan.drop_db:
+        print(f"dry-run: would drop {paths.project_db(plan.project)}")
+    if plan.rmdir:
+        print(f"dry-run: would rmdir {paths.project(plan.project)}")
 
 
 def _cmd_ls(_: argparse.Namespace) -> int:
@@ -132,6 +170,11 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
 
     detach = sub.add_parser("detach", help="detach: unlink forward + release .owner")
     detach.add_argument("project", nargs="?", metavar="<project>")
+    detach.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the plan without mutating state; exit 1 if any blocker",
+    )
     _add_repos_or_all(detach)
     detach.set_defaults(func=_cmd_detach)
 
@@ -141,6 +184,11 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     delete.add_argument("project", nargs="?", metavar="<project>")
     delete.add_argument(
         "--repos", default=None, help="comma-separated repos to delete (omit for whole project)",
+    )
+    delete.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the plan without mutating state; exit 1 if any blocker",
     )
     delete.set_defaults(func=_cmd_delete)
 
