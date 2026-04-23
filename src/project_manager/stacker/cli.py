@@ -10,7 +10,7 @@ from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OwnerKind, PoolDB
 
-from . import git, ops_slot, selectors
+from . import git, locate, ops_slot, selectors
 from .db import StackerDB
 from .models import OperationState, SelectorTarget
 from .service import StackerService
@@ -38,28 +38,44 @@ def _cmd_create(args: argparse.Namespace) -> int:
     try:
         base = _require_base(args.base)
         parent = selectors.resolve_parent_for_base(paths, args.repo, base)
-        target_slot = ops_slot.claim(
-            paths,
-            pooldb,
-            args.repo,
-            wait=ops_slot.WaitOptions(progress=_stderr_progress),
-        )
+        worktree_path, cleanup = _resolve_create_slot(paths, pooldb, args.repo)
         try:
             service.initialize_worktree(
                 repo_name=args.repo,
-                worktree_path=target_slot.path,
+                worktree_path=worktree_path,
                 branch=args.branch,
                 create_branch=True,
                 parent=parent,
             )
         except Exception:
-            pooldb.release(target_slot.repo, target_slot.uuid)
+            cleanup()
             raise
     except (git.GitError, slot_mod.PoolExhaustedError) as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
-    print(target_slot.path)
+    print(worktree_path)
     return 0
+
+
+def _resolve_create_slot(
+    paths: Paths, pooldb: PoolDB, repo_name: str
+) -> tuple[Path, Callable[[], None]]:
+    """Pick the worktree to create the new branch in.
+
+    Prefers the cwd slot when it's a pm slot for `repo_name` — this mirrors
+    `git stack create`, where the new branch lands on the current
+    worktree. Falls back to claiming a fresh ops slot.
+
+    Returns (worktree_path, cleanup) — cleanup releases anything we claimed
+    if the create fails; no-op when we reused an existing slot.
+    """
+    here = locate.slot_for_cwd(paths)
+    if here is not None and here.repo_name == repo_name:
+        return here.path, lambda: None
+    claimed = ops_slot.claim(
+        paths, pooldb, repo_name, wait=ops_slot.WaitOptions(progress=_stderr_progress),
+    )
+    return claimed.path, lambda: pooldb.release(claimed.repo, claimed.uuid)
 
 
 def _stderr_progress(msg: str) -> None:
