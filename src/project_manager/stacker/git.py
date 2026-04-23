@@ -64,29 +64,38 @@ def current_branch(path: Path) -> str:
 
 
 def upstream_branch(path: Path) -> str | None:
-    proc = git(
-        path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", check=False
-    )
-    if proc.returncode != 0:
-        return None
-    upstream = proc.stdout.strip()
-    return upstream or None
+    """Return `<remote>/<remote-branch-name>` for the current branch.
+
+    Reads `branch.<current>.remote` + `.merge` from git config directly —
+    same as universe gitstack's `remote_branch_for_branch()`. Trusts the
+    config written by `git push -u` / `git branch --set-upstream-to` and
+    does not require `@{upstream}` to resolve against a fetched
+    remote-tracking ref.
+    """
+    remote = upstream_remote_name(path)
+    remote_branch = upstream_branch_name(path)
+    return f"{remote}/{remote_branch}" if remote and remote_branch else None
 
 
 def upstream_branch_name(path: Path) -> str | None:
-    upstream = upstream_branch(path)
-    if not upstream or "/" not in upstream:
+    """Return the branch name on the remote side.
+
+    Derived from `branch.<current>.merge` (`refs/heads/<name>`). Returns
+    None if the config key is unset.
+    """
+    branch = current_branch(path)
+    if not branch:
         return None
-    return upstream.split("/", 1)[1]
+    proc = git(path, "config", "--get", f"branch.{branch}.merge", check=False)
+    if proc.returncode != 0:
+        return None
+    merge = proc.stdout.strip()
+    prefix = "refs/heads/"
+    return merge[len(prefix):] if merge.startswith(prefix) else None
 
 
 def upstream_remote_name(path: Path) -> str | None:
-    """Return the remote name the current branch is pushed to (e.g. "origin").
-
-    Reads `branch.<current>.remote` from git config rather than resolving
-    `@{upstream}`, so this works even before `git fetch` has materialized a
-    remote-tracking ref — useful immediately after a push.
-    """
+    """Return the remote name the current branch pushes to (e.g. "origin")."""
     branch = current_branch(path)
     if not branch:
         return None

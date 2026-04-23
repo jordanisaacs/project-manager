@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,7 +87,7 @@ def list_open_prs(
 
 def create_pr(request: CreatePRRequest) -> str:
     if request.head_repo and request.head_repo != request.repo:
-        return _create_pr_graphql(request)
+        return _create_pr_rest(request)
     cmd = [
         "gh", "pr", "create",
         "--repo", request.repo,
@@ -100,64 +101,129 @@ def create_pr(request: CreatePRRequest) -> str:
     return run(cmd).stdout.strip()
 
 
-def _create_pr_graphql(request: CreatePRRequest) -> str:
-    assert request.head_repo is not None
-    base_id = _repo_id(request.repo)
-    head_id = _repo_id(request.head_repo)
-    mutation = (
-        "mutation($baseId:ID!,$headId:ID!,$base:String!,$head:String!,"
-        "$title:String!,$body:String,$draft:Boolean){"
-        "createPullRequest(input:{"
-        "repositoryId:$baseId,headRepositoryId:$headId,"
-        "baseRefName:$base,headRefName:$head,"
-        "title:$title,body:$body,draft:$draft"
-        "}){pullRequest{url}}}"
-    )
-    data = _graphql(
-        mutation,
-        baseId=base_id,
-        headId=head_id,
-        base=request.base,
-        head=request.head,
-        title=request.title,
-        body=request.body_file,   # read from file via `-f body=@<path>`
-        draft=request.draft,
-    )
-    return data["createPullRequest"]["pullRequest"]["url"]
+def _create_pr_rest(request: CreatePRRequest) -> str:
+    """Create a cross-fork same-owner PR via the REST API.
 
-
-def _repo_id(slug: str) -> str:
-    owner, name = slug.split("/", 1)
-    data = _graphql(
-        "query($o:String!,$n:String!){repository(owner:$o,name:$n){id}}",
-        o=owner,
-        n=name,
-    )
-    return data["repository"]["id"]
-
-
-def _graphql(query: str, **variables: object) -> dict:
-    """Invoke `gh api graphql` and return the `data` payload.
-
-    Each kwarg becomes a GraphQL variable. Bools are passed via `-F` so gh
-    types them correctly; Path values use `-f <name>=@<path>` so gh reads
-    the file contents (needed for multi-line PR bodies); everything else is
-    a string via `-f`.
+    Matches how universe's `ci/gitstack` does it (octocrab: `pulls.create(...)
+    .head_repo(repo)`): the REST field `head_repo` is what `gh pr create`
+    never exposes. Pass it and GitHub resolves the head branch on that repo.
     """
-    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
-    for key, value in variables.items():
-        if isinstance(value, bool):
-            cmd.extend(["-F", f"{key}={'true' if value else 'false'}"])
-        elif isinstance(value, Path):
-            cmd.extend(["-f", f"{key}=@{value}"])
-        else:
-            cmd.extend(["-f", f"{key}={value}"])
+    assert request.head_repo is not None
+    cmd = [
+        "gh", "api", "--method", "POST",
+        f"/repos/{request.repo}/pulls",
+        "-f", f"title={request.title}",
+        "-f", f"body={request.body_file.read_text()}",
+        "-f", f"head={request.head}",
+        "-f", f"head_repo={request.head_repo}",
+        "-f", f"base={request.base}",
+        "-F", f"draft={'true' if request.draft else 'false'}",
+    ]
     proc = run(cmd)
+    payload = json.loads(proc.stdout or "{}")
+    url = payload.get("html_url")
+    if not url:
+        raise CommandError(f"createPullRequest returned no url: {payload!r}")
+    return url
+
+
+_PR_URL_RE = re.compile(
+    r"^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$"
+)
+
+
+def parse_pr_url(url: str) -> tuple[str, str, int] | None:
+    """Extract (owner, repo, number) from a GitHub PR URL, or None."""
+    match = _PR_URL_RE.match(url)
+    if match is None:
+        return None
+    return match.group(1), match.group(2), int(match.group(3))
+
+
+def search_prs(query: str) -> list[PullRequest]:
+    """Search PRs via the GitHub GraphQL `search` endpoint.
+
+    Same path universe gitstack uses (`octocrab_client.rs:171-225`):
+    `gh pr list --search` is REST-backed and misses cross-fork same-owner
+    PRs; GraphQL search does not. Query format mirrors universe's:
+    `repo:{owner}/{repo} head:{branch} is:pr is:open`.
+    """
+    graphql_query = (
+        "query($q:String!){search(query:$q,type:ISSUE,first:25){"
+        "nodes{... on PullRequest{"
+        "number url title body state isDraft "
+        "headRefName baseRefName"
+        "}}}}"
+    )
+    proc = run(
+        ["gh", "api", "graphql", "-f", f"query={graphql_query}", "-f", f"q={query}"],
+    )
     payload = json.loads(proc.stdout or "{}")
     if payload.get("errors"):
         msgs = "; ".join(e.get("message", str(e)) for e in payload["errors"])
         raise CommandError(f"GraphQL error: {msgs}")
-    return payload["data"]
+    nodes = payload.get("data", {}).get("search", {}).get("nodes", []) or []
+    return [_graphql_pr(node) for node in nodes if node]
+
+
+def _graphql_pr(node: dict) -> PullRequest:
+    return PullRequest(
+        number=int(node["number"]),
+        url=node.get("url", ""),
+        title=node.get("title", ""),
+        body=node.get("body") or "",
+        head_ref_name=node.get("headRefName", ""),
+        base_ref_name=node.get("baseRefName", ""),
+        state=str(node.get("state", "")).upper(),
+        is_draft=bool(node.get("isDraft", False)),
+    )
+
+
+def view_pr(url: str) -> PullRequest | None:
+    """Fetch the current state of a PR by URL. None if the PR can't be found.
+
+    Stacker caches PR URLs on `tracked_branches` (mirroring universe
+    gitstack's `StackItem.pr`) and calls this on subsequent runs instead
+    of re-running a search. Uses REST `GET /repos/{o}/{r}/pulls/{n}` so
+    the fetch is a single round-trip by known ID — no dependency on
+    GitHub's search index propagation.
+    """
+    parsed = parse_pr_url(url)
+    if parsed is None:
+        return None
+    owner, repo, number = parsed
+    proc = run(
+        ["gh", "api", f"/repos/{owner}/{repo}/pulls/{number}"], check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    payload = json.loads(proc.stdout or "{}")
+    if "number" not in payload:
+        return None
+    return _rest_pr(payload)
+
+
+def _rest_pr(item: dict) -> PullRequest:
+    """Shape a REST `pull_request` payload into our PullRequest dataclass.
+
+    Normalizes the state field so OPEN/MERGED/CLOSED behaves like the
+    `gh pr list --json state` output regardless of which endpoint we
+    used.
+    """
+    head = item.get("head") or {}
+    base = item.get("base") or {}
+    state_raw = item.get("state", "open")
+    state = "MERGED" if item.get("merged") else state_raw.upper()
+    return PullRequest(
+        number=int(item["number"]),
+        url=item.get("html_url", ""),
+        title=item.get("title", ""),
+        body=item.get("body") or "",
+        head_ref_name=head.get("ref", ""),
+        base_ref_name=base.get("ref", ""),
+        state=state,
+        is_draft=bool(item.get("draft", False)),
+    )
 
 
 def edit_pr(request: EditPRRequest) -> None:

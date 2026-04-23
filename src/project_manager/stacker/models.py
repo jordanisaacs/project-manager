@@ -35,6 +35,11 @@ class TrackedBranch:
     managed_base_commit: str
     last_synced_parent_commit: str | None
     last_clean_head: str | None
+    # URL of the PR we opened for this branch, cached so we don't re-query
+    # GitHub on every run. Kept across state transitions — if the PR gets
+    # closed/merged externally, the URL stays and the stack block surfaces
+    # it with a "[merged]" label (matching universe gitstack's UX).
+    pr_url: str | None = None
 
 
 @dataclass(frozen=True)

@@ -175,6 +175,7 @@ class StackerService:
                     managed_base_commit=child.managed_base_commit,
                     last_synced_parent_commit=child.last_synced_parent_commit,
                     last_clean_head=child.last_clean_head,
+                    pr_url=child.pr_url,
                 )
             )
         self.db.delete_branch(target.repo_name, target.branch)
@@ -406,6 +407,7 @@ class StackerService:
                 managed_base_commit=actual_base,
                 last_synced_parent_commit=actual_base,
                 last_clean_head=current_head,
+                pr_url=tracked.pr_url,
             )
         )
         return (
@@ -497,8 +499,14 @@ class StackerService:
             finally:
                 if item.branch != tracked.branch:
                     self._release_if_owned(acquired)
-        assert latest_pr is not None  # chain always contains `tracked` itself
-        self._refresh_component_pr_bodies(tracked, config, current_repo, latest_pr, logs)
+        assert latest_pr is not None  # chain always contains `tracked`
+        # refresh uses _pr_map_for_component, which reads the cached URL we
+        # just wrote in _create_or_update_current_pr — no races, no extra
+        # searches.
+        refreshed = self._require_tracked(target)
+        self._refresh_component_pr_bodies(
+            refreshed, config, current_repo, latest_pr, logs,
+        )
         return self._finish(logs, f"PR ready: {latest_pr.url}")
 
     def _ancestor_chain(self, tracked: TrackedBranch) -> list[TrackedBranch]:
@@ -727,17 +735,22 @@ class StackerService:
         existing = self._find_open_pr(tracked, config, current_repo)
         head = self._head_ref_for_branch(config, current_repo, remote_branch)
         label = selectors.selector_for(tracked.repo_name, tracked.branch)
-        if existing:
-            self._record(logs, f"Updating PR #{existing.number} for {label}")
-            self.pr_backend.edit_pr(
-                gh.EditPRRequest(
-                    repo=target_repo, number=existing.number, title=title, base=base
+        with self._body_file(body) as body_file:
+            if existing:
+                self._record(logs, f"Updating PR #{existing.number} for {label}")
+                self.pr_backend.edit_pr(
+                    gh.EditPRRequest(
+                        repo=target_repo,
+                        number=existing.number,
+                        title=title,
+                        base=base,
+                        body_file=body_file,
+                    )
                 )
-            )
-        else:
-            self._record(logs, f"Creating PR for {label}")
-            with self._body_file(body) as body_file:
-                self.pr_backend.create_pr(
+                pr_url = existing.url
+            else:
+                self._record(logs, f"Creating PR for {label}")
+                pr_url = self.pr_backend.create_pr(
                     gh.CreatePRRequest(
                         repo=target_repo,
                         base=base,
@@ -748,9 +761,12 @@ class StackerService:
                         head_repo=head_repo,
                     )
                 )
-        refreshed = self._find_open_pr(tracked, config, current_repo)
+        # Cache the URL on the branch so future runs skip search entirely
+        # (universe gitstack's StackItem.pr model).
+        self._record_pr_url(tracked, pr_url)
+        refreshed = self.pr_backend.view_pr(pr_url)
         if not refreshed:
-            raise git.GitError(f"Could not find the open PR for {label} after create/update.")
+            raise git.GitError(f"Could not fetch PR {pr_url} after create/update.")
         return refreshed
 
     def _refresh_component_pr_bodies(
@@ -762,7 +778,7 @@ class StackerService:
         logs: list[str],
     ) -> None:
         component = self._component_nodes(tracked)
-        pr_map = self._open_pr_map(component, config, current_repo)
+        pr_map = self._pr_map_for_component(component, config, current_repo)
         if current_pr:
             pr_map[tracked.branch] = current_pr
         if not pr_map:
@@ -798,7 +814,7 @@ class StackerService:
         logs: list[str],
     ) -> None:
         component = self._component_nodes(tracked)
-        pr_map = self._open_pr_map(component, config, current_repo)
+        pr_map = self._pr_map_for_component(component, config, current_repo)
         if not pr_map:
             return
         for node in component:
@@ -835,17 +851,23 @@ class StackerService:
             *self._toposorted_descendants(tracked.repo_name, tracked.branch),
         ]
 
-    def _open_pr_map(
+    def _pr_map_for_component(
         self,
         component: list[TrackedBranch],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> dict[str, gh.PullRequest]:
-        return {
-            node.branch: pr
-            for node in component
-            if (pr := self._find_open_pr(node, config, current_repo)) is not None
-        }
+        """Find the PR (any state) for every branch in the component.
+
+        Used by stack-block rendering, which wants to surface merged PRs
+        with a "[merged]" label rather than dropping them silently.
+        """
+        out: dict[str, gh.PullRequest] = {}
+        for node in component:
+            pr = self._find_pr(node, config, current_repo)
+            if pr is not None:
+                out[node.branch] = pr
+        return out
 
     def _find_open_pr(
         self,
@@ -853,6 +875,33 @@ class StackerService:
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> gh.PullRequest | None:
+        """Return the OPEN PR for `tracked`, or None.
+
+        Callers use this to decide between create-vs-update: a closed
+        or merged cached PR returns None here so a fresh PR is opened.
+        """
+        pr = self._find_pr(tracked, config, current_repo)
+        return pr if pr is not None and pr.state == "OPEN" else None
+
+    def _find_pr(
+        self,
+        tracked: TrackedBranch,
+        config: RepoPRConfig,
+        current_repo: gh.RepoInfo,  # noqa: ARG002 (interface parity with _find_open_pr)
+    ) -> gh.PullRequest | None:
+        """Return the PR for `tracked` in any state (open/closed/merged).
+
+        Cache-first: if `tracked.pr_url` is set we trust it and hit the
+        REST single-PR endpoint — no dependency on GitHub's search index.
+        Matches universe gitstack's `StackItem.pr` caching model. Falls
+        back to a GraphQL-style search (`repo:X head:Y is:pr is:open`)
+        only when the cache is empty; writes the URL back on a hit so
+        the next run is cache-only.
+        """
+        if tracked.pr_url:
+            cached = self.pr_backend.view_pr(tracked.pr_url)
+            if cached is not None:
+                return cached
         target_repo = self._target_repo_slug(config)
         path = locate.locate_worktree(self.paths, tracked.repo_name, tracked.branch)
         if path is None:
@@ -860,12 +909,33 @@ class StackerService:
         remote_branch = git.upstream_branch_name(path)
         if not remote_branch:
             return None
-        if target_repo != current_repo.name_with_owner:
-            search = f"is:open head:{current_repo.owner}:{remote_branch}"
-            prs = self.pr_backend.list_open_prs(target_repo, search=search)
-        else:
-            prs = self.pr_backend.list_open_prs(target_repo, head=remote_branch)
-        return prs[0] if prs else None
+        # GraphQL search (not `gh pr list`): REST list misses cross-fork
+        # same-owner PRs and was the source of the universe regression
+        # where PR A was invisible to PR B's body rendering.
+        query = f"repo:{target_repo} head:{remote_branch} is:pr is:open"
+        prs = self.pr_backend.search_prs(query)
+        if not prs:
+            return None
+        found = prs[0]
+        # First-time discovery (e.g. PR opened by another tool): persist
+        # the URL so subsequent runs skip the search entirely.
+        if not tracked.pr_url:
+            self._record_pr_url(tracked, found.url)
+        return found
+
+    def _record_pr_url(self, tracked: TrackedBranch, url: str) -> None:
+        self.db.upsert_branch(
+            TrackedBranch(
+                repo_name=tracked.repo_name,
+                branch=tracked.branch,
+                parent_repo_name=tracked.parent_repo_name,
+                parent_branch=tracked.parent_branch,
+                managed_base_commit=tracked.managed_base_commit,
+                last_synced_parent_commit=tracked.last_synced_parent_commit,
+                last_clean_head=tracked.last_clean_head,
+                pr_url=url,
+            )
+        )
 
     def _pr_base_for_current_branch(
         self,
@@ -989,6 +1059,13 @@ class StackerService:
         pr = ctx.pr_map.get(node.branch)
         if pr:
             parts.append(f"[PR #{pr.number}]({pr.url})")
+            # Surface merged/closed PRs with a label, matching universe
+            # gitstack's StackItem.merged rendering. Keeps history visible
+            # in the stack block instead of silently dropping landed PRs.
+            if pr.state == "MERGED":
+                parts.append("[merged]")
+            elif pr.state == "CLOSED":
+                parts.append("[closed]")
         if ctx.config.mode == "repo-pr":
             compare_url = self._compare_url(node, ctx)
             if compare_url:
@@ -1269,6 +1346,7 @@ class StackerService:
                     op.target_parent_head or tracked.last_synced_parent_commit
                 ),
                 last_clean_head=git.rev_parse(slot_path, "HEAD"),
+                pr_url=tracked.pr_url,
             )
         )
         if op.op_type == "local_sync":

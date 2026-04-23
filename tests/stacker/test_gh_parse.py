@@ -64,7 +64,7 @@ def test_head_repo_derives_slug_from_branch_upstream(
     )
     assert tracked is not None
 
-    # Stamp a fake "fork" remote + make the branch track it.
+    # Config-only setup — stacker reads branch.X.remote/merge directly.
     stacker_git.git(
         slot.path, "remote", "add", "forkremote",
         "git@github.com:acme/widgets-dev.git",

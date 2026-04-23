@@ -29,6 +29,10 @@ class PRBackend(Protocol):
 
     def edit_pr(self, request: gh.EditPRRequest) -> None: ...
 
+    def view_pr(self, url: str) -> gh.PullRequest | None: ...
+
+    def search_prs(self, query: str) -> list[gh.PullRequest]: ...
+
 
 class GhCliBackend:
     """Production backend — delegates to `stacker.gh` module-level functions."""
@@ -52,3 +56,9 @@ class GhCliBackend:
 
     def edit_pr(self, request: gh.EditPRRequest) -> None:
         gh.edit_pr(request)
+
+    def view_pr(self, url: str) -> gh.PullRequest | None:
+        return gh.view_pr(url)
+
+    def search_prs(self, query: str) -> list[gh.PullRequest]:
+        return gh.search_prs(query)

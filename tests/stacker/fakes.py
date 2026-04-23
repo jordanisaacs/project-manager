@@ -84,6 +84,29 @@ class RecordingPRBackend:
         body = _read_body(request.body_file) if request.body_file else None
         self.edited.append((request, body))
 
+    def view_pr(self, url: str) -> gh.PullRequest | None:
+        for pr in self.prs_by_head.values():
+            if pr.url == url:
+                return pr
+        return None
+
+    def search_prs(self, query: str) -> list[gh.PullRequest]:
+        """Minimal `search` that honors `repo:` / `head:` / `is:open` tokens."""
+        tokens = dict(_parse_search(query))
+        repo = tokens.get("repo")
+        head = tokens.get("head")
+        want_open = tokens.get("is") == "open"
+        out: list[gh.PullRequest] = []
+        for (pr_repo, pr_head), pr in self.prs_by_head.items():
+            if repo and pr_repo != repo:
+                continue
+            if head and pr_head != head:
+                continue
+            if want_open and pr.state != "OPEN":
+                continue
+            out.append(pr)
+        return out
+
     # Convenience helpers for assertions --------------------------------
 
     def body_sent_for(self, branch: str) -> str | None:
@@ -101,6 +124,17 @@ class RecordingPRBackend:
 
 def _read_body(path: Path) -> str:
     return Path(path).read_text()
+
+
+def _parse_search(query: str) -> list[tuple[str, str]]:
+    """Split `key:value key:value ...` into (key, value) pairs."""
+    out: list[tuple[str, str]] = []
+    for token in query.split():
+        if ":" not in token:
+            continue
+        key, value = token.split(":", 1)
+        out.append((key, value))
+    return out
 
 
 def _find_pr_by_number(

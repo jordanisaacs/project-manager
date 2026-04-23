@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tracked_branches (
     managed_base_commit       TEXT NOT NULL,
     last_synced_parent_commit TEXT,
     last_clean_head           TEXT,
+    pr_url                    TEXT,
     updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (repo_name, branch)
 );
@@ -57,6 +58,7 @@ class StackerDB:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         with sqlite_db.transaction(self.db_path, schema=_SCHEMA, row_factory=sqlite3.Row) as conn:
+            _ensure_tracked_branches_pr_url(conn)
             yield conn
 
     def upsert_branch(self, tracked: TrackedBranch) -> None:
@@ -66,14 +68,16 @@ class StackerDB:
                 INSERT INTO tracked_branches (
                     repo_name, branch,
                     parent_repo_name, parent_branch,
-                    managed_base_commit, last_synced_parent_commit, last_clean_head, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    managed_base_commit, last_synced_parent_commit, last_clean_head,
+                    pr_url, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(repo_name, branch) DO UPDATE SET
                     parent_repo_name = excluded.parent_repo_name,
                     parent_branch = excluded.parent_branch,
                     managed_base_commit = excluded.managed_base_commit,
                     last_synced_parent_commit = excluded.last_synced_parent_commit,
                     last_clean_head = excluded.last_clean_head,
+                    pr_url = excluded.pr_url,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -84,6 +88,7 @@ class StackerDB:
                     tracked.managed_base_commit,
                     tracked.last_synced_parent_commit,
                     tracked.last_clean_head,
+                    tracked.pr_url,
                 ),
             )
 
@@ -231,7 +236,20 @@ def _row_to_branch(row: sqlite3.Row) -> TrackedBranch:
         managed_base_commit=row["managed_base_commit"],
         last_synced_parent_commit=row["last_synced_parent_commit"],
         last_clean_head=row["last_clean_head"],
+        pr_url=row["pr_url"] if "pr_url" in row.keys() else None,  # noqa: SIM118 (sqlite3.Row has no `in`)
     )
+
+
+def _ensure_tracked_branches_pr_url(conn: sqlite3.Connection) -> None:
+    """Add the pr_url column to old DBs that predate it.
+
+    `CREATE TABLE IF NOT EXISTS` skips when the table already exists, even
+    if the schema diverges — so for a pre-existing DB we need an explicit
+    ALTER. Gated on `PRAGMA table_info` so it's a no-op after the first run.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(tracked_branches)")}
+    if "pr_url" not in cols:
+        conn.execute("ALTER TABLE tracked_branches ADD COLUMN pr_url TEXT")
 
 
 def _row_to_operation(row: sqlite3.Row) -> OperationState:
