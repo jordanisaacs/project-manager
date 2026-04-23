@@ -18,7 +18,7 @@ from .service import StackerService
 
 def _service(paths: Paths) -> StackerService:
     db = StackerDB(paths.stacker_db())
-    return StackerService(db, paths)
+    return StackerService(db, paths, progress=_stderr_progress)
 
 
 def _target(args: argparse.Namespace, paths: Paths) -> SelectorTarget:

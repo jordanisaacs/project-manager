@@ -237,7 +237,13 @@ def cherry_pick_abort(path: Path) -> subprocess.CompletedProcess[str]:
 
 
 def pp_force(path: Path) -> subprocess.CompletedProcess[str]:
-    return run(["git", "-C", str(path), "pp", "--force"], check=False)
+    """Run `git pp --force` with live output.
+
+    Streamed so the user sees push progress, credential prompts, and
+    network errors in real time instead of waiting silently for the whole
+    push to finish.
+    """
+    return run(["git", "-C", str(path), "pp", "--force"], check=False, stream=True)
 
 
 def is_ancestor(repo_root: Path, older: str, newer: str) -> bool:

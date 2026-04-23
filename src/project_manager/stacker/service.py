@@ -663,13 +663,9 @@ class StackerService:
             self._record(logs, f"Stopping at {label}: no upstream remote is configured.")
             return False
         self._record(logs, f"Running git pp --force in {label}")
+        # pp_force streams its output directly to the parent's stdout/stderr,
+        # so the user sees push progress live instead of waiting silently.
         proc = git.pp_force(path)
-        if proc.stdout.strip():
-            for line in proc.stdout.strip().splitlines():
-                self._record(logs, line)
-        if proc.stderr.strip():
-            for line in proc.stderr.strip().splitlines():
-                self._record(logs, line)
         if proc.returncode != 0:
             raise git.GitError(f"git pp --force failed in {label}.")
         upstream_after = git.upstream_branch(path)
