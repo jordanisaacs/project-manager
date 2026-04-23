@@ -8,7 +8,7 @@ from pathlib import Path
 
 from project_manager import sqlite_db
 
-from .models import OperationState, RepoPRConfig, TrackedBranch
+from .models import OperationState, TrackedBranch
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracked_branches (
@@ -40,12 +40,12 @@ CREATE TABLE IF NOT EXISTS operations (
     updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS repo_pr_config (
-    repo_name    TEXT PRIMARY KEY,
-    mode         TEXT NOT NULL,
-    trunk_branch TEXT NOT NULL,
-    main_repo    TEXT,
-    updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS config (
+    repo_name  TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo_name, key)
 );
 """
 
@@ -118,34 +118,42 @@ class StackerDB:
             ).fetchall()
         return [_row_to_branch(row) for row in rows]
 
-    def upsert_repo_pr_config(self, config: RepoPRConfig) -> None:
+    def get_config(self, repo_name: str, key: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM config WHERE repo_name = ? AND key = ?",
+                (repo_name, key),
+            ).fetchone()
+        return row["value"] if row else None
+
+    def set_config(self, repo_name: str, key: str, value: str) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO repo_pr_config (
-                    repo_name, mode, trunk_branch, main_repo, updated_at
-                ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(repo_name) DO UPDATE SET
-                    mode = excluded.mode,
-                    trunk_branch = excluded.trunk_branch,
-                    main_repo = excluded.main_repo,
+                INSERT INTO config (repo_name, key, value, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(repo_name, key) DO UPDATE SET
+                    value = excluded.value,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (
-                    config.repo_name,
-                    config.mode,
-                    config.trunk_branch,
-                    config.main_repo,
-                ),
+                (repo_name, key, value),
             )
 
-    def get_repo_pr_config(self, repo_name: str) -> RepoPRConfig | None:
+    def unset_config(self, repo_name: str, key: str) -> bool:
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM repo_pr_config WHERE repo_name = ?",
+            cursor = conn.execute(
+                "DELETE FROM config WHERE repo_name = ? AND key = ?",
+                (repo_name, key),
+            )
+            return cursor.rowcount > 0
+
+    def list_config(self, repo_name: str) -> list[tuple[str, str]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT key, value FROM config WHERE repo_name = ? ORDER BY key",
                 (repo_name,),
-            ).fetchone()
-        return _row_to_repo_pr_config(row) if row else None
+            ).fetchall()
+        return [(row["key"], row["value"]) for row in rows]
 
     def get_operation(self, repo_name: str) -> OperationState | None:
         with self.connect() as conn:
@@ -244,10 +252,3 @@ def _row_to_operation(row: sqlite3.Row) -> OperationState:
     )
 
 
-def _row_to_repo_pr_config(row: sqlite3.Row) -> RepoPRConfig:
-    return RepoPRConfig(
-        repo_name=row["repo_name"],
-        mode=row["mode"],
-        trunk_branch=row["trunk_branch"],
-        main_repo=row["main_repo"],
-    )

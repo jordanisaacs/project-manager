@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+PRMode = Literal["pr-pr", "repo-pr"]
 
 
 @dataclass(frozen=True)
@@ -37,9 +40,9 @@ class TrackedBranch:
 @dataclass(frozen=True)
 class RepoPRConfig:
     repo_name: str
-    mode: str
+    mode: PRMode
     trunk_branch: str
-    main_repo: str | None
+    target_repo: str
 
 
 @dataclass

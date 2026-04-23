@@ -104,25 +104,56 @@ def _cmd_abort(args: argparse.Namespace) -> int:
     return _run(lambda svc: svc.abort_operation(args.repo))
 
 
-def _cmd_repo_set_pr_mode(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
+def _cmd_config(args: argparse.Namespace) -> int:
+    service = _service(config.load())
     try:
-        row = service.set_pr_mode(
-            repo_name=args.repo,
-            mode=args.mode,
-            trunk_branch=args.trunk,
-            main_repo=args.main_repo,
-        )
+        return _dispatch_config(service, args)
     except git.GitError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
-    print(f"{row.repo_name}\t{row.mode}\t{row.trunk_branch}")
+
+
+def _dispatch_config(service: StackerService, args: argparse.Namespace) -> int:
+    if args.list:
+        return _config_list(service, args)
+    if args.unset:
+        return _config_unset(service, args)
+    if args.key is None:
+        print("pm: config requires a key (or --list / --unset).", file=sys.stderr)
+        return 2
+    if args.value is None:
+        return _config_get(service, args)
+    return _config_set(service, args)
+
+
+def _config_list(service: StackerService, args: argparse.Namespace) -> int:
+    if args.key is not None or args.value is not None:
+        print("pm: --list takes no key/value arguments.", file=sys.stderr)
+        return 2
+    for key, value in service.list_config(args.repo):
+        print(f"{key}={value}")
     return 0
 
 
-def _cmd_repo_show_pr_mode(args: argparse.Namespace) -> int:
-    return _run(lambda svc: svc.show_pr_mode(args.repo))
+def _config_unset(service: StackerService, args: argparse.Namespace) -> int:
+    if args.key is None or args.value is not None:
+        print("pm: --unset requires exactly one key.", file=sys.stderr)
+        return 2
+    return 0 if service.unset_config(args.repo, args.key) else 1
+
+
+def _config_get(service: StackerService, args: argparse.Namespace) -> int:
+    current = service.get_config(args.repo, args.key)
+    if current is None:
+        return 1
+    print(current)
+    return 0
+
+
+def _config_set(service: StackerService, args: argparse.Namespace) -> int:
+    for note in service.set_config(args.repo, args.key, args.value):
+        print(note, file=sys.stderr)
+    return 0
 
 
 def _run(op: Callable[[StackerService], str]) -> int:
@@ -198,20 +229,15 @@ def _add_repo_only_commands(sub: argparse._SubParsersAction) -> None:
         p.set_defaults(func=handler)
 
 
-def _add_repo_config_commands(sub: argparse._SubParsersAction) -> None:
-    repo = sub.add_parser("repo", help="per-repo PR configuration")
-    repo_sub = repo.add_subparsers(dest="repo_cmd", required=True)
-
-    set_pr = repo_sub.add_parser("set-pr-mode", help="configure PR mode")
-    set_pr.add_argument("--repo", required=True)
-    set_pr.add_argument("--mode", choices=["normal", "forked"], required=True)
-    set_pr.add_argument("--trunk", required=True)
-    set_pr.add_argument("--main-repo", default=None)
-    set_pr.set_defaults(func=_cmd_repo_set_pr_mode)
-
-    show_pr = repo_sub.add_parser("show-pr-mode", help="show PR mode")
-    show_pr.add_argument("--repo", required=True)
-    show_pr.set_defaults(func=_cmd_repo_show_pr_mode)
+def _add_config_command(sub: argparse._SubParsersAction) -> None:
+    cfg = sub.add_parser("config", help="get/set per-repo stacker config (git-config style)")
+    cfg.add_argument("--repo", required=True)
+    group = cfg.add_mutually_exclusive_group()
+    group.add_argument("--list", action="store_true", help="list all set keys")
+    group.add_argument("--unset", action="store_true", help="remove a key")
+    cfg.add_argument("key", nargs="?", help="config key (e.g. pr.mode)")
+    cfg.add_argument("value", nargs="?", help="value to set; omit to read")
+    cfg.set_defaults(func=_cmd_config)
 
 
 def add_subparser(subparsers: argparse._SubParsersAction) -> None:
@@ -221,7 +247,7 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     sub = stacker.add_subparsers(dest="cmd", required=True)
     _add_stacker_commands(sub)
     _add_repo_only_commands(sub)
-    _add_repo_config_commands(sub)
+    _add_config_command(sub)
 
 
 def gc_ops(paths: Paths) -> list[slot_mod.Slot]:

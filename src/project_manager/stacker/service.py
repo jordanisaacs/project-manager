@@ -12,9 +12,16 @@ from project_manager import output
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 
-from . import gh, git, locate, ops_slot, selectors
+from . import config_schema, gh, git, locate, ops_slot, selectors
 from .db import StackerDB
-from .models import OperationState, ParentLocator, RepoPRConfig, SelectorTarget, TrackedBranch
+from .models import (
+    OperationState,
+    ParentLocator,
+    RepoPRConfig,
+    SelectorTarget,
+    TrackedBranch,
+)
+from .pr_backend import GhCliBackend, PRBackend
 
 
 @dataclass
@@ -65,10 +72,12 @@ class StackerService:
         paths: Paths,
         *,
         progress: Callable[[str], None] | None = None,
+        pr_backend: PRBackend | None = None,
     ) -> None:
         self.db = db
         self.paths = paths
         self.progress = progress
+        self.pr_backend: PRBackend = pr_backend or GhCliBackend()
 
     # -------------------------------------------------------------
     # High-level operations
@@ -263,40 +272,52 @@ class StackerService:
     # PR configuration
     # -------------------------------------------------------------
 
-    def set_pr_mode(
-        self,
-        repo_name: str,
-        mode: str,
-        trunk_branch: str,
-        main_repo: str | None,
-    ) -> RepoPRConfig:
-        if mode not in {"normal", "forked"}:
-            raise git.GitError("PR mode must be 'normal' or 'forked'.")
-        if mode == "normal" and main_repo:
-            raise git.GitError("--main-repo is only valid for forked mode.")
-        if mode == "forked" and not main_repo:
-            raise git.GitError("--main-repo is required for forked mode.")
-        config = RepoPRConfig(
-            repo_name=repo_name,
-            mode=mode,
-            trunk_branch=trunk_branch,
-            main_repo=main_repo,
-        )
-        self.db.upsert_repo_pr_config(config)
-        return config
+    def get_config(self, repo_name: str, key: str) -> str | None:
+        config_schema.require_known_key(key)
+        return self.db.get_config(repo_name, key)
 
-    def show_pr_mode(self, repo_name: str) -> str:
-        config = self._pr_config(repo_name)
-        lines = [
-            f"repo: {repo_name}",
-            f"mode: {config.mode}",
-            f"trunk: {config.trunk_branch}",
-        ]
-        if config.main_repo:
-            lines.append(f"main repo: {config.main_repo}")
-        else:
-            lines.append(f"main repo: {self._current_repo_slug(repo_name)}")
-        return "\n".join(lines)
+    def set_config(self, repo_name: str, key: str, value: str) -> list[str]:
+        """Write one config key, enforcing cross-key invariants.
+
+        Returns informational notices (e.g. auto-flip of pr.mode) for display.
+        Only hits `gh repo view` when the key being set requires cross-check
+        against the push remote.
+        """
+        config_schema.validate_value(key, value)
+        notices: list[str] = []
+        if key == config_schema.PR_MODE and value == "pr-pr":
+            push_remote = self._push_remote_slug(repo_name)
+            target = (
+                self.db.get_config(repo_name, config_schema.PR_TARGET_REPO)
+                or push_remote
+            )
+            if target != push_remote:
+                raise git.GitError(
+                    f"pr.mode=pr-pr requires pr.target-repo to equal the push "
+                    f"remote ({push_remote}), but pr.target-repo is {target}. "
+                    "Unset pr.target-repo first or switch to pr.mode=repo-pr."
+                )
+        self.db.set_config(repo_name, key, value)
+        if key == config_schema.PR_TARGET_REPO:
+            push_remote = self._push_remote_slug(repo_name)
+            if value != push_remote:
+                current_mode = config_schema.parse_mode(
+                    self.db.get_config(repo_name, config_schema.PR_MODE)
+                )
+                if current_mode == "pr-pr":
+                    self.db.set_config(repo_name, config_schema.PR_MODE, "repo-pr")
+                    notices.append(
+                        "Switched pr.mode to repo-pr because pr.target-repo "
+                        f"({value}) differs from the push remote ({push_remote})."
+                    )
+        return notices
+
+    def unset_config(self, repo_name: str, key: str) -> bool:
+        config_schema.require_known_key(key)
+        return self.db.unset_config(repo_name, key)
+
+    def list_config(self, repo_name: str) -> list[tuple[str, str]]:
+        return self.db.list_config(repo_name)
 
     # -------------------------------------------------------------
     # Sync / repair / push / pp / pr
@@ -434,7 +455,7 @@ class StackerService:
         config = self._pr_config(target.repo_name)
         repo_path = self.paths.repo(target.repo_name)
         try:
-            current_repo = gh.repo_info(cwd=repo_path)
+            current_repo = self.pr_backend.repo_info(cwd=repo_path)
         except git.GitError:
             current_repo = None
         refresh_root: TrackedBranch | None = None
@@ -448,7 +469,7 @@ class StackerService:
             ):
                 refresh_root = item
         should_refresh_block = (
-            config.mode == "forked" or force_stack_block or erase_stack_block
+            config.mode == "repo-pr" or force_stack_block or erase_stack_block
         )
         if should_refresh_block and current_repo and refresh_root is not None:
             if erase_stack_block:
@@ -462,7 +483,7 @@ class StackerService:
         config = self._pr_config(tracked.repo_name)
         repo_path = self.paths.repo(tracked.repo_name)
         logs: list[str] = []
-        current_repo = gh.repo_info(cwd=repo_path)
+        current_repo = self.pr_backend.repo_info(cwd=repo_path)
         self._run_single_pp(tracked, logs)
         current_pr = self._create_or_update_current_pr(
             tracked, config, current_repo, draft=draft, logs=logs
@@ -632,18 +653,18 @@ class StackerService:
         return True
 
     def _pr_config(self, repo_name: str) -> RepoPRConfig:
-        stored = self.db.get_repo_pr_config(repo_name)
-        if stored:
-            return stored
+        mode = config_schema.parse_mode(self.db.get_config(repo_name, config_schema.PR_MODE))
+        trunk = self.db.get_config(repo_name, config_schema.PR_TRUNK)
+        target = self.db.get_config(repo_name, config_schema.PR_TARGET_REPO)
         return RepoPRConfig(
             repo_name=repo_name,
-            mode="normal",
-            trunk_branch=git.guess_trunk_branch(self.paths.repo(repo_name)),
-            main_repo=None,
+            mode=mode,
+            trunk_branch=trunk or git.guess_trunk_branch(self.paths.repo(repo_name)),
+            target_repo=target or self._push_remote_slug(repo_name),
         )
 
-    def _current_repo_slug(self, repo_name: str) -> str:
-        return gh.repo_info(cwd=self.paths.repo(repo_name)).name_with_owner
+    def _push_remote_slug(self, repo_name: str) -> str:
+        return self.pr_backend.repo_info(cwd=self.paths.repo(repo_name)).name_with_owner
 
     def _create_or_update_current_pr(
         self,
@@ -654,7 +675,7 @@ class StackerService:
         draft: bool,
         logs: list[str],
     ) -> gh.PullRequest:
-        target_repo = self._target_repo_slug(config, current_repo)
+        target_repo = self._target_repo_slug(config)
         remote_branch = self._remote_branch_name(tracked)
         title, first_body = self._first_commit_text(tracked)
         body = self._compose_body_with_block(first_body, "")
@@ -664,7 +685,7 @@ class StackerService:
         label = selectors.selector_for(tracked.repo_name, tracked.branch)
         if existing:
             self._record(logs, f"Updating PR #{existing.number} for {label}")
-            gh.edit_pr(
+            self.pr_backend.edit_pr(
                 gh.EditPRRequest(
                     repo=target_repo, number=existing.number, title=title, base=base
                 )
@@ -672,7 +693,7 @@ class StackerService:
         else:
             self._record(logs, f"Creating PR for {label}")
             with self._body_file(body) as body_file:
-                gh.create_pr(
+                self.pr_backend.create_pr(
                     gh.CreatePRRequest(
                         repo=target_repo,
                         base=base,
@@ -711,9 +732,9 @@ class StackerService:
             block = self._render_stack_block(ctx, node)
             base_body = self._pr_base_body(pr)
             with self._body_file(self._compose_body_with_block(base_body, block)) as body_file:
-                gh.edit_pr(
+                self.pr_backend.edit_pr(
                     gh.EditPRRequest(
-                        repo=self._target_repo_slug(config, current_repo),
+                        repo=self._target_repo_slug(config),
                         number=pr.number,
                         body_file=body_file,
                     )
@@ -740,9 +761,9 @@ class StackerService:
             if not pr:
                 continue
             with self._body_file(self._pr_base_body(pr)) as body_file:
-                gh.edit_pr(
+                self.pr_backend.edit_pr(
                     gh.EditPRRequest(
-                        repo=self._target_repo_slug(config, current_repo),
+                        repo=self._target_repo_slug(config),
                         number=pr.number,
                         body_file=body_file,
                     )
@@ -787,18 +808,18 @@ class StackerService:
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> gh.PullRequest | None:
-        target_repo = self._target_repo_slug(config, current_repo)
+        target_repo = self._target_repo_slug(config)
         path = locate.locate_worktree(self.paths, tracked.repo_name, tracked.branch)
         if path is None:
             return None
         remote_branch = git.upstream_branch_name(path)
         if not remote_branch:
             return None
-        if config.mode == "forked":
+        if target_repo != current_repo.name_with_owner:
             search = f"is:open head:{current_repo.owner}:{remote_branch}"
-            prs = gh.list_open_prs(target_repo, search=search)
+            prs = self.pr_backend.list_open_prs(target_repo, search=search)
         else:
-            prs = gh.list_open_prs(target_repo, head=remote_branch)
+            prs = self.pr_backend.list_open_prs(target_repo, head=remote_branch)
         return prs[0] if prs else None
 
     def _pr_base_for_current_branch(
@@ -807,7 +828,7 @@ class StackerService:
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> str:
-        if config.mode == "forked":
+        if config.mode == "repo-pr":
             return config.trunk_branch
         if tracked.parent_branch == config.trunk_branch:
             return config.trunk_branch
@@ -830,8 +851,8 @@ class StackerService:
             )
         return remote_branch
 
-    def _target_repo_slug(self, config: RepoPRConfig, current_repo: gh.RepoInfo) -> str:
-        return config.main_repo or current_repo.name_with_owner
+    def _target_repo_slug(self, config: RepoPRConfig) -> str:
+        return config.target_repo
 
     def _head_ref_for_branch(
         self,
@@ -839,7 +860,7 @@ class StackerService:
         current_repo: gh.RepoInfo,
         remote_branch: str,
     ) -> str:
-        if config.mode == "forked":
+        if config.target_repo != current_repo.name_with_owner:
             return f"{current_repo.owner}:{remote_branch}"
         return remote_branch
 
@@ -876,12 +897,18 @@ class StackerService:
     ) -> str:
         lines = ["<!-- stacker:begin -->", "## Stacker"]
         nav_links: list[str] = []
+        show_compare = ctx.config.mode == "repo-pr"
         prev_node = self.db.get_branch(current_node.parent_repo_name, current_node.parent_branch)
         if prev_node and (prev_pr := ctx.pr_map.get(prev_node.branch)):
             nav_links.append(f"[<- ({prev_node.branch})]({prev_pr.url})")
-        current_changes_url = self._compare_url(current_node, ctx)
-        if current_changes_url:
-            nav_links.append(f"**[{current_node.branch} (changes)]({current_changes_url})**")
+        if show_compare:
+            current_changes_url = self._compare_url(current_node, ctx)
+            if current_changes_url:
+                nav_links.append(
+                    f"**[{current_node.branch} (changes)]({current_changes_url})**"
+                )
+        else:
+            nav_links.append(f"**{current_node.branch}**")
         next_nodes = self.db.get_children(current_node.repo_name, current_node.branch)
         if len(next_nodes) == 1 and (next_pr := ctx.pr_map.get(next_nodes[0].branch)):
             nav_links.append(f"[({next_nodes[0].branch}) ->]({next_pr.url})")
@@ -917,9 +944,10 @@ class StackerService:
         pr = ctx.pr_map.get(node.branch)
         if pr:
             parts.append(f"[PR #{pr.number}]({pr.url})")
-        compare_url = self._compare_url(node, ctx)
-        if compare_url:
-            parts.append(f"[changes]({compare_url})")
+        if ctx.config.mode == "repo-pr":
+            compare_url = self._compare_url(node, ctx)
+            if compare_url:
+                parts.append(f"[changes]({compare_url})")
         content = " ".join(parts)
         if is_current:
             content = f"**{content}**"
@@ -933,7 +961,7 @@ class StackerService:
         return lines
 
     def _compare_url(self, node: TrackedBranch, ctx: _StackRender) -> str | None:
-        target_repo = self._target_repo_slug(ctx.config, ctx.current_repo)
+        target_repo = self._target_repo_slug(ctx.config)
         path = locate.locate_worktree(self.paths, node.repo_name, node.branch)
         if path is None:
             return None

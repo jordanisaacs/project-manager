@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from project_manager.paths import Paths
+from project_manager.stacker import gh
+from project_manager.stacker.db import StackerDB
+from project_manager.stacker.models import PRMode, RepoPRConfig, TrackedBranch
+from project_manager.stacker.service import StackerService, _StackRender
+
+from .fakes import RecordingPRBackend
+
+
+@pytest.fixture
+def service(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],  # noqa: ARG001 (creates repo on disk)
+) -> StackerService:
+    return StackerService(
+        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+    )
+
+
+def _tracked(branch: str, parent_branch: str) -> TrackedBranch:
+    return TrackedBranch(
+        repo_name="demo",
+        branch=branch,
+        parent_repo_name="demo",
+        parent_branch=parent_branch,
+        managed_base_commit="0" * 40,
+        last_synced_parent_commit=None,
+        last_clean_head=None,
+    )
+
+
+def _config(mode: PRMode) -> RepoPRConfig:
+    return RepoPRConfig(
+        repo_name="demo",
+        mode=mode,
+        trunk_branch="main",
+        target_repo="acme/widgets",
+    )
+
+
+def _pr(number: int, branch: str) -> gh.PullRequest:
+    return gh.PullRequest(
+        number=number,
+        url=f"https://github.com/acme/widgets/pull/{number}",
+        title=f"PR {number}",
+        body="",
+        head_ref_name=branch,
+        base_ref_name="main",
+        state="OPEN",
+        is_draft=False,
+    )
+
+
+def _build_ctx(mode: PRMode, service: StackerService) -> tuple[_StackRender, TrackedBranch]:
+    parent = _tracked("feat-a", "main")
+    child = _tracked("feat-b", "feat-a")
+    service.db.upsert_branch(parent)
+    service.db.upsert_branch(child)
+    component = [parent, child]
+    pr_map = {"feat-a": _pr(11, "feat-a"), "feat-b": _pr(12, "feat-b")}
+    ctx = _StackRender(
+        component=component,
+        pr_map=pr_map,
+        config=_config(mode),
+        current_repo=gh.RepoInfo(name_with_owner="acme/widgets", owner="acme", name="widgets"),
+    )
+    return ctx, child
+
+
+def test_pr_pr_block_omits_changes_link(
+    service: StackerService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # If `_compare_url` is ever called we want the test to fail loudly:
+    def _fail(*_args: object, **_kwargs: object) -> str:
+        pytest.fail("compare_url must not be computed in pr-pr mode")
+
+    monkeypatch.setattr(service, "_compare_url", _fail)
+    ctx, current = _build_ctx("pr-pr", service)
+    block = service._render_stack_block(ctx, current)
+    assert "[changes]" not in block
+    assert "(changes)" not in block
+    # The PR links themselves are still present — only the compare URL is stripped.
+    assert "PR #11" in block
+    assert "PR #12" in block
+    assert "**feat-b**" in block
+
+
+def test_repo_pr_block_includes_changes_link(
+    service: StackerService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _compare(node: TrackedBranch, _ctx: _StackRender) -> str:
+        return f"https://github.com/acme/widgets/compare/abc...def?node={node.branch}"
+
+    monkeypatch.setattr(service, "_compare_url", _compare)
+    ctx, current = _build_ctx("repo-pr", service)
+    block = service._render_stack_block(ctx, current)
+    assert "[changes](https://github.com/acme/widgets/compare/abc...def?node=feat-a)" in block
+    assert "[changes](https://github.com/acme/widgets/compare/abc...def?node=feat-b)" in block
+    assert "(changes)](https://github.com/acme/widgets/compare/abc...def?node=feat-b)" in block
