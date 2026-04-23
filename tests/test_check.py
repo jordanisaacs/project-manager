@@ -101,3 +101,20 @@ def test_attach_after_detach_round_trips_clean(pm_env: Paths) -> None:
     attach_mod.attach(pm_env, "demo", repos=None)
     findings = check.check(pm_env)
     assert _kinds(findings) == [check.Kind.ACTIVE]
+
+
+def test_ops_owned_slot_is_classified(pm_env: Paths) -> None:
+    from project_manager.pool import slot as slot_mod
+
+    _mk_pool(pm_env, "foo", ["a"])
+    # Create the stacker ops marker and claim the slot with it.
+    pm_env.stacker_root.mkdir(parents=True, exist_ok=True)
+    pm_env.stacker_ops_marker().touch()
+    slot = slot_mod.Slot(repo="foo", uuid="a", path=pm_env.slot("foo", "a"))
+    slot_mod.claim(slot, pm_env.stacker_ops_marker())
+
+    findings = check.check(pm_env)
+    assert _kinds(findings) == [check.Kind.OPS_OWNED]
+    # fix() does NOT touch OPS_OWNED slots — they're intentional.
+    assert check.fix(pm_env, findings) == 0
+    assert slot.owner_path.is_symlink()
