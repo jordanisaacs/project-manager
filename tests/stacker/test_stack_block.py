@@ -73,34 +73,45 @@ def _build_ctx(mode: PRMode, service: StackerService) -> tuple[_StackRender, Tra
     return ctx, child
 
 
-def test_pr_pr_block_omits_changes_link(
+def test_pr_pr_block_omits_files_link(
     service: StackerService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # If `_compare_url` is ever called we want the test to fail loudly:
+    # If `_files_url` is ever called we want the test to fail loudly:
     def _fail(*_args: object, **_kwargs: object) -> str:
-        pytest.fail("compare_url must not be computed in pr-pr mode")
+        pytest.fail("files URL must not be computed in pr-pr mode")
 
-    monkeypatch.setattr(service, "_compare_url", _fail)
+    monkeypatch.setattr(service, "_files_url", _fail)
     ctx, current = _build_ctx("pr-pr", service)
     block = service._render_stack_block(ctx, current)
-    assert "[changes]" not in block
-    # The PR links themselves are still present — only the compare URL is stripped.
-    assert "PR #11" in block
-    assert "PR #12" in block
-    # Current branch line is bold-wrapped.
-    assert "**`feat-b` (current) [PR #12](https://github.com/acme/widgets/pull/12)**" in block
+    assert "Files changed" not in block
+    # Preamble is only emitted when files URL is available — pr-pr skips it.
+    assert "review incremental changes" not in block
+    # Both branches still linked to their PRs via branch name.
+    assert "- [feat-a](https://github.com/acme/widgets/pull/11)" in block
+    assert "- [**feat-b**](https://github.com/acme/widgets/pull/12)" in block
 
 
-def test_repo_pr_block_includes_changes_link(
+def test_repo_pr_block_includes_files_link(
     service: StackerService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _compare(node: TrackedBranch, _ctx: _StackRender) -> str:
-        return f"https://github.com/acme/widgets/compare/abc...def?node={node.branch}"
+    def _files(node: TrackedBranch, _ctx: _StackRender) -> str:
+        return f"https://github.com/acme/widgets/pull/X/files/abc..def?node={node.branch}"
 
-    monkeypatch.setattr(service, "_compare_url", _compare)
+    monkeypatch.setattr(service, "_files_url", _files)
     ctx, current = _build_ctx("repo-pr", service)
     block = service._render_stack_block(ctx, current)
-    # Both ancestor and current get a changes link — previously the ancestor
-    # line had no link because _compare_url required a live worktree checkout.
-    assert "[changes](https://github.com/acme/widgets/compare/abc...def?node=feat-a)" in block
-    assert "[changes](https://github.com/acme/widgets/compare/abc...def?node=feat-b)" in block
+    # Every node gets a "Files changed" link — previously ancestors rendered
+    # without one because _compare_url demanded a live worktree checkout.
+    assert (
+        "[[Files changed](https://github.com/acme/widgets/pull/X/files/abc..def?node=feat-a)]"
+        in block
+    )
+    assert (
+        "[[Files changed](https://github.com/acme/widgets/pull/X/files/abc..def?node=feat-b)]"
+        in block
+    )
+    # Preamble pulls the current branch's files URL to the top.
+    assert (
+        "Use this [link](https://github.com/acme/widgets/pull/X/files/abc..def?node=feat-b)"
+        " to review" in block
+    )

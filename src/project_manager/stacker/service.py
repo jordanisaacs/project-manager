@@ -1012,13 +1012,24 @@ class StackerService:
     ) -> str:
         """Render the stack block embedded in a PR body.
 
-        Deliberately minimal: a tree of `- <branch> [PR] [changes]` rows,
-        with the current node bolded. The earlier nav line (prev / current
-        / next) duplicated info that's already in the tree, and nesting
-        `**...**` around `<strong><code>...</code></strong>` rendered as
-        over-emphasized soup in some clients.
+        Matches universe gitstack's shape: a one-line preamble pointing
+        reviewers at the current branch's files view, followed by an
+        indented tree. Each branch renders as
+        `[branch](pr) [[Files changed](files)]` with `[MERGED]` appended
+        for landed PRs; the current branch's name is bolded inside the
+        link.
         """
         lines = ["<!-- stacker:begin -->", "## Stacker", ""]
+        # Preamble + Files-changed links only make sense when every PR bases
+        # on trunk (repo-pr). In pr-pr mode GitHub's own base-chain already
+        # gives reviewers the per-branch diff.
+        if ctx.config.mode == "repo-pr":
+            preamble = self._files_url(current_node, ctx)
+            if preamble is not None:
+                lines.append(
+                    f"Use this [link]({preamble}) to review incremental changes."
+                )
+                lines.append("")
         component_keys = {node.branch for node in ctx.component}
         roots = [
             node for node in ctx.component if node.parent_branch not in component_keys
@@ -1039,26 +1050,24 @@ class StackerService:
         prefix: str,
     ) -> list[str]:
         is_current = node.branch == current_node.branch
-        parts = [f"`{node.branch}`"]
-        if is_current:
-            parts.append("(current)")
+        label = f"**{node.branch}**" if is_current else node.branch
         pr = ctx.pr_map.get(node.branch)
         if pr:
-            parts.append(f"[PR #{pr.number}]({pr.url})")
+            parts = [f"[{label}]({pr.url})"]
+            if ctx.config.mode == "repo-pr":
+                files_url = self._files_url(node, ctx)
+                if files_url:
+                    parts.append(f"[[Files changed]({files_url})]")
             # Surface merged/closed PRs with a label, matching universe
             # gitstack's StackItem.merged rendering. Keeps history visible
             # instead of silently dropping landed PRs.
             if pr.state == "MERGED":
-                parts.append("[merged]")
+                parts.append("[MERGED]")
             elif pr.state == "CLOSED":
-                parts.append("[closed]")
-        if ctx.config.mode == "repo-pr":
-            compare_url = self._compare_url(node, ctx)
-            if compare_url:
-                parts.append(f"[changes]({compare_url})")
-        content = " ".join(parts)
-        if is_current:
-            content = f"**{content}**"
+                parts.append("[CLOSED]")
+            content = " ".join(parts)
+        else:
+            content = label
         lines = [f"{prefix}- {content}"]
         children = sorted(
             [child for child in ctx.component if child.parent_branch == node.branch],
@@ -1068,26 +1077,28 @@ class StackerService:
             lines.extend(self._render_stack_lines(ctx, child, current_node, prefix=prefix + "  "))
         return lines
 
-    def _compare_url(self, node: TrackedBranch, ctx: _StackRender) -> str | None:
-        """Build a `<pr-url>/changes/<base>..<head>` files-changed URL.
+    def _files_url(self, node: TrackedBranch, ctx: _StackRender) -> str | None:
+        """Build `<pr-url>/files/<base>..<head>` for reviewer navigation.
 
-        Matches universe gitstack's per-PR files view
+        Mirrors universe gitstack's per-PR files view
         (`<pr>/files/<parent_commit>..<head>`) — scoped to the PR so
-        reviewers see only the commits unique to that branch. Uses
-        `last_clean_head` (persisted by sync/init/repair) rather than
-        live-rev-parsing, so ancestors and siblings render correctly
-        even when not currently checked out.
+        reviewers see only the commits unique to that branch. For a
+        merged PR the range is dropped (`<pr>/files`) since the commit
+        range no longer reflects reviewable changes. Uses
+        `last_clean_head` (persisted by sync/init/repair), so ancestors
+        and siblings render correctly even when not currently checked out.
         """
         pr = ctx.pr_map.get(node.branch)
         if pr is None:
             return None
+        if pr.state == "MERGED":
+            return f"{pr.url}/files"
         head_sha = node.last_clean_head
         if not head_sha:
             return None
         base_sha = node.managed_base_commit
-        target_repo = self._target_repo_slug(ctx.config)
         return (
-            f"https://github.com/{target_repo}/pull/{pr.number}/changes/"
+            f"{pr.url}/files/"
             f"{quote(base_sha, safe=':/')}..{quote(head_sha, safe=':/')}"
         )
 

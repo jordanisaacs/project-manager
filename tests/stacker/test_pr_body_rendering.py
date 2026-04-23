@@ -180,11 +180,16 @@ def test_refreshed_stack_block_links_both_prs_even_when_list_is_empty(
 
     # Both stack blocks must contain links to both PRs. The universe
     # regression we're guarding against was the ancestor line rendered as
-    # a bare branch name with no PR link — catching [PR #N]( in each body
-    # for both ancestor and leaf is exactly the property that was broken.
+    # a bare branch name with no PR link — catching each branch linked to
+    # its PR URL (via the `[branch](pr-url)` form universe uses) proves the
+    # race is closed.
     for label, body in [("PR A", body_a), ("PR B", body_b)]:
-        assert "[PR #1](" in body, f"{label} is missing ancestor PR link"
-        assert "[PR #2](" in body, f"{label} is missing leaf PR link"
+        assert (
+            "](https://github.com/acme/widgets/pull/1)" in body
+        ), f"{label} missing link to PR A"
+        assert (
+            "](https://github.com/acme/widgets/pull/2)" in body
+        ), f"{label} missing link to PR B"
 
 
 def test_repo_pr_includes_compare_url_in_block(
@@ -203,10 +208,10 @@ def test_repo_pr_includes_compare_url_in_block(
 
     final = {r.number: b for (r, b) in backend.edited if b is not None}
     body_b = final[2]
-    # Files-changed URL format: <pr-url>/changes/<base>..<head>
+    # Files-changed URL format: <pr-url>/files/<base>..<head>
     # (matches universe gitstack's <pr>/files/<parent>..<head>).
-    assert "/pull/2/changes/" in body_b
-    assert "[changes](" in body_b
+    assert "/pull/2/files/" in body_b
+    assert "[[Files changed](" in body_b
 
 
 def test_pr_pr_mode_stack_block_omits_compare_link(
@@ -226,8 +231,8 @@ def test_pr_pr_mode_stack_block_omits_compare_link(
     final = {r.number: b for (r, b) in backend.edited if b is not None}
     assert 2 in final, "leaf body should have been edited to add stack block"
     body_b = final[2]
-    assert "/compare/" not in body_b, "pr-pr mode must not embed compare URLs"
-    assert "[changes](" not in body_b
+    assert "Files changed" not in body_b, "pr-pr mode must not embed files URLs"
+    assert "review incremental changes" not in body_b
 
 
 def test_head_repo_set_when_upstream_is_distinct_fork(
