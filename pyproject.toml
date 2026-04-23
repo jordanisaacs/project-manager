@@ -19,6 +19,9 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    # Parallel test execution. Each test uses an isolated `pm_env` tmp dir
+    # (see tests/conftest.py), so workers can't stomp each other.
+    "pytest-xdist>=3.6",
     "ruff>=0.8",
     "ty>=0.0.1a1",
 ]
@@ -70,3 +73,6 @@ error-on-warning = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `-n auto` spreads tests across as many workers as CPU cores. Each test
+# gets its own tmp_path-backed `pm_env`, so workers can't collide.
+addopts = "-n auto"
