@@ -52,6 +52,9 @@ class LsOptions:
     # or None when cwd is not inside a slot. Used to mark the current row
     # with `> ` / `(current)`.
     current: tuple[str, str] | None = None
+    # Prepend a legend explaining icons, commit groups, and suffix tokens.
+    # Ignored in JSON mode — JSON consumers don't need glyph docs.
+    legend: bool = False
     render: RenderOptions = field(default_factory=RenderOptions)
 
 
@@ -82,12 +85,19 @@ def ls_text(
         }
         branches = [b for b in branches if (b.repo_name, b.branch) not in merged]
     if options.json_output:
+        # `--legend` is intentionally ignored here — JSON consumers don't
+        # need glyph docs, and injecting them would break the parse.
         return _ls_json(ctx, branches, options.details, options.current)
-    if not branches:
-        return _empty_text(ctx, repo_name, options.current)
-    return _ls_tree(
-        ctx, branches, options.details, options.current, options.render,
+    body = (
+        _empty_text(ctx, repo_name, options.current)
+        if not branches
+        else _ls_tree(
+            ctx, branches, options.details, options.current, options.render,
+        )
     )
+    if options.legend:
+        return graph.render_legend(options.render) + "\n\n" + body
+    return body
 
 
 def _empty_text(

@@ -51,6 +51,24 @@ _ICON_COLOR: dict[IconKind, str | None] = {
     "pr_approved_comments": "red",  # comments win visually over approval
 }
 
+_ICON_MEANING: dict[IconKind, str] = {
+    "local_only": "local only",
+    "no_pr": "pushed, no PR",
+    "pr_open": "PR open",
+    "merged": "merged",
+    "pr_draft": "PR draft",
+    "pr_open_comments": "PR open w/ comments",
+    "pr_approved": "PR approved",
+    "pr_approved_comments": "PR approved w/ comments",
+}
+
+_OFFLINE_ICONS: tuple[IconKind, ...] = (
+    "local_only", "no_pr", "pr_open", "merged",
+)
+_ONLINE_ICONS: tuple[IconKind, ...] = (
+    "pr_draft", "pr_open_comments", "pr_approved", "pr_approved_comments",
+)
+
 
 @dataclass(frozen=True)
 class GraphCtx:
@@ -450,3 +468,40 @@ def ensure_syncable(path: Path) -> None:
             f"Cherry-pick already in progress in {path}. Resolve it before starting "
             "another sync."
         )
+
+
+def render_legend(render_opts: RenderOptions) -> str:
+    """Compact legend for icons, commit groups, suffixes, and tree decorators.
+
+    Matches the active `render_opts` so icons only appear when they'd
+    appear in the tree (`--icons`), and online-only glyphs only show up
+    under `--online`. Color-per-status applies under the same rules
+    `_status_symbol` uses, so the legend glyph looks identical to the
+    one in the tree below it.
+    """
+    lines: list[str] = ["Legend:"]
+    if render_opts.icons:
+        lines.append(
+            "  Icons:   " + "  ".join(
+                _legend_icon(kind, render_opts) for kind in _OFFLINE_ICONS
+            ),
+        )
+        if render_opts.online:
+            lines.append(
+                "  Online:  " + "  ".join(
+                    _legend_icon(kind, render_opts) for kind in _ONLINE_ICONS
+                ),
+            )
+    lines.append("  Group:   (!) needs sync   (N↑) N unpushed   (!N↑) both")
+    lines.append("  Suffix:  [LOCAL]  [REMOTE]  [<url>]  [MERGED]  [dirty]")
+    lines.append("  Tree:    ├─✗/└─✗ needs sync   ■┄┆ merged   > … (current)")
+    return "\n".join(lines)
+
+
+def _legend_icon(kind: IconKind, render_opts: RenderOptions) -> str:
+    symbol = _SYMBOL[kind]
+    if render_opts.color_mode != "off":
+        color = _ICON_COLOR[kind]
+        if color is not None:
+            symbol = fmt.style(symbol, fg=color)
+    return f"{symbol} {_ICON_MEANING[kind]}"

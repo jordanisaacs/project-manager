@@ -237,6 +237,62 @@ def test_ls_no_banner_when_cwd_outside_a_slot(
     assert "(on tracked branch" not in out
 
 
+def test_ls_legend_prepended_in_text_mode(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(legend=True))
+    assert out.startswith("Legend:")
+    # Offline icons are always in the legend; each name → glyph pair.
+    for glyph, word in (("·", "local only"), ("○", "pushed"), ("●", "PR open")):
+        assert glyph in out
+        assert word in out
+
+
+def test_ls_legend_hides_icon_row_when_icons_off(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(legend=True, render=RenderOptions(icons=False)),
+    )
+    assert out.startswith("Legend:")
+    assert "Icons:" not in out
+    # Commit-group + suffix sections stay — they're icon-independent.
+    assert "Group:" in out
+    assert "Suffix:" in out
+
+
+def test_ls_legend_includes_online_row_only_under_online(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    on = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(legend=True, render=RenderOptions(online=True)),
+    )
+    off = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(legend=True, render=RenderOptions(online=False)),
+    )
+    assert "Online:" in on
+    assert "Online:" not in off
+
+
+def test_ls_legend_ignored_in_json_mode(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    raw = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(legend=True, json_output=True),
+    )
+    # Must still parse as JSON — no "Legend:" preamble.
+    payload = json.loads(raw)
+    assert "branches" in payload
+
+
 def test_ls_empty_message_mentions_untracked_current(
     stacker_repo: tuple[str, Path],
     service: StackerService,

@@ -52,6 +52,7 @@ def ls(
     merged: bool = True,
     merged_style: _MergedStyleLit = "dimmed",
     color_mode: _ColorModeLit = "icon",
+    legend: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Render the stack tree."""
     paths = config.load()
@@ -74,6 +75,7 @@ def ls(
                     details=details,
                     json_output=json,
                     current=current_pos,
+                    legend=legend,
                     render=render_opts,
                 ),
             )
@@ -86,6 +88,7 @@ def ls(
                 details=details,
                 json_output=json,
                 current=current_pos,
+                legend=legend,
                 render=render_opts,
             ),
         )
