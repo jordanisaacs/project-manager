@@ -38,7 +38,12 @@ def _cmd_create(args: argparse.Namespace) -> int:
     try:
         base = _require_base(args.base)
         parent = selectors.resolve_parent_for_base(paths, args.repo, base)
-        target_slot = ops_slot.claim(paths, pooldb, args.repo)
+        target_slot = ops_slot.claim(
+            paths,
+            pooldb,
+            args.repo,
+            wait=ops_slot.WaitOptions(progress=_stderr_progress),
+        )
         try:
             service.initialize_worktree(
                 repo_name=args.repo,
@@ -55,6 +60,10 @@ def _cmd_create(args: argparse.Namespace) -> int:
         return 2
     print(target_slot.path)
     return 0
+
+
+def _stderr_progress(msg: str) -> None:
+    print(f"pm: {msg}", file=sys.stderr)
 
 
 def _cmd_track(args: argparse.Namespace) -> int:

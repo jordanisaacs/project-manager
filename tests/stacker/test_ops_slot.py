@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -96,6 +98,80 @@ def test_pool_exhausted(pm_env: Paths, stacker_repo: tuple[str, Path]) -> None:
     # No pool slots exist (three_slots fixture not requested).
     with pytest.raises(slot_mod.PoolExhaustedError):
         ops_slot.claim(pm_env, _pooldb(pm_env), repo_name)
+
+
+def test_claim_fails_fast_when_pool_full_and_no_stacker_owned(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+) -> None:
+    repo_name, _ = stacker_repo
+    # All three slots are claimed by projects — stacker owns nothing.
+    for i, s in enumerate(three_slots):
+        claim_forward(pm_env, f"proj-{i}", repo_name, s)
+
+    start = time.monotonic()
+    with pytest.raises(slot_mod.PoolExhaustedError, match="no stacker-owned slot"):
+        ops_slot.claim(
+            pm_env,
+            _pooldb(pm_env),
+            repo_name,
+            wait=ops_slot.WaitOptions(timeout_s=5.0, poll_interval_s=0.05),
+        )
+    # Did not wait — failure is immediate.
+    assert time.monotonic() - start < 0.5
+
+
+def test_claim_waits_for_stacker_slot_to_release(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+) -> None:
+    repo_name, _ = stacker_repo
+    pooldb = _pooldb(pm_env)
+    # Two slots claimed by projects, one by stacker.
+    claim_forward(pm_env, "proj-0", repo_name, three_slots[0])
+    claim_forward(pm_env, "proj-1", repo_name, three_slots[1])
+    held = three_slots[2]
+    pooldb.claim(repo_name, held.uuid, OWNER_STACKER_OPS)
+
+    notices: list[str] = []
+
+    def _release_later() -> None:
+        time.sleep(0.15)
+        pooldb.release(held.repo, held.uuid)
+
+    threading.Thread(target=_release_later, daemon=True).start()
+    claimed = ops_slot.claim(
+        pm_env,
+        pooldb,
+        repo_name,
+        wait=ops_slot.WaitOptions(
+            timeout_s=5.0, poll_interval_s=0.05, progress=notices.append
+        ),
+    )
+    assert claimed.uuid == held.uuid
+    assert any("Waiting" in n for n in notices)
+
+
+def test_claim_times_out_when_stacker_slot_never_releases(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+) -> None:
+    repo_name, _ = stacker_repo
+    pooldb = _pooldb(pm_env)
+    claim_forward(pm_env, "proj-0", repo_name, three_slots[0])
+    claim_forward(pm_env, "proj-1", repo_name, three_slots[1])
+    pooldb.claim(repo_name, three_slots[2].uuid, OWNER_STACKER_OPS)
+
+    with pytest.raises(slot_mod.PoolExhaustedError, match="stayed full"):
+        ops_slot.claim(
+            pm_env,
+            pooldb,
+            repo_name,
+            wait=ops_slot.WaitOptions(timeout_s=0.2, poll_interval_s=0.05),
+        )
 
 
 def test_two_ops_on_different_branches_hold_distinct_slots(

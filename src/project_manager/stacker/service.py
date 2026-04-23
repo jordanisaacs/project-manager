@@ -554,7 +554,13 @@ class StackerService:
         existing = locate.locate_worktree(self.paths, repo_name, branch)
         if existing is not None:
             return _Acquired(path=existing, ops=None)
-        claimed = ops_slot.acquire(self.paths, PoolDB(self.paths.pool_db()), repo_name, branch)
+        claimed = ops_slot.acquire(
+            self.paths,
+            PoolDB(self.paths.pool_db()),
+            repo_name,
+            branch,
+            wait=ops_slot.WaitOptions(progress=self.progress),
+        )
         return _Acquired(path=claimed.path, ops=claimed)
 
     def _release_if_owned(self, acquired: _Acquired) -> None:
