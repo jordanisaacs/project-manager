@@ -1010,26 +1010,15 @@ class StackerService:
         ctx: _StackRender,
         current_node: TrackedBranch,
     ) -> str:
-        lines = ["<!-- stacker:begin -->", "## Stacker"]
-        nav_links: list[str] = []
-        show_compare = ctx.config.mode == "repo-pr"
-        prev_node = self.db.get_branch(current_node.parent_repo_name, current_node.parent_branch)
-        if prev_node and (prev_pr := ctx.pr_map.get(prev_node.branch)):
-            nav_links.append(f"[<- ({prev_node.branch})]({prev_pr.url})")
-        if show_compare:
-            current_changes_url = self._compare_url(current_node, ctx)
-            if current_changes_url:
-                nav_links.append(
-                    f"**[{current_node.branch} (changes)]({current_changes_url})**"
-                )
-        else:
-            nav_links.append(f"**{current_node.branch}**")
-        next_nodes = self.db.get_children(current_node.repo_name, current_node.branch)
-        if len(next_nodes) == 1 and (next_pr := ctx.pr_map.get(next_nodes[0].branch)):
-            nav_links.append(f"[({next_nodes[0].branch}) ->]({next_pr.url})")
-        if nav_links:
-            lines.append("&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;".join(nav_links))
-        lines.append("")
+        """Render the stack block embedded in a PR body.
+
+        Deliberately minimal: a tree of `- <branch> [PR] [changes]` rows,
+        with the current node bolded. The earlier nav line (prev / current
+        / next) duplicated info that's already in the tree, and nesting
+        `**...**` around `<strong><code>...</code></strong>` rendered as
+        over-emphasized soup in some clients.
+        """
+        lines = ["<!-- stacker:begin -->", "## Stacker", ""]
         component_keys = {node.branch for node in ctx.component}
         roots = [
             node for node in ctx.component if node.parent_branch not in component_keys
@@ -1049,19 +1038,16 @@ class StackerService:
         *,
         prefix: str,
     ) -> list[str]:
-        label = node.branch
         is_current = node.branch == current_node.branch
-        formatted_label = (
-            f"<strong><code>{label}</code></strong>" if is_current else f"`{label}`"
-        )
-        marker = " (current)" if is_current else ""
-        parts = [f"{formatted_label}{marker}"]
+        parts = [f"`{node.branch}`"]
+        if is_current:
+            parts.append("(current)")
         pr = ctx.pr_map.get(node.branch)
         if pr:
             parts.append(f"[PR #{pr.number}]({pr.url})")
             # Surface merged/closed PRs with a label, matching universe
             # gitstack's StackItem.merged rendering. Keeps history visible
-            # in the stack block instead of silently dropping landed PRs.
+            # instead of silently dropping landed PRs.
             if pr.state == "MERGED":
                 parts.append("[merged]")
             elif pr.state == "CLOSED":
@@ -1083,18 +1069,26 @@ class StackerService:
         return lines
 
     def _compare_url(self, node: TrackedBranch, ctx: _StackRender) -> str | None:
-        target_repo = self._target_repo_slug(ctx.config)
-        path = locate.locate_worktree(self.paths, node.repo_name, node.branch)
-        if path is None:
+        """Build a `<pr-url>/changes/<base>..<head>` files-changed URL.
+
+        Matches universe gitstack's per-PR files view
+        (`<pr>/files/<parent_commit>..<head>`) — scoped to the PR so
+        reviewers see only the commits unique to that branch. Uses
+        `last_clean_head` (persisted by sync/init/repair) rather than
+        live-rev-parsing, so ancestors and siblings render correctly
+        even when not currently checked out.
+        """
+        pr = ctx.pr_map.get(node.branch)
+        if pr is None:
             return None
-        try:
-            head_sha = git.rev_parse(path, "HEAD")
-        except git.GitError:
+        head_sha = node.last_clean_head
+        if not head_sha:
             return None
         base_sha = node.managed_base_commit
+        target_repo = self._target_repo_slug(ctx.config)
         return (
-            f"https://github.com/{target_repo}/compare/"
-            f"{quote(base_sha, safe=':/')}...{quote(head_sha, safe=':/')}"
+            f"https://github.com/{target_repo}/pull/{pr.number}/changes/"
+            f"{quote(base_sha, safe=':/')}..{quote(head_sha, safe=':/')}"
         )
 
     @contextlib.contextmanager

@@ -84,11 +84,11 @@ def test_pr_pr_block_omits_changes_link(
     ctx, current = _build_ctx("pr-pr", service)
     block = service._render_stack_block(ctx, current)
     assert "[changes]" not in block
-    assert "(changes)" not in block
     # The PR links themselves are still present — only the compare URL is stripped.
     assert "PR #11" in block
     assert "PR #12" in block
-    assert "**feat-b**" in block
+    # Current branch line is bold-wrapped.
+    assert "**`feat-b` (current) [PR #12](https://github.com/acme/widgets/pull/12)**" in block
 
 
 def test_repo_pr_block_includes_changes_link(
@@ -100,6 +100,7 @@ def test_repo_pr_block_includes_changes_link(
     monkeypatch.setattr(service, "_compare_url", _compare)
     ctx, current = _build_ctx("repo-pr", service)
     block = service._render_stack_block(ctx, current)
+    # Both ancestor and current get a changes link — previously the ancestor
+    # line had no link because _compare_url required a live worktree checkout.
     assert "[changes](https://github.com/acme/widgets/compare/abc...def?node=feat-a)" in block
     assert "[changes](https://github.com/acme/widgets/compare/abc...def?node=feat-b)" in block
-    assert "(changes)](https://github.com/acme/widgets/compare/abc...def?node=feat-b)" in block

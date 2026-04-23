@@ -203,8 +203,9 @@ def test_repo_pr_includes_compare_url_in_block(
 
     final = {r.number: b for (r, b) in backend.edited if b is not None}
     body_b = final[2]
-    # Compare URL format: github.com/<repo>/compare/<base>...<head>
-    assert "/compare/" in body_b
+    # Files-changed URL format: <pr-url>/changes/<base>..<head>
+    # (matches universe gitstack's <pr>/files/<parent>..<head>).
+    assert "/pull/2/changes/" in body_b
     assert "[changes](" in body_b
 
 
