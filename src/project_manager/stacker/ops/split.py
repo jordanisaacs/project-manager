@@ -97,7 +97,7 @@ def _plan_split(
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
             "Another stacker operation is active for this repo. "
-            "Use 'stacker continue' or 'stacker abort'."
+            "Use `pm stacker continue` or `pm stacker abort`."
         )
     tracked = require_tracked(ctx, target)
     current_path = worktree.require_checked_out(

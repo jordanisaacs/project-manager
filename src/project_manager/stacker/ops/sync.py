@@ -35,7 +35,7 @@ def sync(
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
             "Another stacker operation is active for this repo. "
-            "Use 'stacker continue' or 'stacker abort'."
+            "Use `pm stacker continue` or `pm stacker abort`."
         )
     resolved = resolve_scope(ctx, target.repo_name, target.branch, spec)
     if not resolved:
@@ -106,7 +106,7 @@ def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
             "Another stacker operation is active for this repo. "
-            "Use 'stacker continue' or 'stacker abort'."
+            "Use `pm stacker continue` or `pm stacker abort`."
         )
     path = worktree.require_checked_out(ctx, target.repo_name, target.branch)
     ensure_syncable(path)

@@ -35,7 +35,7 @@ def test_guard_no_rebase_blocks_on_tracked_branch(
     slot = three_slots[0]
     _initialize(service, repo_name, slot, "feature-a")
     monkeypatch.chdir(slot.path)
-    with pytest.raises(stacker_git.GitError, match="managed by stacker"):
+    with pytest.raises(stacker_git.GitError, match="managed by pm stacker"):
         service.guard_no_rebase()
 
 
@@ -90,5 +90,5 @@ def test_guard_no_rebase_active_op_message(
         )
     )
     monkeypatch.chdir(slot.path)
-    with pytest.raises(stacker_git.GitError, match="active stacker operation"):
+    with pytest.raises(stacker_git.GitError, match="has an active operation"):
         service.guard_no_rebase()

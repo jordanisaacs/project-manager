@@ -14,7 +14,7 @@ def require_tracked(ctx: StackerCtx, target: SelectorTarget) -> TrackedBranch:
     if not tracked:
         raise git.GitError(
             f"{selectors.selector_for(target.repo_name, target.branch)} is not tracked. "
-            "Use 'stacker track' or 'stacker create'."
+            "Use `pm stacker create` to start a new stacked branch."
         )
     return tracked
 

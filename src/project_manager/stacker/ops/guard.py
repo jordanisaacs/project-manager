@@ -30,10 +30,10 @@ def guard_no_rebase(ctx: StackerCtx) -> None:
     label = selectors.selector_for(repo_name, context.branch)
     if ctx.db.get_operation(repo_name):
         raise git.GitError(
-            f"{label} is managed by stacker and has an active stacker operation. "
-            "Do not rebase it; use 'stacker continue' or 'stacker abort'."
+            f"{label} is managed by pm stacker and has an active operation. "
+            "Do not rebase it; use `pm stacker continue` or `pm stacker abort`."
         )
     raise git.GitError(
-        f"{label} is managed by stacker. "
-        "Do not rebase it; use stacker sync/push/repair instead."
+        f"{label} is managed by pm stacker. "
+        "Do not rebase it; use `pm stacker sync` or `pm stacker push` instead."
     )

@@ -29,7 +29,7 @@ def remove(
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
             "Another stacker operation is active for this repo. "
-            "Use 'stacker continue' or 'stacker abort'."
+            "Use `pm stacker continue` or `pm stacker abort`."
         )
     tracked = ctx.db.get_branch(target.repo_name, target.branch)
     if not tracked:

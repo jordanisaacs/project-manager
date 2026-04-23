@@ -36,7 +36,7 @@ def push(
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
             "Another stacker operation is active for this repo. "
-            "Use 'stacker continue' or 'stacker abort'."
+            "Use `pm stacker continue` or `pm stacker abort`."
         )
     resolved = resolve_scope(ctx, target.repo_name, target.branch, options.scope)
     if not resolved:

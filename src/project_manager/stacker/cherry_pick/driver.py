@@ -242,5 +242,5 @@ def failure_message(op: OperationState, slot_path: Path) -> str:
     if op.error_message:
         parts.append(f"Git says: {op.error_message}")
     parts.append(f"Worktree at: {slot_path}")
-    parts.append("Next action: stacker continue or stacker abort")
+    parts.append("Next action: `pm stacker continue` or `pm stacker abort`")
     return "\n".join(parts)
