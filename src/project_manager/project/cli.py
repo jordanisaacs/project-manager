@@ -40,11 +40,15 @@ def _cmd_attach(args: argparse.Namespace) -> int:
     paths = config.load()
     try:
         project = current.resolve_project(paths, args.project)
-        attached = attach_mod.attach(paths, project, _selected_repos(args))
+        result = attach_mod.attach(
+            paths, project, _selected_repos(args), no_branch=args.no_branch,
+        )
     except ProjectError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
-    for slot in attached:
+    for warning in result.warnings:
+        print(f"pm: warn: {warning}", file=sys.stderr)
+    for slot in result.newly_claimed:
         print(f"{slot.repo}\t{slot.path}")
     return 0
 
@@ -118,6 +122,11 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
 
     attach = sub.add_parser("attach", help="re-attach a project (best-effort slot reclaim)")
     attach.add_argument("project", nargs="?", metavar="<project>")
+    attach.add_argument(
+        "--no-branch",
+        action="store_true",
+        help="skip saved-branch restore (leave slot in detached HEAD)",
+    )
     _add_repos_or_all(attach)
     attach.set_defaults(func=_cmd_attach)
 

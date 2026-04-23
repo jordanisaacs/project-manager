@@ -1,12 +1,22 @@
 import contextlib
 import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
+from project_manager.project import branch as branch_mod
 from project_manager.project import db
+from project_manager.project.branch import RestoreResult
+
+
+@dataclass(frozen=True)
+class AttachResult:
+    newly_claimed: list[Slot] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _resolve_repos(
@@ -94,14 +104,59 @@ def _attach_one(  # noqa: PLR0913
     return s
 
 
-def attach(paths: Paths, project: str, repos: list[str] | None) -> list[Slot]:
+def _maybe_restore_branch(
+    paths: Paths,
+    conn: sqlite3.Connection,
+    repo: str,
+    slot_path: Path,
+    *,
+    no_branch: bool,
+) -> str | None:
+    """Restore saved branch into slot and clear the saved field.
+
+    Always clears `branch` on the row after attaching so in-session branch
+    changes by the user aren't accidentally reverted by a future attach.
+    Returns a human-readable warning string if restoration was skipped, else
+    None.
+    """
+    saved = db.get_branch(conn, repo)
+    if saved is None:
+        return None
+    warning: str | None = None
+    if not no_branch:
+        outcome = branch_mod.restore(slot_path, paths.repo(repo), saved)
+        if outcome.result == RestoreResult.SKIPPED_IN_USE:
+            warning = (
+                f"{repo}: saved branch '{saved}' already checked out at "
+                f"{outcome.conflict_path}; slot left on default"
+            )
+        elif outcome.result == RestoreResult.SKIPPED_MISSING_BRANCH:
+            warning = (
+                f"{repo}: saved branch '{saved}' no longer exists; "
+                f"slot left on default"
+            )
+    db.set_branch(conn, repo, None)
+    return warning
+
+
+def attach(
+    paths: Paths,
+    project: str,
+    repos: list[str] | None,
+    *,
+    no_branch: bool = False,
+) -> AttachResult:
     """Attach the given repos (or all if `repos is None`).
 
     For each repo row in the db: try the remembered `slot_uuid`. If the slot is missing
     or not free, claim any free slot and UPDATE the row. Best-effort rollback across
     repos on failure.
 
-    Returns the list of slots newly claimed.
+    After a fresh claim, restore the saved branch (unless `no_branch=True`). The
+    saved branch field is unconditionally cleared on successful attach.
+
+    Returns AttachResult with newly-claimed slots and any per-repo warnings
+    (e.g., saved branch already checked out elsewhere).
     """
     db_path = paths.project_db(project)
     if not db_path.is_file():
@@ -109,12 +164,18 @@ def attach(paths: Paths, project: str, repos: list[str] | None) -> list[Slot]:
 
     pooldb = PoolDB(paths.pool_db())
     attached: list[tuple[str, Slot]] = []
+    warnings: list[str] = []
     try:
         with db.transaction(db_path) as conn:
             to_attach = _resolve_repos(project, repos, db.list_repos(conn))
             for repo, remembered in to_attach:
                 s = _attach_one(paths, pooldb, project, repo, remembered, conn)
                 if s is not None:
+                    warning = _maybe_restore_branch(
+                        paths, conn, repo, s.path, no_branch=no_branch,
+                    )
+                    if warning:
+                        warnings.append(warning)
                     attached.append((repo, s))
     except BaseException:
         for repo, s in reversed(attached):
@@ -123,4 +184,4 @@ def attach(paths: Paths, project: str, repos: list[str] | None) -> list[Slot]:
                 forward.unlink()
             pooldb.release(repo, s.uuid)
         raise
-    return [s for _, s in attached]
+    return AttachResult(newly_claimed=[s for _, s in attached], warnings=warnings)

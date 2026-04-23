@@ -5,6 +5,7 @@ from project_manager.paths import Paths
 from project_manager.project import current
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
+from tests.helpers import git_pool
 
 
 def _mk_pool(paths: Paths, repo: str, uuids: list[str]) -> None:
@@ -40,10 +41,10 @@ def test_detach_while_inside_worktree_clears_detection(
     """After detach the pool row is gone, so worktree-path detection can't recover
     the project name. Users in this corner case must pass the name explicitly.
     """
-    _mk_pool(pm_env, "foo", ["a"])
+    slots = git_pool(pm_env, "foo", n=1)
     new_mod.new(pm_env, "demo", ["foo"])
     detach_mod.detach(pm_env, "demo", repos=None)
-    _chdir(monkeypatch, pm_env.worktrees / "foo" / "a")
+    _chdir(monkeypatch, slots[0].path)
     assert current.detect_current_project(pm_env) is None
 
 

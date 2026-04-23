@@ -4,9 +4,11 @@ from project_manager import check as check_mod
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
+from project_manager.project import db as project_db
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
 from project_manager.project import status as status_mod
+from tests.helpers import git_pool
 
 
 def _mk_pool(paths: Paths, repo: str, uuids: list[str]) -> None:
@@ -28,14 +30,16 @@ def test_status_healthy_project(pm_env: Paths) -> None:
 
 
 def test_status_includes_detached_row(pm_env: Paths) -> None:
-    _mk_pool(pm_env, "foo", ["a"])
+    git_pool(pm_env, "foo", n=1)
     new_mod.new(pm_env, "demo", ["foo"])
+    with project_db.readonly(pm_env.project_db("demo")) as conn:
+        uuid = dict(project_db.list_repos(conn))["foo"]
     detach_mod.detach(pm_env, "demo", repos=None)
     rows = status_mod.status(pm_env, "demo")
     assert len(rows) == 1
     assert rows[0].finding.kind == check_mod.Kind.DETACHED
     assert rows[0].repo == "foo"
-    assert rows[0].slot_uuid == "a"
+    assert rows[0].slot_uuid == uuid
 
 
 def test_status_raises_on_missing_project(pm_env: Paths) -> None:

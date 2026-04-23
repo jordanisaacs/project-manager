@@ -4,8 +4,10 @@ from project_manager import check
 from project_manager.paths import Paths
 from project_manager.pool.db import OWNER_STACKER_OPS, Owner, OwnerKind, PoolDB
 from project_manager.project import attach as attach_mod
+from project_manager.project import db as project_db
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
+from tests.helpers import git_pool
 
 
 def _mk_pool(paths: Paths, repo: str, uuids: list[str]) -> None:
@@ -26,7 +28,7 @@ def test_healthy_active(pm_env: Paths) -> None:
 
 
 def test_detached_reported(pm_env: Paths) -> None:
-    _mk_pool(pm_env, "foo", ["a"])
+    git_pool(pm_env, "foo", n=1)
     new_mod.new(pm_env, "demo", ["foo"])
     detach_mod.detach(pm_env, "demo", repos=None)
     findings = check.check(pm_env)
@@ -57,14 +59,17 @@ def test_stale_when_pool_row_missing(pm_env: Paths) -> None:
 
 
 def test_drift_is_informational(pm_env: Paths) -> None:
-    _mk_pool(pm_env, "foo", ["a", "b"])
+    slots = git_pool(pm_env, "foo", n=2)
     new_mod.new(pm_env, "demo", ["foo"])
     detach_mod.detach(pm_env, "demo", repos=None)
-    # Simulate drift: forward and pool row both point at slot b, but the
-    # project db still remembers slot a.
+    # Simulate drift: forward and pool row both point at the OTHER slot, but the
+    # project db still remembers the original.
+    with project_db.readonly(pm_env.project_db("demo")) as conn:
+        remembered = dict(project_db.list_repos(conn))["foo"]
+    other = next(s for s in slots if s.uuid != remembered)
     fwd = pm_env.projects / "demo" / "foo"
-    PoolDB(pm_env.pool_db()).claim("foo", "b", Owner(OwnerKind.PROJECT, "demo"))
-    fwd.symlink_to(pm_env.worktrees / "foo" / "b")
+    PoolDB(pm_env.pool_db()).claim("foo", other.uuid, Owner(OwnerKind.PROJECT, "demo"))
+    fwd.symlink_to(other.path)
     findings = check.check(pm_env)
     assert check.Kind.DRIFT in _kinds(findings)
     # fix should be a no-op for drift
@@ -96,7 +101,7 @@ def test_orphan_owner_points_at_nonmember_forward(pm_env: Paths) -> None:
 
 
 def test_attach_after_detach_round_trips_clean(pm_env: Paths) -> None:
-    _mk_pool(pm_env, "foo", ["a"])
+    git_pool(pm_env, "foo", n=1)
     new_mod.new(pm_env, "demo", ["foo"])
     detach_mod.detach(pm_env, "demo", repos=None)
     attach_mod.attach(pm_env, "demo", repos=None)
