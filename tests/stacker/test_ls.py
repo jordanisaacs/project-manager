@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -199,6 +200,55 @@ def test_ls_current_marker_renders_when_current_provided(
     assert "(current)" in out
     # Non-current rows still get the 2-space gutter.
     assert "  demo" in out
+
+
+def test_ls_no_banner_when_current_branch_is_tracked(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """The `>` / `(current)` row-level markers carry the tracked-branch
+    indication on their own; the banner is reserved for the untracked case.
+    """
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "b")),
+    )
+    assert "not tracked by pm" not in out
+    assert "(on tracked branch" not in out
+
+
+def test_ls_banner_when_current_branch_is_not_tracked(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "scratch-branch")),
+    )
+    assert "(current branch `scratch-branch` is not tracked by pm)" in out
+
+
+def test_ls_no_banner_when_cwd_outside_a_slot(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(current=None))
+    assert "not tracked by pm" not in out
+    assert "(on tracked branch" not in out
+
+
+def test_ls_empty_message_mentions_untracked_current(
+    stacker_repo: tuple[str, Path],
+    service: StackerService,
+) -> None:
+    """Empty repo + cwd in slot on untracked branch: surface both facts."""
+    repo_name, _ = stacker_repo
+    out = service.ls_text(
+        repo_name,
+        LsOptions(current=(repo_name, "exploration")),
+    )
+    assert repo_name in out
+    assert "`exploration` is not tracked by pm" in out
 
 
 def test_ls_local_only_icon_shown_by_default(

@@ -81,12 +81,33 @@ def ls_text(
             if pr.merged
         }
         branches = [b for b in branches if (b.repo_name, b.branch) not in merged]
-    if not branches:
-        return "No tracked branches."
     if options.json_output:
         return _ls_json(ctx, branches, options.details, options.current)
+    if not branches:
+        return _empty_text(ctx, repo_name, options.current)
     return _ls_tree(
         ctx, branches, options.details, options.current, options.render,
+    )
+
+
+def _empty_text(
+    ctx: StackerCtx, repo_name: str | None, current: tuple[str, str] | None,
+) -> str:
+    """Empty-set message. Adds the "not tracked" note when it applies.
+
+    A tracked current branch implies the result set cannot truly be
+    empty, so we only need to surface the unmanaged-branch case here.
+    """
+    if current is None:
+        return "No tracked branches."
+    cur_repo, cur_branch = current
+    if repo_name is not None and cur_repo != repo_name:
+        return "No tracked branches."
+    if ctx.db.get_branch(cur_repo, cur_branch) is not None:
+        return "No tracked branches."
+    return (
+        f"No tracked branches in {cur_repo}. "
+        f"Current branch `{cur_branch}` is not tracked by pm."
     )
 
 
@@ -183,6 +204,21 @@ def _ls_tree(
         # Two-space gutter mirrors the per-row `> ` current marker.
         lines.append("  " + fmt.style(repo, fg="blue", bold=True))
         tracked_branches = {item.branch for item in items}
+        if (
+            current is not None
+            and current[0] == repo
+            and current[1] not in tracked_branches
+        ):
+            # Tracked branches already signal their state via the `> / (current)`
+            # marker; only call out the non-managed case, where the marker
+            # can't fire and the reader would otherwise miss the branch.
+            lines.append(
+                "  "
+                + fmt.style(
+                    f"(current branch `{current[1]}` is not tracked by pm)",
+                    fg="yellow",
+                ),
+            )
         roots: list[tuple[str, bool]] = []
         seen_roots: set[str] = set()
         for item in items:
