@@ -73,6 +73,29 @@ def test_worktrees_unknown_project_silent(
     assert capsys.readouterr().out == ""
 
 
+def test_worktrees_filter_by_attach_state(
+    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """state=attached/unattached filter correctly."""
+    from project_manager.project import detach as detach_mod
+    git_pool(pm_env, "foo", n=2)
+    create_mod.create(pm_env, "demo", [("foo1", "foo"), ("foo2", "foo")])
+    # Detach foo1 → it should appear in "unattached", not in "attached".
+    detach_mod.detach(pm_env, "demo", ["foo1"])
+
+    # attached → foo2 only
+    assert worktrees(project="demo", state="attached") == 0
+    assert capsys.readouterr().out.splitlines() == ["foo2"]
+
+    # unattached → foo1 only
+    assert worktrees(project="demo", state="unattached") == 0
+    assert capsys.readouterr().out.splitlines() == ["foo1"]
+
+    # all → both
+    assert worktrees(project="demo", state="all") == 0
+    assert set(capsys.readouterr().out.splitlines()) == {"foo1", "foo2"}
+
+
 def test_worktrees_no_project_outside_cwd(
     pm_env: Paths,
     capsys: pytest.CaptureFixture[str],
