@@ -296,6 +296,158 @@ def test_ls_legend_ignored_in_json_mode(
     assert "branches" in payload
 
 
+# --- color tests -----------------------------------------------------------
+
+_GREEN = "\x1b[32m"
+_GREEN_BOLD = "\x1b[1;32m"
+_BOLD = "\x1b[1m"
+
+
+@pytest.fixture
+def force_color(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pytest's stdout isn't a TTY, so `output.use_color` normally returns
+    False. Flip `CLICOLOR_FORCE` on and ensure `NO_COLOR` is unset so the
+    real ANSI escape codes show up in the captured text.
+    """
+    monkeypatch.setenv("CLICOLOR_FORCE", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
+def _seed_approved(
+    svc: StackerService, repo_name: str, branch: str,
+) -> RecordingPRBackend:
+    """Install an approved PR for `branch` via a fake PR backend.
+
+    Returns the backend so callers can further tweak it. The PR state is
+    pre-cached so the `--online` refresh path and the offline path both
+    see the same approval flags after the bulk fetch runs.
+    """
+    backend = svc._ctx.pr_backend
+    assert isinstance(backend, RecordingPRBackend)
+    svc.db.upsert_pr_state(
+        PRState(
+            repo_name=repo_name,
+            branch=branch,
+            pr_url="https://github.com/acme/widgets/pull/1",
+            state="OPEN",
+            is_approved=True,
+        ),
+    )
+    backend.review_by_pr[("acme", "widgets", 1)] = gh.PRReviewSummary(
+        state="OPEN",
+        is_draft=False,
+        is_approved=True,
+        has_open_comments=False,
+    )
+    return backend
+
+
+def test_ls_icon_mode_does_not_color_non_current_branch_names(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+    force_color: None,
+) -> None:
+    """Regression: under the default `icon` color mode only the status
+    symbol should carry a per-row color. Previously every tracked branch
+    name came out green+bold from a stale fallback.
+    """
+    _ = force_color
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(
+            current=(tracked_stack.repo_name, "b"),
+            render=RenderOptions(online=False, color_mode="icon"),
+        ),
+    )
+    # Current row: green+bold (the cwd marker still stands out).
+    assert f"{_GREEN_BOLD}demo:b\x1b[0m" in out
+    # Non-current rows: no green styling on the name.
+    assert f"{_GREEN}demo:a" not in out
+    assert f"{_GREEN_BOLD}demo:a" not in out
+    assert f"{_GREEN}demo:c" not in out
+    assert f"{_GREEN_BOLD}demo:c" not in out
+
+
+def test_ls_icon_mode_colors_symbol_not_name_for_approved(
+    tracked_stack: TrackedStack,
+    pm_env: Paths,
+    force_color: None,
+) -> None:
+    _ = force_color
+    svc = StackerService(
+        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+    )
+    _seed_approved(svc, tracked_stack.repo_name, "b")
+    out = svc.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(render=RenderOptions(online=True, color_mode="icon")),
+    )
+    # Approved glyph is green.
+    assert f"{_GREEN}✓\x1b[0m" in out
+    # Branch name not green under `icon` mode.
+    assert f"{_GREEN}demo:b" not in out
+    assert f"{_GREEN_BOLD}demo:b" not in out
+
+
+def test_ls_title_mode_colors_both_symbol_and_approved_branch_name(
+    tracked_stack: TrackedStack,
+    pm_env: Paths,
+    force_color: None,
+) -> None:
+    _ = force_color
+    svc = StackerService(
+        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+    )
+    _seed_approved(svc, tracked_stack.repo_name, "b")
+    out = svc.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(render=RenderOptions(online=True, color_mode="title")),
+    )
+    assert f"{_GREEN}✓\x1b[0m" in out
+    assert f"{_GREEN_BOLD}demo:b\x1b[0m" in out
+
+
+def test_ls_color_mode_off_drops_current_branch_fg(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+    force_color: None,
+) -> None:
+    """`--color-mode off` drops per-status / current fg on names and icons,
+    but `fmt.style`-based chrome (repo header, suffix tokens, etc.) keeps
+    its colors — only `NO_COLOR=1` silences those.
+    """
+    _ = force_color
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(
+            current=(tracked_stack.repo_name, "b"),
+            render=RenderOptions(color_mode="off"),
+        ),
+    )
+    # Current row is bold but not green.
+    assert f"{_BOLD}demo:b\x1b[0m" in out
+    assert f"{_GREEN_BOLD}demo:b" not in out
+    # Repo header keeps its blue styling (unaffected by color_mode).
+    assert "\x1b[1;34mdemo\x1b[0m" in out
+
+
+def test_ls_no_color_env_strips_every_ansi_escape(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("CLICOLOR_FORCE", "1")  # NO_COLOR wins over this.
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "b")),
+    )
+    assert "\x1b[" not in out
+
+
+# --- end color tests -------------------------------------------------------
+
+
 def test_ls_empty_message_mentions_untracked_current(
     stacker_repo: tuple[str, Path],
     service: StackerService,

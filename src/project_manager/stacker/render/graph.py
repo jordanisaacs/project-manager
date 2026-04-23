@@ -272,20 +272,27 @@ def _name_label(
     pos: GraphPos,
     gctx: GraphCtx,
 ) -> str:
-    """Styled branch name. Current → green+bold; else color-mode-aware."""
+    """Styled branch name per color-mode.
+
+    Current branch is always green+bold so the cwd row stands out
+    regardless of mode. Non-current names:
+      - `off` / `icon`: plain (bold for tracked rows)
+      - `title` / `full`: colored per status when the status has a
+        review-state color (`pr_approved` → green, `pr_open_comments` →
+        red, etc.); otherwise plain bold
+    """
     label = selectors.selector_for(gctx.repo_name, pos.branch)
     is_current = status is not None and status.is_current
+    bold = is_current or not pos.implicit
     mode = gctx.render_opts.color_mode
-    if mode == "off":
-        return fmt.style(label, bold=is_current or not pos.implicit)
-    if is_current:
+    if is_current and mode != "off":
         return fmt.style(label, fg="green", bold=True)
     if mode in ("title", "full") and tracked is not None and status is not None:
         kind = classify(tracked, pr, status, online=gctx.render_opts.online)
         color = _ICON_COLOR[kind]
         if color is not None:
-            return fmt.style(label, fg=color, bold=not pos.implicit)
-    return fmt.style(label, fg="green", bold=not pos.implicit)
+            return fmt.style(label, fg=color, bold=bold)
+    return fmt.style(label, bold=bold)
 
 
 def _apply_merged_style(text: str, style: MergedStyle) -> str:
