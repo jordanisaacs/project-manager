@@ -5,8 +5,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .models import RepoContext
-
 
 class GitError(RuntimeError):
     pass
@@ -14,29 +12,38 @@ class GitError(RuntimeError):
 
 @dataclass(frozen=True)
 class WorktreeInfo:
-    path: str
+    path: Path
     branch: str | None
+
+
+@dataclass(frozen=True)
+class GitContext:
+    """Filesystem-level context of the cwd: absolute repo root + worktree + branch.
+
+    Distinct from stacker.models.RepoContext, which is pm-level (repo_name).
+    """
+
+    repo_root: Path
+    worktree_path: Path
+    branch: str
 
 
 def run(
     cmd: list[str],
     *,
-    cwd: str | None = None,
+    cwd: Path | None = None,
     env: dict[str, str] | None = None,
-    capture_output: bool = True,
     check: bool = True,
-    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     full_env = os.environ.copy()
     if env:
         full_env.update(env)
     proc = subprocess.run(
         cmd,
-        cwd=cwd,
+        cwd=str(cwd) if cwd is not None else None,
         env=full_env,
         text=True,
-        input=input_text,
-        capture_output=capture_output,
+        capture_output=True,
         check=False,
     )
     if check and proc.returncode != 0:
@@ -44,71 +51,76 @@ def run(
     return proc
 
 
-def git(path: str, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return run(["git", "-C", path, *args], check=check)
+def git(path: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return run(["git", "-C", str(path), *args], check=check)
 
 
-def current_context(cwd: str | None = None) -> RepoContext:
-    path = cwd or os.getcwd()
+def current_context(cwd: Path | None = None) -> GitContext:
+    path = cwd if cwd is not None else Path.cwd()
     repo_root = repo_root_for_path(path)
-    worktree_path = git(path, "rev-parse", "--show-toplevel").stdout.strip()
+    worktree_path = Path(git(path, "rev-parse", "--show-toplevel").stdout.strip())
     branch = current_branch(worktree_path)
     if not branch:
-        raise GitError(f"Detached HEAD at {worktree_path}; stacker requires a branch checkout.")
-    return RepoContext(repo_root=repo_root, worktree_path=worktree_path, branch=branch)
+        raise GitError(
+            f"Detached HEAD at {worktree_path}; stacker requires a branch checkout."
+        )
+    return GitContext(repo_root=repo_root, worktree_path=worktree_path, branch=branch)
 
 
-def repo_root_for_path(path: str) -> str:
+def repo_root_for_path(path: Path) -> Path:
     common_dir = git(path, "rev-parse", "--git-common-dir").stdout.strip()
+    common_path = Path(common_dir)
     if common_dir.endswith("/.git"):
-        return str(Path(common_dir).parent.resolve())
-    return str((Path(path) / common_dir).resolve().parent)
+        return common_path.parent.resolve()
+    return (path / common_dir).resolve().parent
 
 
-def current_branch(path: str) -> str:
+def current_branch(path: Path) -> str:
     return git(path, "branch", "--show-current").stdout.strip()
 
 
-def upstream_branch(path: str) -> str | None:
-    proc = git(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", check=False)
+def upstream_branch(path: Path) -> str | None:
+    proc = git(
+        path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", check=False
+    )
     if proc.returncode != 0:
         return None
     upstream = proc.stdout.strip()
     return upstream or None
 
 
-def upstream_branch_name(path: str) -> str | None:
+def upstream_branch_name(path: Path) -> str | None:
     upstream = upstream_branch(path)
     if not upstream or "/" not in upstream:
         return None
     return upstream.split("/", 1)[1]
 
 
-def branch_exists(repo_root: str, branch: str) -> bool:
+def branch_exists(repo_root: Path, branch: str) -> bool:
     return git(repo_root, "rev-parse", "--verify", branch, check=False).returncode == 0 or git(
         repo_root, "rev-parse", "--verify", f"origin/{branch}", check=False
     ).returncode == 0
 
 
-def rev_parse(path: str, rev: str) -> str:
+def rev_parse(path: Path, rev: str) -> str:
     return git(path, "rev-parse", rev).stdout.strip()
 
 
-def merge_base(repo_root: str, left: str, right: str) -> str:
+def merge_base(repo_root: Path, left: str, right: str) -> str:
     return git(repo_root, "merge-base", left, right).stdout.strip()
 
 
-def rev_list(path: str, revspec: str) -> list[str]:
+def rev_list(path: Path, revspec: str) -> list[str]:
     out = git(path, "rev-list", "--reverse", revspec).stdout.strip()
     return [line for line in out.splitlines() if line]
 
 
-def rev_count(path: str, revspec: str) -> int:
+def rev_count(path: Path, revspec: str) -> int:
     out = git(path, "rev-list", "--count", revspec).stdout.strip()
     return int(out or "0")
 
 
-def log_subject_and_author(path: str, revspec: str) -> list[tuple[str, str]]:
+def log_subject_and_author(path: Path, revspec: str) -> list[tuple[str, str]]:
     out = git(path, "log", "--reverse", "--format=%s%x09%an", revspec).stdout.strip()
     entries: list[tuple[str, str]] = []
     for line in out.splitlines():
@@ -119,7 +131,7 @@ def log_subject_and_author(path: str, revspec: str) -> list[tuple[str, str]]:
     return entries
 
 
-def first_commit_title_and_body(path: str, revspec: str) -> tuple[str, str]:
+def first_commit_title_and_body(path: Path, revspec: str) -> tuple[str, str]:
     out = git(path, "log", "--reverse", "--format=%s%x1f%b%x1e", revspec).stdout
     if not out:
         return ("", "")
@@ -133,16 +145,16 @@ def first_commit_title_and_body(path: str, revspec: str) -> tuple[str, str]:
     return subject.strip(), body.strip()
 
 
-def worktree_list(repo_root: str) -> list[WorktreeInfo]:
+def worktree_list(repo_root: Path) -> list[WorktreeInfo]:
     out = git(repo_root, "worktree", "list", "--porcelain").stdout
     items: list[WorktreeInfo] = []
-    current_path: str | None = None
+    current_path: Path | None = None
     current_branch_name: str | None = None
     for line in out.splitlines():
         if line.startswith("worktree "):
             if current_path is not None:
                 items.append(WorktreeInfo(path=current_path, branch=current_branch_name))
-            current_path = line[len("worktree ") :]
+            current_path = Path(line[len("worktree ") :])
             current_branch_name = None
         elif line.startswith("branch refs/heads/"):
             current_branch_name = line[len("branch refs/heads/") :]
@@ -155,7 +167,7 @@ def worktree_list(repo_root: str) -> list[WorktreeInfo]:
     return items
 
 
-def has_tracked_changes(path: str) -> bool:
+def has_tracked_changes(path: Path) -> bool:
     # `git status` is expensive in large repos. Quiet diff checks are enough here
     # because stacker only needs a yes/no answer for tracked staged or unstaged changes.
     git(path, "update-index", "-q", "--refresh", check=False)
@@ -163,65 +175,65 @@ def has_tracked_changes(path: str) -> bool:
         return bool(git(path, "status", "--porcelain=v1", "-uno").stdout.strip())
     if git(path, "diff-index", "--quiet", "--cached", "HEAD", "--", check=False).returncode != 0:
         return True
-    if git(path, "diff-files", "--quiet", "--", check=False).returncode != 0:
-        return True
-    return False
+    return git(path, "diff-files", "--quiet", "--", check=False).returncode != 0
 
 
-def cherry_pick_in_progress(path: str) -> bool:
+def cherry_pick_in_progress(path: Path) -> bool:
     cherry_pick_head = git(path, "rev-parse", "--git-path", "CHERRY_PICK_HEAD").stdout.strip()
     return Path(cherry_pick_head).exists()
 
 
-def reset_hard(path: str, target: str) -> None:
+def reset_hard(path: Path, target: str) -> None:
     git(path, "reset", "--hard", target)
 
 
-def cherry_pick(path: str, commit: str) -> subprocess.CompletedProcess[str]:
+def cherry_pick(path: Path, commit: str) -> subprocess.CompletedProcess[str]:
     return run(
-        ["git", "-C", path, "-c", "core.editor=true", "cherry-pick", "--no-edit", commit],
+        ["git", "-C", str(path), "-c", "core.editor=true", "cherry-pick", "--no-edit", commit],
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
     )
 
 
-def cherry_pick_continue(path: str) -> subprocess.CompletedProcess[str]:
+def cherry_pick_continue(path: Path) -> subprocess.CompletedProcess[str]:
     return run(
-        ["git", "-C", path, "-c", "core.editor=true", "cherry-pick", "--continue"],
+        ["git", "-C", str(path), "-c", "core.editor=true", "cherry-pick", "--continue"],
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
     )
 
 
-def cherry_pick_skip(path: str) -> subprocess.CompletedProcess[str]:
+def cherry_pick_skip(path: Path) -> subprocess.CompletedProcess[str]:
     return run(
-        ["git", "-C", path, "-c", "core.editor=true", "cherry-pick", "--skip"],
+        ["git", "-C", str(path), "-c", "core.editor=true", "cherry-pick", "--skip"],
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
     )
 
 
-def cherry_pick_abort(path: str) -> subprocess.CompletedProcess[str]:
+def cherry_pick_abort(path: Path) -> subprocess.CompletedProcess[str]:
     return git(path, "cherry-pick", "--abort", check=False)
 
 
-def pp_force(path: str) -> subprocess.CompletedProcess[str]:
-    return run(["git", "-C", path, "pp", "--force"], check=False)
+def pp_force(path: Path) -> subprocess.CompletedProcess[str]:
+    return run(["git", "-C", str(path), "pp", "--force"], check=False)
 
 
-def is_ancestor(repo_root: str, older: str, newer: str) -> bool:
+def is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
     return git(repo_root, "merge-base", "--is-ancestor", older, newer, check=False).returncode == 0
 
 
-def guess_trunk_branch(repo_root: str) -> str:
+def guess_trunk_branch(repo_root: Path) -> str:
     for candidate in ("main", "master"):
         if branch_exists(repo_root, candidate):
             return candidate
     current = current_branch(repo_root)
     if current:
         return current
-    out = git(repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads", check=False).stdout.strip()
-    branches = [line for line in out.splitlines() if line]
+    proc = git(
+        repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads", check=False
+    )
+    branches = [line for line in proc.stdout.strip().splitlines() if line]
     if branches:
         return branches[0]
     raise GitError(f"Could not determine a trunk branch for {repo_root}.")

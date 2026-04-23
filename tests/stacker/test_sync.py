@@ -4,22 +4,23 @@ from pathlib import Path
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
-from project_manager.pool import worktree as wt
-from project_manager.stacker import locate, ops_slot
+from project_manager.stacker import git as stacker_git
+from project_manager.stacker import locate
 from project_manager.stacker.models import ParentLocator, SelectorTarget
 from project_manager.stacker.service import StackerService
 
 from .conftest import commit_file
 
 
-def _initialize(service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str) -> None:
-    parent = ParentLocator(repo_name=repo_name, branch="main")
+def _initialize(
+    service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str
+) -> None:
     service.initialize_worktree(
         repo_name=repo_name,
         worktree_path=slot.path,
         branch=branch,
         create_branch=True,
-        parent=parent,
+        parent=ParentLocator(repo_name=repo_name, branch="main"),
     )
 
 
@@ -29,7 +30,6 @@ def _advance_main(repo_path: Path) -> str:
 
 
 def test_sync_against_live_worktree(
-    pm_env: Paths,  # noqa: ARG001
     stacker_repo: tuple[str, Path],
     three_slots: list[slot_mod.Slot],
     service: StackerService,
@@ -44,7 +44,6 @@ def test_sync_against_live_worktree(
 
     result = service.sync(SelectorTarget(repo_name=repo_name, branch="feature-a"))
     assert "Sync complete." in result
-    # The branch's last_clean_head should now be set, and parent base updated.
     tracked = service.db.get_branch(repo_name, "feature-a")
     assert tracked is not None
     assert tracked.managed_base_commit == new_main
@@ -61,24 +60,25 @@ def test_sync_branch_not_checked_out_acquires_ops_slot(
     _initialize(service, repo_name, feature_slot, "feature-b")
     commit_file(feature_slot.path, "feat.txt", "work\n", "feature work")
     # Simulate the branch moving out of any pool slot: detach the slot.
-    wt._git(feature_slot.path, "checkout", "--detach", "HEAD")
-    # Free the slot so ops_slot can claim another one (or this one).
-    slot_mod.release(feature_slot) if feature_slot.owner_path.exists() else None
+    stacker_git.git(feature_slot.path, "checkout", "--detach", "HEAD")
+    if feature_slot.owner_path.exists():
+        slot_mod.release(feature_slot)
     assert locate.locate_worktree(pm_env, repo_name, "feature-b") is None
 
     _advance_main(repo_path)
 
     result = service.sync(SelectorTarget(repo_name=repo_name, branch="feature-b"))
     assert "Sync complete." in result
-    # After clean completion, the ops slot should be released (detached HEAD, .owner gone).
+    # After clean completion no slot should be held by the ops marker.
+    ops_marker = pm_env.stacker_ops_marker().resolve()
     for slot in slot_mod.list_slots(pm_env, repo_name):
-        if slot.owner_target() is not None:
-            # If any slot is still owned, it should be by a project (not the ops marker).
-            assert slot.owner_target().resolve() != pm_env.stacker_ops_marker().resolve()
+        target = slot.owner_target()
+        if target is None:
+            continue
+        assert target.resolve() != ops_marker
 
 
 def test_sync_paused_on_conflict_keeps_slot_claimed(
-    pm_env: Paths,
     stacker_repo: tuple[str, Path],
     three_slots: list[slot_mod.Slot],
     service: StackerService,
@@ -93,7 +93,6 @@ def test_sync_paused_on_conflict_keeps_slot_claimed(
 
     result = service.sync(SelectorTarget(repo_name=repo_name, branch="feature-c"))
     assert "paused" in result.lower()
-    # Operation row persists.
     op = service.db.get_operation(repo_name)
     assert op is not None
     assert op.status == "paused"

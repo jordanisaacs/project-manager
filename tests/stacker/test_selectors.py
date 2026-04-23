@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -66,8 +67,6 @@ def test_resolve_parent_for_base_rejects_cross_repo(
     # Create a second repo.
     other = pm_env.repo("other")
     other.mkdir()
-    import subprocess
-
     subprocess.run(["git", "init", "-q", "-b", "main", str(other)], check=True)
     with pytest.raises(git.GitError, match="same repo"):
         selectors.resolve_parent_for_base(pm_env, repo_name, "other:main")

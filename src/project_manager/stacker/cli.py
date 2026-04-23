@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from project_manager import config
@@ -10,7 +11,7 @@ from project_manager.pool import slot as slot_mod
 
 from . import git, ops_slot, selectors
 from .db import StackerDB
-from .models import SelectorTarget
+from .models import OperationState, SelectorTarget
 from .service import StackerService
 
 
@@ -23,13 +24,18 @@ def _target(args: argparse.Namespace) -> SelectorTarget:
     return SelectorTarget(repo_name=args.repo, branch=args.branch)
 
 
+def _require_base(base: str | None) -> str:
+    if not base:
+        raise git.GitError("pm stacker create requires --base <parent-branch>.")
+    return base
+
+
 def _cmd_create(args: argparse.Namespace) -> int:
     paths = config.load()
     service = _service(paths)
     try:
-        if not args.base:
-            raise git.GitError("pm stacker create requires --base <parent-branch>.")
-        parent = selectors.resolve_parent_for_base(paths, args.repo, args.base)
+        base = _require_base(args.base)
+        parent = selectors.resolve_parent_for_base(paths, args.repo, base)
         target_slot = ops_slot.claim(paths, args.repo)
         try:
             service.initialize_worktree(
@@ -63,110 +69,46 @@ def _cmd_track(args: argparse.Namespace) -> int:
 
 
 def _cmd_untrack(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        message = service.untrack(_target(args))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    print(message)
-    return 0
+    return _run(lambda svc: svc.untrack(_target(args)))
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.sync(_target(args)))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.sync(_target(args)))
 
 
 def _cmd_push(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.push(_target(args)))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.push(_target(args)))
 
 
 def _cmd_pr(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.pr(_target(args), draft=args.draft))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.pr(_target(args), draft=args.draft))
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.status_text(_target(args)))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.status_text(_target(args)))
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.log_text(_target(args)))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.log_text(_target(args)))
 
 
 def _cmd_graph(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.graph_text(args.repo))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.graph_text(args.repo))
 
 
 def _cmd_continue(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.continue_operation(args.repo))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.continue_operation(args.repo))
 
 
 def _cmd_abort(args: argparse.Namespace) -> int:
-    paths = config.load()
-    service = _service(paths)
-    try:
-        print(service.abort_operation(args.repo))
-    except git.GitError as e:
-        print(f"pm: {e}", file=sys.stderr)
-        return 2
-    return 0
+    return _run(lambda svc: svc.abort_operation(args.repo))
 
 
 def _cmd_repo_set_pr_mode(args: argparse.Namespace) -> int:
     paths = config.load()
     service = _service(paths)
     try:
-        config_row = service.set_pr_mode(
+        row = service.set_pr_mode(
             repo_name=args.repo,
             mode=args.mode,
             trunk_branch=args.trunk,
@@ -175,93 +117,111 @@ def _cmd_repo_set_pr_mode(args: argparse.Namespace) -> int:
     except git.GitError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
-    print(f"{config_row.repo_name}\t{config_row.mode}\t{config_row.trunk_branch}")
+    print(f"{row.repo_name}\t{row.mode}\t{row.trunk_branch}")
     return 0
 
 
 def _cmd_repo_show_pr_mode(args: argparse.Namespace) -> int:
+    return _run(lambda svc: svc.show_pr_mode(args.repo))
+
+
+def _run(op: Callable[[StackerService], str]) -> int:
     paths = config.load()
-    service = _service(paths)
     try:
-        print(service.show_pr_mode(args.repo))
+        result = op(_service(paths))
     except git.GitError as e:
         print(f"pm: {e}", file=sys.stderr)
         return 2
+    print(result)
     return 0
 
 
-def add_subparser(subparsers: argparse._SubParsersAction) -> None:
-    stacker = subparsers.add_parser("stacker", help="branch-stack tracking against pm's pool")
-    sub = stacker.add_subparsers(dest="cmd", required=True)
+_Handler = Callable[[argparse.Namespace], int]
 
-    create = sub.add_parser("create", help="claim a slot, create a branch off --base, track it")
+
+def _add_branch_subcommand(
+    sub: argparse._SubParsersAction,
+    name: str,
+    handler: _Handler,
+    *,
+    help_text: str,
+) -> argparse.ArgumentParser:
+    p = sub.add_parser(name, help=help_text)
+    p.add_argument("--repo", required=True)
+    p.add_argument("branch")
+    p.set_defaults(func=handler)
+    return p
+
+
+def _add_stacker_commands(sub: argparse._SubParsersAction) -> None:
+    create = sub.add_parser("create", help="claim a slot, create branch off --base, track it")
     create.add_argument("--repo", required=True)
     create.add_argument("-b", "--branch", required=True)
     create.add_argument("--base", help="parent branch (or repo:parent)")
     create.set_defaults(func=_cmd_create)
 
-    track = sub.add_parser("track", help="adopt an existing branch into the stack")
-    track.add_argument("--repo", required=True)
-    track.add_argument("branch")
+    track = _add_branch_subcommand(
+        sub, "track", _cmd_track, help_text="adopt an existing branch into the stack"
+    )
     track.add_argument("--parent", required=True)
-    track.set_defaults(func=_cmd_track)
 
-    untrack = sub.add_parser("untrack", help="stop tracking a branch; reparent children")
-    untrack.add_argument("--repo", required=True)
-    untrack.add_argument("branch")
-    untrack.set_defaults(func=_cmd_untrack)
-
-    sync = sub.add_parser("sync", help="cherry-pick the branch onto its parent's tip")
-    sync.add_argument("--repo", required=True)
-    sync.add_argument("branch")
-    sync.set_defaults(func=_cmd_sync)
-
-    push = sub.add_parser("push", help="sync every descendant of this branch in topo order")
-    push.add_argument("--repo", required=True)
-    push.add_argument("branch")
-    push.set_defaults(func=_cmd_push)
-
-    pr = sub.add_parser("pr", help="pp + create/update PR for the branch")
-    pr.add_argument("--repo", required=True)
-    pr.add_argument("branch")
+    _add_branch_subcommand(
+        sub, "untrack", _cmd_untrack, help_text="stop tracking a branch; reparent children"
+    )
+    _add_branch_subcommand(
+        sub, "sync", _cmd_sync, help_text="cherry-pick the branch onto its parent's tip"
+    )
+    _add_branch_subcommand(
+        sub, "push", _cmd_push, help_text="sync every descendant of this branch",
+    )
+    pr = _add_branch_subcommand(sub, "pr", _cmd_pr, help_text="pp + create/update PR")
     pr.add_argument("--draft", action="store_true")
-    pr.set_defaults(func=_cmd_pr)
+    _add_branch_subcommand(
+        sub, "status", _cmd_status, help_text="show tracking + operation state",
+    )
+    _add_branch_subcommand(
+        sub, "log", _cmd_log, help_text="show commits since the branch's managed base",
+    )
 
-    status = sub.add_parser("status", help="show tracking + operation state for a branch")
-    status.add_argument("--repo", required=True)
-    status.add_argument("branch")
-    status.set_defaults(func=_cmd_status)
 
-    log = sub.add_parser("log", help="show commits since the branch's managed base")
-    log.add_argument("--repo", required=True)
-    log.add_argument("branch")
-    log.set_defaults(func=_cmd_log)
-
+def _add_repo_only_commands(sub: argparse._SubParsersAction) -> None:
     graph = sub.add_parser("graph", help="render tracked branches as a tree")
     graph.add_argument("--repo", default=None)
     graph.set_defaults(func=_cmd_graph)
 
-    cont = sub.add_parser("continue", help="resume a paused stacker operation")
-    cont.add_argument("--repo", required=True)
-    cont.set_defaults(func=_cmd_continue)
+    for name, handler, help_text in (
+        ("continue", _cmd_continue, "resume a paused stacker operation"),
+        ("abort", _cmd_abort, "abort a paused stacker operation and reset state"),
+    ):
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("--repo", required=True)
+        p.set_defaults(func=handler)
 
-    abort = sub.add_parser("abort", help="abort a paused stacker operation and reset state")
-    abort.add_argument("--repo", required=True)
-    abort.set_defaults(func=_cmd_abort)
 
+def _add_repo_config_commands(sub: argparse._SubParsersAction) -> None:
     repo = sub.add_parser("repo", help="per-repo PR configuration")
     repo_sub = repo.add_subparsers(dest="repo_cmd", required=True)
 
-    set_pr = repo_sub.add_parser("set-pr-mode", help="configure PR mode for a repo")
+    set_pr = repo_sub.add_parser("set-pr-mode", help="configure PR mode")
     set_pr.add_argument("--repo", required=True)
     set_pr.add_argument("--mode", choices=["normal", "forked"], required=True)
     set_pr.add_argument("--trunk", required=True)
     set_pr.add_argument("--main-repo", default=None)
     set_pr.set_defaults(func=_cmd_repo_set_pr_mode)
 
-    show_pr = repo_sub.add_parser("show-pr-mode", help="show PR mode for a repo")
+    show_pr = repo_sub.add_parser("show-pr-mode", help="show PR mode")
     show_pr.add_argument("--repo", required=True)
     show_pr.set_defaults(func=_cmd_repo_show_pr_mode)
+
+
+def add_subparser(subparsers: argparse._SubParsersAction) -> None:
+    stacker = subparsers.add_parser(
+        "stacker", help="branch-stack tracking against pm's pool"
+    )
+    sub = stacker.add_subparsers(dest="cmd", required=True)
+    _add_stacker_commands(sub)
+    _add_repo_only_commands(sub)
+    _add_repo_config_commands(sub)
 
 
 def gc_ops(paths: Paths) -> list[slot_mod.Slot]:
@@ -271,41 +231,59 @@ def gc_ops(paths: Paths) -> list[slot_mod.Slot]:
     the stacker ops marker and (b) has no matching `operations` row in the
     stacker db pointing at its current branch.
     """
-    released: list[slot_mod.Slot] = []
-    if not paths.stacker_root.is_dir():
-        return released
+    if not paths.stacker_root.is_dir() or not paths.worktrees.is_dir():
+        return []
     db = StackerDB(paths.stacker_db())
-    ops_by_repo: dict[str, set[str]] = {}
-    for op in db.list_operations():
-        ops_by_repo.setdefault(op.repo_name, set())
-        if op.branch:
-            ops_by_repo[op.repo_name].add(op.branch)
+    ops_by_repo = _ops_by_repo(db.list_operations())
     marker = paths.stacker_ops_marker().resolve()
-    if not paths.worktrees.is_dir():
-        return released
+    released: list[slot_mod.Slot] = []
     for repo_dir in sorted(paths.worktrees.iterdir()):
         if not repo_dir.is_dir():
             continue
-        repo_name = repo_dir.name
-        for slot in slot_mod.list_slots(paths, repo_name):
-            target = slot.owner_target()
-            if target is None:
-                continue
-            try:
-                if target.resolve() != marker:
-                    continue
-            except OSError:
-                continue
-            branch = _slot_branch(slot.path)
-            if branch and branch in ops_by_repo.get(repo_name, set()):
-                continue
-            slot_mod.release(slot)
-            released.append(slot)
+        released.extend(
+            _collect_orphan_ops_slots(
+                paths, repo_dir.name, ops_by_repo.get(repo_dir.name, set()), marker
+            )
+        )
     return released
+
+
+def _ops_by_repo(ops: list[OperationState]) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for op in ops:
+        out.setdefault(op.repo_name, set())
+        if op.branch:
+            out[op.repo_name].add(op.branch)
+    return out
+
+
+def _collect_orphan_ops_slots(
+    paths: Paths, repo_name: str, live_branches: set[str], marker: Path
+) -> list[slot_mod.Slot]:
+    released: list[slot_mod.Slot] = []
+    for slot in slot_mod.list_slots(paths, repo_name):
+        if not _points_at_marker(slot, marker):
+            continue
+        branch = _slot_branch(slot.path)
+        if branch and branch in live_branches:
+            continue
+        slot_mod.release(slot)
+        released.append(slot)
+    return released
+
+
+def _points_at_marker(slot: slot_mod.Slot, marker: Path) -> bool:
+    target = slot.owner_target()
+    if target is None:
+        return False
+    try:
+        return target.resolve() == marker
+    except OSError:
+        return False
 
 
 def _slot_branch(slot_path: Path) -> str | None:
     try:
-        return git.current_branch(str(slot_path)) or None
+        return git.current_branch(slot_path) or None
     except git.GitError:
         return None

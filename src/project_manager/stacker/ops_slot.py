@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
-from project_manager.pool import worktree as wt
+
+from . import git
 
 
 def claim(paths: Paths, repo_name: str) -> slot_mod.Slot:
@@ -33,8 +34,8 @@ def acquire(paths: Paths, repo_name: str, branch: str) -> slot_mod.Slot:
     """
     target = claim(paths, repo_name)
     try:
-        wt._git(target.path, "checkout", branch)
-    except wt.GitError:
+        git.git(target.path, "checkout", branch)
+    except git.GitError:
         slot_mod.release(target)
         raise
     return target
@@ -42,7 +43,7 @@ def acquire(paths: Paths, repo_name: str, branch: str) -> slot_mod.Slot:
 
 def release(slot: slot_mod.Slot) -> None:
     """Return a stacker-ops slot to the pool with detached HEAD."""
-    wt._git(slot.path, "checkout", "--detach", "HEAD")
+    git.git(slot.path, "checkout", "--detach", "HEAD")
     slot_mod.release(slot)
 
 

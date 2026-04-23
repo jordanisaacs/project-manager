@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
 class RepoContext:
     repo_name: str
-    worktree_path: str
+    worktree_path: Path
     branch: str
 
 

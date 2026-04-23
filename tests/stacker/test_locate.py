@@ -4,7 +4,7 @@ from pathlib import Path
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
-from project_manager.pool import worktree as wt
+from project_manager.stacker import git as stacker_git
 from project_manager.stacker import locate
 
 
@@ -15,11 +15,11 @@ def test_locate_returns_slot_for_checked_out_branch(
 ) -> None:
     repo_name, _ = stacker_repo
     target = three_slots[0]
-    wt._git(target.path, "checkout", "-b", "feature-a")
+    stacker_git.git(target.path, "checkout", "-b", "feature-a")
 
     found = locate.locate_worktree(pm_env, repo_name, "feature-a")
     assert found is not None
-    assert Path(found).resolve() == target.path.resolve()
+    assert found.resolve() == target.path.resolve()
 
 
 def test_locate_returns_none_for_absent_branch(

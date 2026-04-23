@@ -16,7 +16,7 @@ def locate_worktree(paths: Paths, repo_name: str, branch: str) -> Path | None:
     repo = paths.repo(repo_name)
     if not repo.is_dir():
         return None
-    for info in git.worktree_list(str(repo)):
+    for info in git.worktree_list(repo):
         if info.branch == branch:
-            return Path(info.path)
+            return info.path
     return None

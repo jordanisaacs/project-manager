@@ -2,6 +2,7 @@ import shutil
 
 from project_manager import check
 from project_manager.paths import Paths
+from project_manager.pool import slot as slot_mod
 from project_manager.project import attach as attach_mod
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
@@ -104,8 +105,6 @@ def test_attach_after_detach_round_trips_clean(pm_env: Paths) -> None:
 
 
 def test_ops_owned_slot_is_classified(pm_env: Paths) -> None:
-    from project_manager.pool import slot as slot_mod
-
     _mk_pool(pm_env, "foo", ["a"])
     # Create the stacker ops marker and claim the slot with it.
     pm_env.stacker_root.mkdir(parents=True, exist_ok=True)

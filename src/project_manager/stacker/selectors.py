@@ -73,16 +73,14 @@ def resolve_target(
     if repo_name is None:
         raise git.GitError("Provide a repo via 'repo:branch' or --repo.")
     if parsed.is_root:
-        repo_path = str(paths.repo(repo_name))
-        branch = git.current_branch(repo_path)
+        branch = git.current_branch(paths.repo(repo_name))
         if not branch:
             raise git.GitError(f"Repository {repo_name} is not on a branch.")
         return SelectorTarget(repo_name=repo_name, branch=branch)
     if require_branch and not parsed.branch:
         raise git.GitError("Branch name is required.")
     assert parsed.branch
-    repo_path = paths.repo(repo_name)
-    if not repo_path.is_dir():
+    if not paths.repo(repo_name).is_dir():
         raise git.GitError(f"Repository '{repo_name}' not found under {paths.repos}.")
     return SelectorTarget(repo_name=repo_name, branch=parsed.branch)
 
@@ -102,20 +100,19 @@ def resolve_parent_for_base(
             raise git.GitError(
                 "Parent branch for -B/--base must be in the same repo as the target branch."
             )
-    repo_path = str(paths.repo(parent_repo_name))
-    if not git.branch_exists(repo_path, parsed.branch):
+    if not git.branch_exists(paths.repo(parent_repo_name), parsed.branch):
         raise git.GitError(f"Branch '{parsed.branch}' not found in {parent_repo_name}.")
     return ParentLocator(repo_name=parent_repo_name, branch=parsed.branch)
 
 
-def resolve_current(paths: Paths, cwd: str | None = None) -> RepoContext | None:
+def resolve_current(paths: Paths, cwd: Path | None = None) -> RepoContext | None:
     """Best-effort: if cwd is a pm worktree, return its context; else None."""
     try:
         ctx = git.current_context(cwd)
     except git.GitError:
         return None
     try:
-        relative = Path(ctx.worktree_path).resolve().relative_to(paths.worktrees.resolve())
+        relative = ctx.worktree_path.resolve().relative_to(paths.worktrees.resolve())
     except ValueError:
         return None
     parts = relative.parts
