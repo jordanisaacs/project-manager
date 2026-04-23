@@ -559,9 +559,14 @@ class StackerService:
     def guard_no_rebase(self) -> None:
         """Hook entry point: error out if cwd is on a stacker-tracked branch.
 
-        Requires cwd to be inside a worktree in a known pm repo.
+        Fails open: if cwd isn't in a pm worktree, isn't in any git repo, or is
+        on a detached HEAD, we can't identify a tracked branch and must let
+        git proceed — the guard only blocks when it's certain.
         """
-        context = git.current_context()
+        try:
+            context = git.current_context()
+        except git.GitError:
+            return
         repo_name = self._repo_name_for_path(context.worktree_path)
         if repo_name is None:
             return

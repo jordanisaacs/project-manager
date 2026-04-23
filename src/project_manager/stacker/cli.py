@@ -171,6 +171,18 @@ def _cmd_abort(args: argparse.Namespace) -> int:
     return _run(lambda svc: svc.abort_operation(_resolve_repo(args, svc.paths)))
 
 
+def _cmd_guard_no_rebase(args: argparse.Namespace) -> int:
+    del args
+    paths = config.load()
+    service = _service(paths)
+    try:
+        service.guard_no_rebase()
+    except git.GitError as e:
+        print(f"pm: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     paths = config.load()
     service = _service(paths)
@@ -308,6 +320,16 @@ def _add_repo_only_commands(sub: argparse._SubParsersAction) -> None:
         p.set_defaults(func=handler)
 
 
+def _add_guard_command(sub: argparse._SubParsersAction) -> None:
+    guard = sub.add_parser("guard", help="internal guardrails for Git hooks")
+    guard_sub = guard.add_subparsers(dest="guard_cmd", required=True)
+    no_rebase = guard_sub.add_parser(
+        "no-rebase",
+        help="exit nonzero when cwd is a stacker-tracked branch",
+    )
+    no_rebase.set_defaults(func=_cmd_guard_no_rebase)
+
+
 def _add_config_command(sub: argparse._SubParsersAction) -> None:
     cfg = sub.add_parser("config", help="get/set per-repo stacker config (git-config style)")
     cfg.add_argument("--repo", default=None, help="defaults to the cwd's pm slot")
@@ -327,6 +349,7 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     _add_stacker_commands(sub)
     _add_repo_only_commands(sub)
     _add_config_command(sub)
+    _add_guard_command(sub)
 
 
 def gc_ops(paths: Paths) -> list[slot_mod.Slot]:
