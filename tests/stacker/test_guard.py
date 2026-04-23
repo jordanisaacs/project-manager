@@ -8,19 +8,20 @@ import pytest
 
 from project_manager.pool import slot as slot_mod
 from project_manager.stacker import git as stacker_git
-from project_manager.stacker.models import OperationState, ParentLocator
+from project_manager.stacker.models import OperationState, ParentLocator, WorktreeInit
 from project_manager.stacker.service import StackerService
 
 
 def _initialize(
     service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str
 ) -> None:
-    service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=slot.path,
-        branch=branch,
-        create_branch=True,
-        parent=ParentLocator(repo_name=repo_name, branch="main"),
+    service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot.path,
+            branch=branch,
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
 
 

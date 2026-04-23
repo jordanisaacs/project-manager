@@ -13,7 +13,12 @@ from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
-from project_manager.stacker.models import ParentLocator, SelectorTarget
+from project_manager.stacker.models import (
+    ParentLocator,
+    PushOptions,
+    SelectorTarget,
+    WorktreeInit,
+)
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -79,18 +84,21 @@ def _two_branch_stack(
     _build_branch(repo_path, slot_a.path, "feature-a", "main",
                   "A\n", "A: first commit\n\nExtra body for A.")
     _setup_fake_upstream(slot_a.path, "feature-a")
-    service.initialize_worktree(
-        repo_name=repo_name, worktree_path=slot_a.path, branch="feature-a",
-        create_branch=False, parent=ParentLocator(repo_name=repo_name, branch="main"),
+    service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name, worktree_path=slot_a.path, branch="feature-a",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
 
     _build_branch(repo_path, slot_b.path, "feature-b", "feature-a",
                   "B\n", "B: second commit\n\nExtra body for B.")
     _setup_fake_upstream(slot_b.path, "feature-b")
-    service.initialize_worktree(
-        repo_name=repo_name, worktree_path=slot_b.path, branch="feature-b",
-        create_branch=False,
-        parent=ParentLocator(repo_name=repo_name, branch="feature-a"),
+    service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name, worktree_path=slot_b.path, branch="feature-b",
+            parent=ParentLocator(repo_name=repo_name, branch="feature-a"),
+        )
     )
 
     # pp uses `git pp --force` (a databricks alias not in test env) — stub.
@@ -116,7 +124,7 @@ def test_pr_body_has_actual_commit_message_not_file_path(
     )
     _set_config(service, repo_name, "repo-pr")
 
-    service.pr(SelectorTarget(repo_name=repo_name, branch="feature-b"), draft=True)
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
 
     assert len(backend.created) == 2, "both ancestor and leaf get PRs"
     for request, body in backend.created:
@@ -136,7 +144,7 @@ def test_pr_body_includes_first_commit_body_text(
     )
     _set_config(service, repo_name, "repo-pr")
 
-    service.pr(SelectorTarget(repo_name=repo_name, branch="feature-b"), draft=True)
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
 
     # The body-at-create is the first-commit body (no stack block yet —
     # refresh follows). "Extra body" is in the commit trailer of both.
@@ -165,7 +173,7 @@ def test_refreshed_stack_block_links_both_prs_even_when_list_is_empty(
     # Simulate the race: list_open_prs returns nothing (GitHub index lag).
     backend.prs_by_head.clear()
 
-    service.pr(SelectorTarget(repo_name=repo_name, branch="feature-b"), draft=True)
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
 
     # After pr(), refresh wrote each PR's final body via edit_pr(body_file=...).
     # Pull the most recent body written for each PR number.
@@ -204,7 +212,7 @@ def test_repo_pr_includes_compare_url_in_block(
     )
     _set_config(service, repo_name, "repo-pr")
 
-    service.pr(SelectorTarget(repo_name=repo_name, branch="feature-b"), draft=True)
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
 
     final = {r.number: b for (r, b) in backend.edited if b is not None}
     body_b = final[2]
@@ -226,7 +234,7 @@ def test_pr_pr_mode_stack_block_omits_compare_link(
     )
     _set_config(service, repo_name, "pr-pr")
 
-    service.pr(SelectorTarget(repo_name=repo_name, branch="feature-b"), draft=True)
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
 
     final = {r.number: b for (r, b) in backend.edited if b is not None}
     assert 2 in final, "leaf body should have been edited to add stack block"
@@ -251,6 +259,6 @@ def test_head_repo_set_when_upstream_is_distinct_fork(
         service, stacker_repo, three_slots, monkeypatch,
     )
     _set_config(service, repo_name, "repo-pr")
-    service.pr(SelectorTarget(repo_name=repo_name, branch="feature-b"), draft=True)
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
     for request, _body in backend.created:
         assert request.head_repo == "acme/widgets"

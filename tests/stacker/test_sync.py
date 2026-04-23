@@ -2,26 +2,34 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker import locate
-from project_manager.stacker.models import ParentLocator, SelectorTarget
+from project_manager.stacker.models import (
+    ParentLocator,
+    ScopeSpec,
+    SelectorTarget,
+    WorktreeInit,
+)
 from project_manager.stacker.service import StackerService
 
-from .conftest import commit_file
+from .conftest import TrackedStack, commit_file
 
 
 def _initialize(
     service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str
 ) -> None:
-    service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=slot.path,
-        branch=branch,
-        create_branch=True,
-        parent=ParentLocator(repo_name=repo_name, branch="main"),
+    service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot.path,
+            branch=branch,
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
 
 
@@ -100,3 +108,96 @@ def test_sync_paused_on_conflict_keeps_slot_claimed(
     abort_result = service.abort_operation(repo_name)
     assert "Aborted" in abort_result
     assert service.db.get_operation(repo_name) is None
+
+
+# --- Scope-flag coverage ----------------------------------------------------
+
+
+def test_sync_default_scope_walks_lineage(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """Default scope `-c` walks ancestors + target + descendants.
+
+    With `main` unchanged, every branch is up-to-date; the walk still
+    visits each and reports "Sync complete." once.
+    """
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
+    result = service.sync(target)
+    assert "Sync complete." in result
+
+
+def test_sync_skip_ancestors_matches_old_push_behavior(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`--skip-ancestors` syncs target + descendants (the old `push` meaning).
+
+    Add a commit to `b`, expect `b`'s tip becomes the managed base of
+    descendants `c` and `d` after sync walk.
+    """
+    b_slot = tracked_stack.slots["b"]
+    new_b_head = commit_file(b_slot.path, "b-extra.txt", "b+\n", "b: extra")
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
+
+    result = service.sync(target, ScopeSpec(scope="current", skip_ancestors=True))
+    assert "Sync complete." in result
+
+    c_tracked = service.db.get_branch(tracked_stack.repo_name, "c")
+    d_tracked = service.db.get_branch(tracked_stack.repo_name, "d")
+    assert c_tracked is not None
+    assert d_tracked is not None
+    assert c_tracked.managed_base_commit == new_b_head
+    assert d_tracked.last_synced_parent_commit is not None
+
+
+def test_sync_skip_descendants_leaves_descendants_untouched(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`--skip-descendants` must not rewrite descendants' managed bases."""
+    before_d = service.db.get_branch(tracked_stack.repo_name, "d")
+    assert before_d is not None
+
+    # Advance main so ancestors need a sync — but descendants should be skipped.
+    commit_file(tracked_stack.repo_path, "shared.txt", "v\n", "main advance")
+
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
+    service.sync(target, ScopeSpec(scope="current", skip_descendants=True))
+
+    after_d = service.db.get_branch(tracked_stack.repo_name, "d")
+    assert after_d is not None
+    assert after_d.managed_base_commit == before_d.managed_base_commit
+
+
+def test_sync_all_walks_every_tracked_branch(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`--all` resolves to every tracked branch, regardless of target."""
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="a")
+    result = service.sync(target, ScopeSpec(scope="all"))
+    assert "Sync complete." in result
+
+
+def test_sync_from_branch_trims_walk(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`--from c` on a lineage walk starts the walk at `c`."""
+    commit_file(tracked_stack.repo_path, "main-bump.txt", "m\n", "main bump")
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
+    result = service.sync(
+        target, ScopeSpec(scope="current", from_branch="c"),
+    )
+    assert "Sync complete." in result
+
+
+def test_sync_from_branch_rejects_out_of_scope(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`--from nonexistent` raises rather than silently walking nothing."""
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
+    with pytest.raises(stacker_git.GitError, match="--from"):
+        service.sync(target, ScopeSpec(scope="current", from_branch="nonexistent"))

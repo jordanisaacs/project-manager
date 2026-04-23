@@ -15,7 +15,12 @@ from project_manager.pool import slot as slot_mod
 from project_manager.stacker import gh
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
-from project_manager.stacker.models import ParentLocator, SelectorTarget
+from project_manager.stacker.models import (
+    ParentLocator,
+    PushOptions,
+    SelectorTarget,
+    WorktreeInit,
+)
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -62,9 +67,11 @@ def feature_a(
 ) -> slot_mod.Slot:
     repo_name, _repo_path = stacker_repo
     slot = three_slots[0]
-    service.initialize_worktree(
-        repo_name=repo_name, worktree_path=slot.path, branch="feature-a",
-        create_branch=True, parent=ParentLocator(repo_name=repo_name, branch="main"),
+    service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name, worktree_path=slot.path, branch="feature-a",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
     _commit_one(slot.path, "a.txt")
     _config_upstream(slot.path, "feature-a")
@@ -76,7 +83,7 @@ def test_create_populates_pr_url_on_branch(
     service: StackerService,
     feature_a: slot_mod.Slot,  # noqa: ARG001
 ) -> None:
-    service.pr(SelectorTarget(repo_name="demo", branch="feature-a"), draft=True)
+    service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
     tracked = service.db.get_branch("demo", "feature-a")
     assert tracked is not None
     assert tracked.pr_url is not None
@@ -89,7 +96,7 @@ def test_second_run_is_cache_hit_no_search(
     feature_a: slot_mod.Slot,  # noqa: ARG001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service.pr(SelectorTarget(repo_name="demo", branch="feature-a"), draft=True)
+    service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
 
     # Second run: bump a counter from the backend's list_open_prs so we
     # can prove the cached URL path bypassed it entirely.
@@ -103,7 +110,7 @@ def test_second_run_is_cache_hit_no_search(
         return original(repo, head=head, search=search)
 
     monkeypatch.setattr(backend, "list_open_prs", _count)
-    service.pr(SelectorTarget(repo_name="demo", branch="feature-a"), draft=True)
+    service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
 
     assert search_calls == [], f"cached URL should skip search, saw: {search_calls}"
     # Exactly one create + one or more edits (refresh) across both runs.
@@ -137,7 +144,7 @@ def test_search_hit_writes_url_back_for_future_runs(
     assert tracked is not None
     assert tracked.pr_url is None
 
-    service.pr(SelectorTarget(repo_name="demo", branch="feature-a"), draft=True)
+    service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
     after = service.db.get_branch("demo", "feature-a")
     assert after is not None
     # The existing PR should have been detected and its URL cached —

@@ -6,7 +6,7 @@ from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker import locate
-from project_manager.stacker.models import ParentLocator
+from project_manager.stacker.models import ParentLocator, WorktreeInit
 from project_manager.stacker.service import StackerService
 
 
@@ -22,16 +22,15 @@ def test_create_branch_off_parent_tracks(
 ) -> None:
     repo_name, _ = stacker_repo
     target = three_slots[0]
-    parent = ParentLocator(repo_name=repo_name, branch="main")
 
-    tracked = service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=target.path,
-        branch="feature-a",
-        create_branch=True,
-        parent=parent,
+    tracked = service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=target.path,
+            branch="feature-a",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
-    assert tracked is not None
     assert tracked.branch == "feature-a"
     assert tracked.parent_branch == "main"
     assert _head_ref(target.path) == "refs/heads/feature-a"
@@ -46,14 +45,14 @@ def test_adopt_existing_branch_tracks(
     repo_name, repo_path = stacker_repo
     stacker_git.git(repo_path, "branch", "feature-b", "main")
     target = three_slots[0]
-    parent = ParentLocator(repo_name=repo_name, branch="main")
 
-    tracked = service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=target.path,
-        branch="feature-b",
-        create_branch=False,
-        parent=parent,
+    tracked = service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=target.path,
+            branch="feature-b",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
     assert tracked is not None
     assert tracked.branch == "feature-b"
@@ -69,12 +68,13 @@ def test_plain_checkout_without_tracking(
     stacker_git.git(repo_path, "branch", "feature-c", "main")
     target = three_slots[0]
 
-    tracked = service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=target.path,
-        branch="feature-c",
-        create_branch=False,
-        parent=None,
+    tracked = service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=target.path,
+            branch="feature-c",
+            parent=None,
+        )
     )
     assert tracked is None
     assert _head_ref(target.path) == "refs/heads/feature-c"

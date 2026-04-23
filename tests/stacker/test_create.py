@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from project_manager.paths import Paths
+from project_manager.pool import slot as slot_mod
+from project_manager.stacker import git as stacker_git
+from project_manager.stacker import locate
+from project_manager.stacker.models import ParentLocator, SelectorTarget, WorktreeInit
+from project_manager.stacker.service import StackerService
+
+from .conftest import commit_file
+
+
+def test_init_new_branch_off_parent_tracks(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """Creates a new branch at parent's tip, tracks with managed_base = parent_tip."""
+    repo_name, _ = stacker_repo
+    slot = three_slots[0]
+    tracked = service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot.path,
+            branch="feature-a",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
+    )
+    assert tracked.parent_branch == "main"
+    main_head = stacker_git.rev_parse(pm_env.repo(repo_name), "main")
+    assert tracked.managed_base_commit == main_head
+
+
+def test_init_new_branch_with_copy_from_imports_commits(
+    pm_env: Paths,  # noqa: ARG001 — seeds pm env via the stacker_repo fixture chain
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """`copy_from` seeds the branch with another branch's history.
+
+    The new branch's tip is `copy_from`'s tip; its managed_base is
+    still `parent`'s tip, so next sync sees the copied commits as
+    cherry-pick candidates.
+    """
+    repo_name, repo_path = stacker_repo
+    # Create a donor branch with a unique commit.
+    donor_slot = three_slots[0]
+    service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=donor_slot.path,
+            branch="donor",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
+    )
+    donor_head = commit_file(donor_slot.path, "donor.txt", "d\n", "donor: commit")
+
+    # Create new branch off main but starting from donor's tip.
+    new_slot = three_slots[1]
+    tracked = service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=new_slot.path,
+            branch="copy-target",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+            copy_from="donor",
+        )
+    )
+    new_head = stacker_git.rev_parse(new_slot.path, "HEAD")
+    main_head = stacker_git.rev_parse(repo_path, "main")
+    assert new_head == donor_head
+    assert tracked.managed_base_commit == main_head
+
+
+def test_create_tracked_branch_without_worktree_slot(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    service: StackerService,
+) -> None:
+    """`--no-checkout` path: branch ref exists, no slot is claimed."""
+    repo_name, repo_path = stacker_repo
+    tracked = service.create_tracked_branch(
+        repo_name, "ghost-branch",
+        ParentLocator(repo_name=repo_name, branch="main"),
+    )
+    assert tracked.branch == "ghost-branch"
+    assert stacker_git.branch_exists(repo_path, "ghost-branch")
+    # No worktree reports the branch as checked out.
+    assert locate.locate_worktree(pm_env, repo_name, "ghost-branch") is None
+
+
+def test_create_tracked_branch_errors_when_branch_exists(
+    stacker_repo: tuple[str, Path],
+    service: StackerService,
+) -> None:
+    repo_name, repo_path = stacker_repo
+    stacker_git.git(repo_path, "branch", "existing", "main")
+    with pytest.raises(stacker_git.GitError, match="already exists"):
+        service.create_tracked_branch(
+            repo_name, "existing",
+            ParentLocator(repo_name=repo_name, branch="main"),
+        )
+
+
+def test_track_adopts_existing_branch(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """The `create --replace` path calls `service.track()`."""
+    repo_name, repo_path = stacker_repo
+    stacker_git.git(repo_path, "branch", "feature-existing", "main")
+    slot = three_slots[0]
+    stacker_git.git(slot.path, "checkout", "feature-existing")
+
+    tracked = service.track(
+        SelectorTarget(repo_name=repo_name, branch="feature-existing"),
+        ParentLocator(repo_name=repo_name, branch="main"),
+    )
+    assert tracked.parent_branch == "main"

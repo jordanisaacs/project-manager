@@ -5,6 +5,46 @@ from pathlib import Path
 from typing import Literal
 
 PRMode = Literal["pr-pr", "repo-pr"]
+Scope = Literal["current", "all"]
+Details = Literal["none", "status", "status-counts", "all"]
+
+
+@dataclass(frozen=True)
+class ScopeSpec:
+    """Scope + skip flags shared by sync / push / ls walks."""
+
+    scope: Scope = "current"
+    skip_ancestors: bool = False
+    skip_descendants: bool = False
+    only: bool = False
+    from_branch: str | None = None
+
+
+@dataclass(frozen=True)
+class PushOptions:
+    """Options for `push`: scope walk plus draft / create-PR behavior."""
+
+    scope: ScopeSpec = field(default_factory=ScopeSpec)
+    draft: bool = False
+    publish: bool = False
+    create_pr: bool = True
+
+
+# Frozen singletons for default arguments: dataclasses are immutable, so
+# sharing one instance across call sites is safe and avoids B008.
+DEFAULT_SCOPE = ScopeSpec()
+DEFAULT_PUSH_OPTIONS = PushOptions()
+
+
+@dataclass(frozen=True)
+class WorktreeInit:
+    """Inputs for seeding a pool slot with a branch (creating or adopting)."""
+
+    repo_name: str
+    worktree_path: Path
+    branch: str
+    parent: ParentLocator | None = None
+    copy_from: str | None = None
 
 
 @dataclass(frozen=True)

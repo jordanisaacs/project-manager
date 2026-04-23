@@ -36,13 +36,15 @@ pm pool ls [<repo>]                       # slots with claim status
 pm pool add <repo>                        # mint a slot
 pm pool gc-ops                            # release stacker-ops slots w/ no live op
 
-pm stacker create -b <branch> --base <parent>   # new branch off parent, tracked
-pm stacker track <branch> --parent <p>          # adopt an existing branch
-pm stacker untrack <branch>                     # stop tracking; reparent children
-pm stacker sync <branch>                        # cherry-pick onto parent's tip
-pm stacker push <branch>                        # sync every descendant
-pm stacker pr <branch> [--draft]                # pp + create/update PR
-pm stacker status | log | graph
+pm stacker create <branch> [--on current|parent|<branch>] [--copy <b>] [--replace] [--no-checkout]
+pm stacker sync [<branch>] [-c|-a] [--skip-ancestors] [--skip-descendants] [--from <b>] [--continue | --abort]
+pm stacker push [<branch>] [-c|-a] [--only] [--skip-ancestors] [--skip-descendants] [--publish|--draft] [--create-pr true|false]
+pm stacker ls [<branch>] [-c|-a] [--details none|status|status-counts|all] [--json]
+pm stacker remove [<branch>] [--keep-branch] [--parent] [--force]
+pm stacker reparent <new-parent> [--branch <b>] [--continue | --abort]
+pm stacker split <new-name> <commit> [--stay]
+pm stacker rename <new-name>
+pm stacker log [<branch>]
 pm stacker continue | abort                     # resume/cancel paused op
 pm stacker config [--list | --unset] [<key> [<value>]]   # pr.mode, pr.trunk, pr.target-repo
 

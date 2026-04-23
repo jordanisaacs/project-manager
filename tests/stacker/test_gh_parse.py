@@ -9,7 +9,7 @@ from project_manager.pool import slot as slot_mod
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.git import parse_github_slug
-from project_manager.stacker.models import ParentLocator
+from project_manager.stacker.models import ParentLocator, WorktreeInit
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -55,14 +55,14 @@ def test_head_repo_derives_slug_from_branch_upstream(
         StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
     )
     slot = three_slots[0]
-    tracked = service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=slot.path,
-        branch="feature-fork",
-        create_branch=True,
-        parent=ParentLocator(repo_name=repo_name, branch="main"),
+    tracked = service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot.path,
+            branch="feature-fork",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
-    assert tracked is not None
 
     # Config-only setup — stacker reads branch.X.remote/merge directly.
     stacker_git.git(
@@ -86,12 +86,12 @@ def test_head_repo_returns_none_when_no_upstream(
     service = StackerService(
         StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
     )
-    tracked = service.initialize_worktree(
-        repo_name=repo_name,
-        worktree_path=three_slots[0].path,
-        branch="feature-no-upstream",
-        create_branch=True,
-        parent=ParentLocator(repo_name=repo_name, branch="main"),
+    tracked = service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=three_slots[0].path,
+            branch="feature-no-upstream",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
     )
-    assert tracked is not None
     assert service._head_repo_for_branch(tracked) is None

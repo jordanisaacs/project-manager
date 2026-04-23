@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -16,11 +17,18 @@ from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
 from . import config_schema, gh, git, locate, ops_slot, selectors
 from .db import StackerDB
 from .models import (
+    DEFAULT_PUSH_OPTIONS,
+    DEFAULT_SCOPE,
+    Details,
     OperationState,
     ParentLocator,
+    PushOptions,
     RepoPRConfig,
+    Scope,
+    ScopeSpec,
     SelectorTarget,
     TrackedBranch,
+    WorktreeInit,
 )
 from .pr_backend import GhCliBackend, PRBackend
 
@@ -84,48 +92,98 @@ class StackerService:
     # High-level operations
     # -------------------------------------------------------------
 
-    def initialize_worktree(
+    def init_new_branch(self, spec: WorktreeInit) -> TrackedBranch:
+        """Seed `spec.worktree_path` with a freshly-created, tracked branch.
+
+        Creates the branch off `spec.parent`'s tip (or `spec.copy_from`'s
+        tip when set — commits between the two become the branch's own
+        cherry-pick set on next sync), then tracks it with
+        managed_base = parent_tip.
+        """
+        if spec.parent is None:
+            raise git.GitError("init_new_branch requires a parent.")
+        if spec.parent.repo_name != spec.repo_name:
+            raise git.GitError("Parent and child must be in the same repo.")
+        repo_path = self.paths.repo(spec.repo_name)
+        parent_head = git.rev_parse(repo_path, spec.parent.branch)
+        start_point = (
+            git.rev_parse(repo_path, spec.copy_from) if spec.copy_from else parent_head
+        )
+        git.git(spec.worktree_path, "checkout", "-b", spec.branch, start_point)
+        return self._persist_init(spec, parent_head, parent_head)
+
+    def init_adopt_branch(self, spec: WorktreeInit) -> TrackedBranch | None:
+        """Check out `spec.branch` in `spec.worktree_path`, optionally tracking.
+
+        With `spec.parent` set, tracks the branch using
+        managed_base = merge-base(branch, parent_branch). Without a
+        parent this is a plain checkout with no DB row written.
+        """
+        git.git(spec.worktree_path, "checkout", spec.branch)
+        if spec.parent is None:
+            return None
+        if spec.parent.repo_name != spec.repo_name:
+            raise git.GitError("Parent and child must be in the same repo.")
+        repo_path = self.paths.repo(spec.repo_name)
+        managed_base = git.merge_base(repo_path, spec.parent.branch, spec.branch)
+        return self._persist_init(spec, managed_base, None)
+
+    def _persist_init(
+        self,
+        spec: WorktreeInit,
+        managed_base: str,
+        last_synced_override: str | None,
+    ) -> TrackedBranch:
+        assert spec.parent is not None
+        repo_path = self.paths.repo(spec.repo_name)
+        last_synced = (
+            last_synced_override
+            if last_synced_override is not None
+            else git.rev_parse(repo_path, spec.parent.branch)
+        )
+        tracked = TrackedBranch(
+            repo_name=spec.repo_name,
+            branch=spec.branch,
+            parent_repo_name=spec.parent.repo_name,
+            parent_branch=spec.parent.branch,
+            managed_base_commit=managed_base,
+            last_synced_parent_commit=last_synced,
+            last_clean_head=git.rev_parse(spec.worktree_path, "HEAD"),
+        )
+        self.db.upsert_branch(tracked)
+        return tracked
+
+    def create_tracked_branch(
         self,
         repo_name: str,
-        worktree_path: Path,
         branch: str,
+        parent: ParentLocator,
         *,
-        create_branch: bool,
-        parent: ParentLocator | None,
-    ) -> TrackedBranch | None:
-        """Seed a caller-supplied slot with `branch` and optionally track it.
+        copy_from: str | None = None,
+    ) -> TrackedBranch:
+        """Create a branch ref in the repo and track it without claiming a slot.
 
-        - `create_branch=True`, `parent` required: create `branch` off the
-          parent's tip, track with managed_base = parent_tip.
-        - `create_branch=False`, `parent` given: check out existing `branch`,
-          track with managed_base = merge-base(branch, parent_branch).
-        - `create_branch=False`, `parent=None`: plain checkout, no tracking.
+        Backs `create --no-checkout`: the branch exists in git's ref
+        store and the stacker DB, but no pool slot is allocated for it.
         """
-        if parent is not None and parent.repo_name != repo_name:
+        if parent.repo_name != repo_name:
             raise git.GitError("Parent and child must be in the same repo.")
         repo_path = self.paths.repo(repo_name)
-
-        if create_branch:
-            if parent is None:
-                raise git.GitError("create_branch=True requires a parent.")
-            parent_head = git.rev_parse(repo_path, parent.branch)
-            git.git(worktree_path, "checkout", "-b", branch, parent_head)
-            managed_base = parent_head
-        else:
-            git.git(worktree_path, "checkout", branch)
-            if parent is None:
-                return None
-            managed_base = git.merge_base(repo_path, parent.branch, branch)
-
-        assert parent is not None
+        if git.branch_exists(repo_path, branch):
+            raise git.GitError(f"Branch {branch} already exists.")
+        parent_head = git.rev_parse(repo_path, parent.branch)
+        start_point = (
+            git.rev_parse(repo_path, copy_from) if copy_from else parent_head
+        )
+        git.git(repo_path, "branch", branch, start_point)
         tracked = TrackedBranch(
             repo_name=repo_name,
             branch=branch,
             parent_repo_name=parent.repo_name,
             parent_branch=parent.branch,
-            managed_base_commit=managed_base,
-            last_synced_parent_commit=git.rev_parse(repo_path, parent.branch),
-            last_clean_head=git.rev_parse(worktree_path, "HEAD"),
+            managed_base_commit=parent_head,
+            last_synced_parent_commit=parent_head,
+            last_clean_head=start_point,
         )
         self.db.upsert_branch(tracked)
         return tracked
@@ -154,7 +212,23 @@ class StackerService:
         self.db.upsert_branch(tracked)
         return tracked
 
-    def untrack(self, target: SelectorTarget) -> str:
+    def remove(
+        self,
+        target: SelectorTarget,
+        *,
+        keep_branch: bool = False,
+        parent_cascade: bool = False,
+        force: bool = False,  # noqa: ARG002 — reserved for future interactive-confirm gate
+    ) -> str:
+        """Stop tracking a branch; optionally delete it and/or cascade upward.
+
+        Default: untrack, reparent children onto the removed branch's
+        parent, and delete the underlying git branch. `keep_branch=True`
+        preserves the git branch (matches the old `untrack` semantics).
+        `parent_cascade=True` also removes every tracked ancestor chain
+        above the target (children of those ancestors get reparented up).
+        Refuses when an op is paused on this repo.
+        """
         if self.db.get_operation(target.repo_name):
             raise git.GitError(
                 "Another stacker operation is active for this repo. "
@@ -165,7 +239,21 @@ class StackerService:
             raise git.GitError(
                 f"{selectors.selector_for(target.repo_name, target.branch)} is not tracked."
             )
-        for child in self.db.get_children(target.repo_name, target.branch):
+        removed: list[str] = []
+        cursor: TrackedBranch | None = tracked
+        while cursor is not None:
+            self._remove_one(cursor, keep_branch=keep_branch)
+            removed.append(selectors.selector_for(cursor.repo_name, cursor.branch))
+            if not parent_cascade:
+                break
+            cursor = self.db.get_branch(cursor.parent_repo_name, cursor.parent_branch)
+        if len(removed) == 1:
+            return f"Removed {removed[0]}."
+        return "Removed:\n  " + "\n  ".join(removed)
+
+    def _remove_one(self, tracked: TrackedBranch, *, keep_branch: bool) -> None:
+        """Untrack `tracked`, reparent children, optionally delete the git branch."""
+        for child in self.db.get_children(tracked.repo_name, tracked.branch):
             self.db.upsert_branch(
                 TrackedBranch(
                     repo_name=child.repo_name,
@@ -178,8 +266,225 @@ class StackerService:
                     pr_url=child.pr_url,
                 )
             )
-        self.db.delete_branch(target.repo_name, target.branch)
-        return f"Untracked {selectors.selector_for(target.repo_name, target.branch)}"
+        self.db.delete_branch(tracked.repo_name, tracked.branch)
+        if keep_branch:
+            return
+        slot_path = locate.locate_worktree(self.paths, tracked.repo_name, tracked.branch)
+        if slot_path is not None:
+            # Detach so `git branch -D` won't refuse because it's checked out.
+            git.git(slot_path, "checkout", "--detach", "HEAD")
+        repo_path = self.paths.repo(tracked.repo_name)
+        git.git(repo_path, "branch", "-D", tracked.branch, check=False)
+
+    def reparent(self, target: SelectorTarget, new_parent: ParentLocator) -> str:
+        """Move `target` onto a new parent; cascade cherry-pick through descendants.
+
+        DB-only rewrite of `parent_branch`; `managed_base_commit` stays
+        at the old parent's tip so the next sync sees every commit from
+        `old_base..HEAD` as "to cherry-pick onto the new parent". Sync
+        then updates managed_base to the new parent's tip on finalize.
+        """
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
+            )
+        if new_parent.repo_name != target.repo_name:
+            raise git.GitError("Cross-repo reparent is not supported.")
+        tracked = self._require_tracked(target)
+        if new_parent.branch == tracked.branch:
+            raise git.GitError(f"{tracked.branch} cannot be its own parent.")
+        if self._is_descendant(tracked, new_parent.branch):
+            raise git.GitError(
+                f"{new_parent.branch} is a descendant of {tracked.branch}; "
+                "reparenting would create a cycle."
+            )
+        repo_path = self.paths.repo(tracked.repo_name)
+        if not git.branch_exists(repo_path, new_parent.branch):
+            raise git.GitError(
+                f"Branch '{new_parent.branch}' not found in {tracked.repo_name}."
+            )
+        self.db.upsert_branch(
+            TrackedBranch(
+                repo_name=tracked.repo_name,
+                branch=tracked.branch,
+                parent_repo_name=new_parent.repo_name,
+                parent_branch=new_parent.branch,
+                managed_base_commit=tracked.managed_base_commit,
+                last_synced_parent_commit=tracked.last_synced_parent_commit,
+                last_clean_head=tracked.last_clean_head,
+                pr_url=tracked.pr_url,
+            )
+        )
+        return self.sync(
+            target, ScopeSpec(scope="current", skip_ancestors=True)
+        )
+
+    def _is_descendant(self, tracked: TrackedBranch, candidate: str) -> bool:
+        for descendant in self._toposorted_descendants(tracked.repo_name, tracked.branch):
+            if descendant.branch == candidate:
+                return True
+        return False
+
+    def split(
+        self,
+        target: SelectorTarget,
+        new_name: str,
+        split_commit: str,
+        *,
+        stay: bool = False,
+    ) -> str:
+        """Split `[split_commit..HEAD]` onto a new child branch `new_name`.
+
+        Front-to-back: earlier commits stay on `target`, `split_commit`
+        and everything after it move to `new_name`. Children of `target`
+        reparent onto `new_name` (they were based on target's old tip,
+        which is now `new_name`'s tip). Refuses dirty worktrees and any
+        attempt to split at the first commit of the branch.
+
+        After the split, `new_name` is provisioned into a free pool slot
+        so the user has a workspace for it. Pass `stay=True` to skip
+        the slot claim (the branch ref and DB row still land) — useful
+        when the pool is saturated or the user only wanted to rearrange
+        history. A saturated pool under the default is surfaced in the
+        result message rather than raising, since the split itself has
+        already succeeded.
+        """
+        tracked, current_path, plan = self._plan_split(target, new_name, split_commit)
+        split_sha, head_sha, new_base_sha, moved_count = plan
+        git.git(current_path, "branch", new_name, head_sha)
+        git.reset_hard(current_path, new_base_sha)
+        children = self.db.get_children(tracked.repo_name, tracked.branch)
+        self.db.upsert_branch(
+            TrackedBranch(
+                repo_name=tracked.repo_name,
+                branch=new_name,
+                parent_repo_name=tracked.repo_name,
+                parent_branch=tracked.branch,
+                managed_base_commit=new_base_sha,
+                last_synced_parent_commit=new_base_sha,
+                last_clean_head=head_sha,
+            )
+        )
+        for child in children:
+            if child.branch == new_name:
+                continue
+            self.db.upsert_branch(
+                TrackedBranch(
+                    repo_name=child.repo_name,
+                    branch=child.branch,
+                    parent_repo_name=tracked.repo_name,
+                    parent_branch=new_name,
+                    managed_base_commit=child.managed_base_commit,
+                    last_synced_parent_commit=child.last_synced_parent_commit,
+                    last_clean_head=child.last_clean_head,
+                    pr_url=child.pr_url,
+                )
+            )
+        header = (
+            f"Split {tracked.branch} at {self._short(split_sha)}: "
+            f"{moved_count} commit(s) moved to {new_name}."
+        )
+        if stay:
+            return header
+        try:
+            self._acquire(tracked.repo_name, new_name)
+        except slot_mod.PoolExhaustedError as exc:
+            return f"{header}\nNote: could not claim a slot for {new_name}: {exc}"
+        return f"{header}\n{new_name} is now checked out in a fresh slot."
+
+    def _plan_split(
+        self, target: SelectorTarget, new_name: str, split_commit: str,
+    ) -> tuple[TrackedBranch, Path, tuple[str, str, str, int]]:
+        """Validate preconditions and compute the four sha/count values split needs.
+
+        Returns (tracked, worktree_path, (split_sha, head_sha, new_base_sha,
+        moved_count)). Raises on any precondition violation before any ref
+        or DB state is mutated.
+        """
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
+            )
+        tracked = self._require_tracked(target)
+        current_path = self._require_checked_out(tracked.repo_name, tracked.branch)
+        if git.has_tracked_changes(current_path):
+            raise git.GitError(
+                f"Tracked changes present in {current_path}. Commit or discard before splitting."
+            )
+        if git.cherry_pick_in_progress(current_path):
+            raise git.GitError(
+                f"Cherry-pick in progress in {current_path}. Resolve before splitting."
+            )
+        if git.branch_exists(self.paths.repo(tracked.repo_name), new_name):
+            raise git.GitError(f"Branch {new_name} already exists.")
+        split_sha = git.rev_parse(current_path, split_commit)
+        head_sha = git.rev_parse(current_path, "HEAD")
+        commit_list = git.rev_list(
+            current_path, f"{tracked.managed_base_commit}..{head_sha}",
+        )
+        if split_sha not in commit_list:
+            raise git.GitError(
+                f"commit {split_commit} is not on {tracked.branch} "
+                f"between {self._short(tracked.managed_base_commit)} and HEAD."
+            )
+        split_index = commit_list.index(split_sha)
+        if split_index == 0:
+            raise git.GitError("Cannot split at the first commit of this branch.")
+        new_base_sha = commit_list[split_index - 1]
+        moved_count = len(commit_list) - split_index
+        return tracked, current_path, (split_sha, head_sha, new_base_sha, moved_count)
+
+    def rename(self, target: SelectorTarget, new_name: str) -> str:
+        """Rename the current branch; rewrite DB rows for it and its children.
+
+        Does not touch the remote branch or PR head-ref: the next `push`
+        will create the new remote branch; the old one lingers until
+        cleaned up externally. `git branch -m` also drops the upstream
+        config, so the next push must re-establish it.
+        """
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
+            )
+        tracked = self._require_tracked(target)
+        if target.branch == new_name:
+            return f"Branch already named {new_name}."
+        repo_path = self.paths.repo(tracked.repo_name)
+        if git.branch_exists(repo_path, new_name):
+            raise git.GitError(f"Branch {new_name} already exists.")
+        current_path = self._require_checked_out(tracked.repo_name, tracked.branch)
+        children = self.db.get_children(tracked.repo_name, target.branch)
+        git.git(current_path, "branch", "-m", target.branch, new_name)
+        self.db.delete_branch(tracked.repo_name, target.branch)
+        self.db.upsert_branch(
+            TrackedBranch(
+                repo_name=tracked.repo_name,
+                branch=new_name,
+                parent_repo_name=tracked.parent_repo_name,
+                parent_branch=tracked.parent_branch,
+                managed_base_commit=tracked.managed_base_commit,
+                last_synced_parent_commit=tracked.last_synced_parent_commit,
+                last_clean_head=tracked.last_clean_head,
+                pr_url=tracked.pr_url,
+            )
+        )
+        for child in children:
+            self.db.upsert_branch(
+                TrackedBranch(
+                    repo_name=child.repo_name,
+                    branch=child.branch,
+                    parent_repo_name=tracked.repo_name,
+                    parent_branch=new_name,
+                    managed_base_commit=child.managed_base_commit,
+                    last_synced_parent_commit=child.last_synced_parent_commit,
+                    last_clean_head=child.last_clean_head,
+                    pr_url=child.pr_url,
+                )
+            )
+        return f"Renamed {target.branch} -> {new_name}."
 
     def status_text(self, target: SelectorTarget) -> str:
         tracked = self.db.get_branch(target.repo_name, target.branch)
@@ -235,10 +540,49 @@ class StackerService:
         tracked = self._require_tracked(target)
         return tracked.managed_base_commit
 
-    def graph_text(self, repo_name: str | None = None) -> str:
-        branches = self.db.list_branches(repo_name)
+    def ls_text(
+        self,
+        repo_name: str | None = None,
+        *,
+        target_branch: str | None = None,
+        scope: Scope = "all",
+        details: Details = "status-counts",
+        json_output: bool = False,
+    ) -> str:
+        """Render the stack tree with configurable detail level.
+
+        Replaces the old `graph_text` (`pm stacker graph`) and the
+        per-branch `status` command. `scope="current"` narrows the render
+        to the lineage of `target_branch`; `scope="all"` shows every
+        tracked branch grouped by repo. `details` controls per-branch
+        annotations (none/status/status-counts/all). `json_output` emits
+        a machine-readable tree instead of ANSI-styled text.
+        """
+        branches = self._ls_branch_set(repo_name, target_branch, scope)
         if not branches:
             return "No tracked branches."
+        if json_output:
+            return self._ls_json(branches, details)
+        return self._ls_tree(branches, details)
+
+    def _ls_branch_set(
+        self,
+        repo_name: str | None,
+        target_branch: str | None,
+        scope: Scope,
+    ) -> list[TrackedBranch]:
+        if scope == "current":
+            if repo_name is None or target_branch is None:
+                raise git.GitError(
+                    "ls --scope current requires a repo and target branch."
+                )
+            target = self._require_tracked(
+                SelectorTarget(repo_name=repo_name, branch=target_branch)
+            )
+            return self._lineage(target)
+        return self.db.list_branches(repo_name)
+
+    def _ls_tree(self, branches: list[TrackedBranch], details: Details) -> str:
         by_repo: dict[str, list[TrackedBranch]] = {}
         for item in branches:
             by_repo.setdefault(item.repo_name, []).append(item)
@@ -267,8 +611,39 @@ class StackerService:
                     ctx,
                     parent_branch,
                     _GraphPos(prefix="", is_last=True, implicit=implicit),
+                    details=details,
                 )
         return "\n".join(lines)
+
+    def _ls_json(self, branches: list[TrackedBranch], details: Details) -> str:
+        """Machine-readable tree: one node per tracked branch.
+
+        `details` controls which fields each node includes; `"none"`
+        emits just names + parent links, fuller levels add op/sync
+        state. Output is a flat list so consumers can rebuild the tree
+        via parent_branch.
+        """
+        include_state = details in ("status", "status-counts", "all")
+        include_counts = details in ("status-counts", "all")
+        include_all = details == "all"
+        entries: list[dict[str, object]] = []
+        for item in branches:
+            entry: dict[str, object] = {
+                "repo_name": item.repo_name,
+                "branch": item.branch,
+                "parent_repo_name": item.parent_repo_name,
+                "parent_branch": item.parent_branch,
+            }
+            if include_state:
+                entry["synced"] = self._is_synced(item)
+            if include_counts:
+                entry["managed_base"] = item.managed_base_commit
+            if include_all:
+                entry["last_synced_parent_commit"] = item.last_synced_parent_commit
+                entry["last_clean_head"] = item.last_clean_head
+                entry["pr_url"] = item.pr_url
+            entries.append(entry)
+        return json.dumps(entries, indent=2)
 
     # -------------------------------------------------------------
     # PR configuration
@@ -325,32 +700,56 @@ class StackerService:
     # Sync / repair / push / pp / pr
     # -------------------------------------------------------------
 
-    def sync(self, target: SelectorTarget) -> str:
-        tracked = self._require_tracked(target)
+    def sync(self, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE) -> str:
+        """Cherry-pick a set of tracked branches onto their parents.
+
+        Scope resolution (see `_resolve_scope`) picks the branches. With a
+        single-branch resolution we take the local_sync fast path so
+        callers see the "Nothing to sync" short-circuit; with a multi-
+        branch resolution we drive a downstream_sync queue that syncs
+        each entry in parent-before-child order.
+        """
         if self.db.get_operation(target.repo_name):
             raise git.GitError(
                 "Another stacker operation is active for this repo. "
                 "Use 'stacker continue' or 'stacker abort'."
             )
-        # Write the operation row *before* claiming a slot so pm pool gc-ops
-        # can always reconcile claim vs. active-op state.
+        resolved = self._resolve_scope(target.repo_name, target.branch, spec)
+        if not resolved:
+            return "No tracked branches to sync."
+        if len(resolved) == 1:
+            return self._sync_one(resolved[0])
         self.db.put_operation(
             OperationState(
                 repo_name=target.repo_name,
+                op_type="downstream_sync",
+                status="running",
+                root_branch=resolved[0].branch,
+                queue=[b.branch for b in resolved],
+                current_index=0,
+            )
+        )
+        return self._run_until_pause_or_finish(target.repo_name, logs=[])
+
+    def _sync_one(self, tracked: TrackedBranch) -> str:
+        """Single-branch sync path: local_sync op with up-to-date short-circuit."""
+        self.db.put_operation(
+            OperationState(
+                repo_name=tracked.repo_name,
                 op_type="local_sync",
                 status="running",
-                branch=target.branch,
+                branch=tracked.branch,
                 parent_branch=tracked.parent_branch,
             )
         )
         try:
-            acquired = self._acquire(target.repo_name, target.branch)
+            acquired = self._acquire(tracked.repo_name, tracked.branch)
         except Exception:
-            self.db.clear_operation(target.repo_name)
+            self.db.clear_operation(tracked.repo_name)
             raise
         parent_head, _, _ = self._sync_plan(tracked, acquired.path)
         if parent_head == tracked.managed_base_commit:
-            self.db.clear_operation(target.repo_name)
+            self.db.clear_operation(tracked.repo_name)
             self._release_if_owned(acquired)
             child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
             parent_label = selectors.selector_for(
@@ -363,7 +762,7 @@ class StackerService:
         try:
             self._ensure_syncable(acquired.path)
         except git.GitError:
-            self.db.clear_operation(target.repo_name)
+            self.db.clear_operation(tracked.repo_name)
             self._release_if_owned(acquired)
             raise
         logs: list[str] = []
@@ -371,7 +770,7 @@ class StackerService:
             tracked, op_type="local_sync", slot_path=acquired.path, logs=logs
         )
         return self._run_until_pause_or_finish(
-            target.repo_name,
+            tracked.repo_name,
             slot_path=acquired.path,
             acquired_ops=acquired.ops,
             logs=logs,
@@ -417,97 +816,74 @@ class StackerService:
             f"{self._short(actual_base)}"
         )
 
-    def push(self, target: SelectorTarget) -> str:
+    def push(
+        self, target: SelectorTarget, options: PushOptions = DEFAULT_PUSH_OPTIONS,
+    ) -> str:
+        """Force-push and create/update PRs for a set of tracked branches.
+
+        Replaces the old `pr()` command. Scope resolution matches `sync`;
+        within the resolved list each branch is force-pushed and has its
+        PR created or updated. `options.publish` overrides per-branch
+        draft decisions: default draft behavior is only-leaf-non-draft;
+        with `--publish` every PR is published, with `--draft` every PR
+        is draft. `options.create_pr=False` skips PR creation and only
+        force-pushes.
+        """
+        if options.publish and options.draft:
+            raise git.GitError("--publish and --draft are mutually exclusive.")
         if self.db.get_operation(target.repo_name):
             raise git.GitError(
                 "Another stacker operation is active for this repo. "
                 "Use 'stacker continue' or 'stacker abort'."
             )
-        queue = self._toposorted_descendants(target.repo_name, target.branch)
-        if not queue:
-            return "No downstream tracked branches to sync."
-        # Write op row before claiming any slot.
-        self.db.put_operation(
-            OperationState(
-                repo_name=target.repo_name,
-                op_type="downstream_sync",
-                status="running",
-                root_branch=target.branch,
-                queue=[child.branch for child in queue],
-                current_index=0,
-            )
-        )
-        return self._run_until_pause_or_finish(target.repo_name, logs=[])
-
-    def pp(
-        self,
-        target: SelectorTarget,
-        *,
-        force_stack_block: bool = False,
-        erase_stack_block: bool = False,
-    ) -> str:
-        logs: list[str] = []
-        queue: list[TrackedBranch] = []
-        tracked = self.db.get_branch(target.repo_name, target.branch)
-        if tracked:
-            queue.append(tracked)
-        queue.extend(self._toposorted_descendants(target.repo_name, target.branch))
-        if not queue:
+        resolved = self._resolve_scope(target.repo_name, target.branch, options.scope)
+        if not resolved:
             return "No tracked branches to push."
-
         config = self._pr_config(target.repo_name)
         repo_path = self.paths.repo(target.repo_name)
-        try:
-            current_repo = self.pr_backend.repo_info(cwd=repo_path)
-        except git.GitError:
-            current_repo = None
-        refresh_root: TrackedBranch | None = None
-        for item in queue:
-            if not self._run_single_pp(item, logs, require_upstream_before=True):
-                return self._finish(logs, "PP complete.")
-            if (
-                current_repo
-                and refresh_root is None
-                and self._find_open_pr(item, config, current_repo)
-            ):
-                refresh_root = item
-        should_refresh_block = (
-            config.mode == "repo-pr" or force_stack_block or erase_stack_block
-        )
-        if should_refresh_block and current_repo and refresh_root is not None:
-            if erase_stack_block:
-                self._erase_component_pr_bodies(refresh_root, config, current_repo, logs)
-            else:
-                self._refresh_component_pr_bodies(refresh_root, config, current_repo, None, logs)
-        return self._finish(logs, "PP complete.")
-
-    def pr(self, target: SelectorTarget, *, draft: bool) -> str:
-        tracked = self._require_tracked(target)
-        config = self._pr_config(tracked.repo_name)
-        repo_path = self.paths.repo(tracked.repo_name)
         logs: list[str] = []
-        current_repo = self.pr_backend.repo_info(cwd=repo_path)
-        chain = self._ancestor_chain(tracked)
+        current_repo = (
+            self.pr_backend.repo_info(cwd=repo_path) if options.create_pr else None
+        )
+        leaf = resolved[-1]
         latest_pr: gh.PullRequest | None = None
-        for item in chain:
+        for item in resolved:
             acquired = self._acquire(item.repo_name, item.branch)
             try:
                 self._run_single_pp(item, logs)
-                latest_pr = self._create_or_update_current_pr(
-                    item, config, current_repo, draft=draft, logs=logs
-                )
+                if options.create_pr and current_repo is not None:
+                    is_leaf = item.branch == leaf.branch
+                    item_draft = self._pr_draft_decision(
+                        draft=options.draft, publish=options.publish, is_leaf=is_leaf,
+                    )
+                    latest_pr = self._create_or_update_current_pr(
+                        item, config, current_repo, draft=item_draft, logs=logs
+                    )
             finally:
-                if item.branch != tracked.branch:
+                if item.branch != target.branch:
                     self._release_if_owned(acquired)
-        assert latest_pr is not None  # chain always contains `tracked`
-        # refresh uses _pr_map_for_component, which reads the cached URL we
-        # just wrote in _create_or_update_current_pr — no races, no extra
-        # searches.
+        if not options.create_pr or current_repo is None:
+            return self._finish(logs, "Push complete.")
+        assert latest_pr is not None
         refreshed = self._require_tracked(target)
         self._refresh_component_pr_bodies(
             refreshed, config, current_repo, latest_pr, logs,
         )
         return self._finish(logs, f"PR ready: {latest_pr.url}")
+
+    def _pr_draft_decision(self, *, draft: bool, publish: bool, is_leaf: bool) -> bool:
+        """Pick draft-ness per-branch when push walks a scope.
+
+        `--draft` → every PR draft. `--publish` → every PR published.
+        Default → non-leaf entries draft, leaf published (mirrors
+        gitstack's "first PR off master published, deeper draft" model,
+        but indexed from the leaf for pm's current-lineage default).
+        """
+        if draft:
+            return True
+        if publish:
+            return False
+        return not is_leaf
 
     def _ancestor_chain(self, tracked: TrackedBranch) -> list[TrackedBranch]:
         """Return the tracked ancestor chain, root-first, including `tracked`.
@@ -782,7 +1158,7 @@ class StackerService:
         current_pr: gh.PullRequest | None,
         logs: list[str],
     ) -> None:
-        component = self._component_nodes(tracked)
+        component = self._lineage(tracked)
         pr_map = self._pr_map_for_component(component, config, current_repo)
         if current_pr:
             pr_map[tracked.branch] = current_pr
@@ -818,7 +1194,7 @@ class StackerService:
         current_repo: gh.RepoInfo,
         logs: list[str],
     ) -> None:
-        component = self._component_nodes(tracked)
+        component = self._lineage(tracked)
         pr_map = self._pr_map_for_component(component, config, current_repo)
         if not pr_map:
             return
@@ -840,7 +1216,13 @@ class StackerService:
                 f"({selectors.selector_for(node.repo_name, node.branch)})",
             )
 
-    def _component_nodes(self, tracked: TrackedBranch) -> list[TrackedBranch]:
+    def _lineage(self, tracked: TrackedBranch) -> list[TrackedBranch]:
+        """Return tracked ancestors root-first + `tracked` + descendants toposorted.
+
+        Used as the `-c`/`--current` scope for sync/push/ls and as the
+        component for PR-body rendering. Ancestors stop at the first
+        untracked parent (matching `_ancestor_chain`'s termination).
+        """
         ancestors: list[TrackedBranch] = []
         current = tracked
         while True:
@@ -855,6 +1237,76 @@ class StackerService:
             tracked,
             *self._toposorted_descendants(tracked.repo_name, tracked.branch),
         ]
+
+    def _toposorted_all(self, repo_name: str) -> list[TrackedBranch]:
+        """All tracked branches in `repo_name`, ordered parent-before-child.
+
+        Branches whose parent is not tracked (typical roots off trunk) go
+        first, in stable `branch` order. Remaining branches follow a DFS
+        from each root so a cascading op can rely on parents being synced
+        before their children.
+        """
+        all_branches = self.db.list_branches(repo_name)
+        by_parent: dict[str, list[TrackedBranch]] = {}
+        tracked_names: set[str] = set()
+        for b in all_branches:
+            by_parent.setdefault(b.parent_branch, []).append(b)
+            tracked_names.add(b.branch)
+        ordered: list[TrackedBranch] = []
+        visited: set[str] = set()
+
+        def walk(parent_branch: str) -> None:
+            for child in sorted(by_parent.get(parent_branch, []), key=lambda b: b.branch):
+                if child.branch in visited:
+                    continue
+                visited.add(child.branch)
+                ordered.append(child)
+                walk(child.branch)
+
+        roots = sorted(
+            (b for b in all_branches if b.parent_branch not in tracked_names),
+            key=lambda b: (b.parent_branch, b.branch),
+        )
+        for root in roots:
+            if root.branch in visited:
+                continue
+            visited.add(root.branch)
+            ordered.append(root)
+            walk(root.branch)
+        return ordered
+
+    def _resolve_scope(
+        self, repo_name: str, target_branch: str, spec: ScopeSpec,
+    ) -> list[TrackedBranch]:
+        """Resolve scope flags into an ordered branch list.
+
+        Order is parent-before-child, safe to sync/push sequentially:
+        `_lineage` for scope="current", `_toposorted_all` for scope="all".
+        `only` short-circuits to just the target. `skip_ancestors` /
+        `skip_descendants` trim the walk. `from_branch` drops entries
+        before that branch in the resolved list.
+        """
+        if spec.only:
+            tracked = self._require_tracked(
+                SelectorTarget(repo_name=repo_name, branch=target_branch)
+            )
+            return [tracked]
+        if spec.scope == "all":
+            resolved = self._toposorted_all(repo_name)
+            if spec.from_branch:
+                resolved = _drop_until(resolved, spec.from_branch)
+            return resolved
+        target = self._require_tracked(
+            SelectorTarget(repo_name=repo_name, branch=target_branch)
+        )
+        lineage = self._lineage(target)
+        target_index = next(i for i, b in enumerate(lineage) if b.branch == target.branch)
+        start = target_index if spec.skip_ancestors else 0
+        end = target_index + 1 if spec.skip_descendants else len(lineage)
+        resolved = lineage[start:end]
+        if spec.from_branch:
+            resolved = _drop_until(resolved, spec.from_branch)
+        return resolved
 
     def _pr_map_for_component(
         self,
@@ -1190,7 +1642,7 @@ class StackerService:
             if op.op_type == "downstream_sync":
                 if op.current_index >= len(op.queue):
                     self.db.clear_operation(repo_name)
-                    return self._finish(logs, "Push complete.")
+                    return self._finish(logs, "Sync complete.")
                 slot_path, acquired_ops = self._advance_downstream(repo_name, op, logs)
                 op = self.db.get_operation(repo_name)
                 assert op
@@ -1395,23 +1847,12 @@ class StackerService:
         ctx: _GraphCtx,
         branch: str,
         pos: _GraphPos,
+        *,
+        details: Details = "status-counts",
     ) -> None:
         label = selectors.selector_for(ctx.repo_name, branch)
         branch_label = self._style(label, fg="green", bold=not pos.implicit)
-        suffixes: list[str] = []
-        tracked = next((item for item in ctx.items if item.branch == branch), None)
-        if pos.implicit:
-            suffixes.append(self._style("[untracked root]", fg="yellow"))
-        elif tracked:
-            synced = self._is_synced(tracked)
-            suffixes.append(
-                self._style(
-                    "[synced]" if synced else "[unsynced]",
-                    fg="cyan" if synced else "yellow",
-                )
-            )
-            if branch in ctx.live and self._has_graph_blocking_changes(ctx.live[branch].path):
-                suffixes.append(self._style("[dirty]", fg="red", bold=True))
+        suffixes = self._node_suffixes(ctx, branch, pos, details)
         connector = "└── " if pos.is_last else "├── "
         line = f"{pos.prefix}{connector}{branch_label}"
         if suffixes:
@@ -1433,7 +1874,45 @@ class StackerService:
                     is_last=index == len(children) - 1,
                     implicit=False,
                 ),
+                details=details,
             )
+
+    def _node_suffixes(
+        self, ctx: _GraphCtx, branch: str, pos: _GraphPos, details: Details,
+    ) -> list[str]:
+        if details == "none":
+            return []
+        suffixes: list[str] = []
+        tracked = next((item for item in ctx.items if item.branch == branch), None)
+        if pos.implicit:
+            suffixes.append(self._style("[untracked root]", fg="yellow"))
+            return suffixes
+        if tracked is None:
+            return suffixes
+        synced = self._is_synced(tracked)
+        suffixes.append(
+            self._style(
+                "[synced]" if synced else "[unsynced]",
+                fg="cyan" if synced else "yellow",
+            )
+        )
+        if branch in ctx.live and self._has_graph_blocking_changes(ctx.live[branch].path):
+            suffixes.append(self._style("[dirty]", fg="red", bold=True))
+        if details in ("status-counts", "all"):
+            count = self._count_branch_commits(tracked)
+            if count is not None:
+                suffixes.append(self._style(f"[{count} commits]", fg="white"))
+        if details == "all" and tracked.pr_url:
+            suffixes.append(self._style(f"[{tracked.pr_url}]", fg="magenta"))
+        return suffixes
+
+    def _count_branch_commits(self, tracked: TrackedBranch) -> int | None:
+        path = locate.locate_worktree(self.paths, tracked.repo_name, tracked.branch)
+        if path is None:
+            return None
+        with contextlib.suppress(git.GitError):
+            return git.rev_count(path, f"{tracked.managed_base_commit}..HEAD")
+        return None
 
     def _is_synced(self, tracked: TrackedBranch) -> bool:
         try:
@@ -1537,3 +2016,10 @@ class StackerService:
 
     def _style(self, text: str, *, fg: str | None = None, bold: bool = False) -> str:
         return output.style(text, fg=fg, bold=bold)
+
+
+def _drop_until(branches: list[TrackedBranch], name: str) -> list[TrackedBranch]:
+    for index, item in enumerate(branches):
+        if item.branch == name:
+            return branches[index:]
+    raise git.GitError(f"--from {name!r} is not in the resolved scope.")

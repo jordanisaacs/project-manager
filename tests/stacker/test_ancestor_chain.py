@@ -7,7 +7,7 @@ import pytest
 from project_manager.paths import Paths
 from project_manager.stacker import gh
 from project_manager.stacker.db import StackerDB
-from project_manager.stacker.models import SelectorTarget, TrackedBranch
+from project_manager.stacker.models import PushOptions, SelectorTarget, TrackedBranch
 from project_manager.stacker.service import StackerService, _Acquired
 
 from .fakes import RecordingPRBackend
@@ -110,6 +110,6 @@ def test_pr_walks_ancestors_root_first(
         service, "_refresh_component_pr_bodies", lambda *_a, **_k: None
     )
 
-    service.pr(SelectorTarget(repo_name="demo", branch="feature-c"), draft=False)
+    service.push(SelectorTarget(repo_name="demo", branch="feature-c"), PushOptions(publish=True))
     assert pp_order == ["feature-a", "feature-b", "feature-c"]
     assert pr_order == ["feature-a", "feature-b", "feature-c"]

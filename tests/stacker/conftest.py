@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from project_manager.pool import add as add_mod
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.stacker.db import StackerDB
+from project_manager.stacker.models import ParentLocator, WorktreeInit
 from project_manager.stacker.service import StackerService
 
 
@@ -84,3 +86,57 @@ def three_slots(pm_env: Paths, stacker_repo: tuple[str, Path]) -> list[slot_mod.
 def service(pm_env: Paths) -> StackerService:
     db = StackerDB(pm_env.stacker_db())
     return StackerService(db, pm_env)
+
+
+@dataclass(frozen=True)
+class TrackedStack:
+    """A four-branch chain `main → a → b → c → d`, each in its own slot.
+
+    Each branch has one commit (`<name>.txt`). Use as a starting shape
+    for tests that need a real lineage: reparent / split / rename /
+    remove / scope resolution all operate against a non-trivial tree.
+    """
+
+    repo_name: str
+    repo_path: Path
+    slots: dict[str, slot_mod.Slot]
+    commits: dict[str, str]
+
+
+@pytest.fixture
+def tracked_stack(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+) -> TrackedStack:
+    repo_name, repo_path = stacker_repo
+    service = StackerService(StackerDB(pm_env.stacker_db()), pm_env)
+    pooldb = PoolDB(pm_env.pool_db())
+    chain = [("a", "main"), ("b", "a"), ("c", "b"), ("d", "c")]
+    slots: dict[str, slot_mod.Slot] = {}
+    commits: dict[str, str] = {}
+    for branch, parent in chain:
+        slot = add_mod.add(pm_env, repo_name)
+        # Real pm claims slots via `pm project new`. The tests that use this
+        # fixture want production-accurate ownership so ops_slot.claim cannot
+        # grab a slot that already has a branch checked out.
+        pooldb.claim(
+            repo_name, slot.uuid, Owner(OwnerKind.PROJECT, "tracked-stack"),
+        )
+        slots[branch] = slot
+        service.init_new_branch(
+            WorktreeInit(
+                repo_name=repo_name,
+                worktree_path=slot.path,
+                branch=branch,
+                parent=ParentLocator(repo_name=repo_name, branch=parent),
+            )
+        )
+        commits[branch] = commit_file(
+            slot.path, f"{branch}.txt", f"{branch}\n", f"{branch}: first commit",
+        )
+    return TrackedStack(
+        repo_name=repo_name,
+        repo_path=repo_path,
+        slots=slots,
+        commits=commits,
+    )
