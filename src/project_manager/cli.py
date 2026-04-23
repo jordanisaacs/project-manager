@@ -5,6 +5,7 @@ from project_manager import check as check_mod
 from project_manager import config
 from project_manager.pool import cli as pool_cli
 from project_manager.project import cli as project_cli
+from project_manager.stacker import cli as stacker_cli
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
 
     project_cli.add_subparser(subparsers)
     pool_cli.add_subparser(subparsers)
+    stacker_cli.add_subparser(subparsers)
 
     check = subparsers.add_parser("check", help="verify invariants across pool and projects")
     check.add_argument("--fix", action="store_true", help="apply safe reconciliations")
