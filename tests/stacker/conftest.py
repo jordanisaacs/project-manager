@@ -8,6 +8,7 @@ import pytest
 from project_manager.paths import Paths
 from project_manager.pool import add as add_mod
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.service import StackerService
 
@@ -59,7 +60,7 @@ def claim_forward(paths: Paths, project: str, repo: str, slot: slot_mod.Slot) ->
     (paths.projects / project).mkdir(parents=True, exist_ok=True)
     forward = paths.forward(project, repo)
     forward.symlink_to(slot.path)
-    slot_mod.claim(slot, forward)
+    PoolDB(paths.pool_db()).claim(repo, slot.uuid, Owner(OwnerKind.PROJECT, project))
     return forward
 
 

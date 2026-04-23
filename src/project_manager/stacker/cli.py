@@ -8,6 +8,7 @@ from pathlib import Path
 from project_manager import config
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import OwnerKind, PoolDB
 
 from . import git, ops_slot, selectors
 from .db import StackerDB
@@ -33,10 +34,11 @@ def _require_base(base: str | None) -> str:
 def _cmd_create(args: argparse.Namespace) -> int:
     paths = config.load()
     service = _service(paths)
+    pooldb = PoolDB(paths.pool_db())
     try:
         base = _require_base(args.base)
         parent = selectors.resolve_parent_for_base(paths, args.repo, base)
-        target_slot = ops_slot.claim(paths, args.repo)
+        target_slot = ops_slot.claim(paths, pooldb, args.repo)
         try:
             service.initialize_worktree(
                 repo_name=args.repo,
@@ -46,7 +48,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
                 parent=parent,
             )
         except Exception:
-            slot_mod.release(target_slot)
+            pooldb.release(target_slot.repo, target_slot.uuid)
             raise
     except (git.GitError, slot_mod.PoolExhaustedError) as e:
         print(f"pm: {e}", file=sys.stderr)
@@ -253,24 +255,29 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
 def gc_ops(paths: Paths) -> list[slot_mod.Slot]:
     """Release stacker-ops slots whose repo has no active operation row.
 
-    Safe to run at any time: a slot is only released if it is (a) claimed by
-    the stacker ops marker and (b) has no matching `operations` row in the
-    stacker db pointing at its current branch.
+    Safe to run at any time: a slot is only released if it is (a) recorded in
+    the pool db as stacker-owned and (b) has no matching `operations` row in
+    the stacker db pointing at its current branch.
     """
-    if not paths.stacker_root.is_dir() or not paths.worktrees.is_dir():
+    if not paths.worktrees.is_dir():
         return []
+    pooldb = PoolDB(paths.pool_db())
     db = StackerDB(paths.stacker_db())
     ops_by_repo = _ops_by_repo(db.list_operations())
-    marker = paths.stacker_ops_marker().resolve()
     released: list[slot_mod.Slot] = []
-    for repo_dir in sorted(paths.worktrees.iterdir()):
-        if not repo_dir.is_dir():
+    for repo, uuid, owner in pooldb.list_owned():
+        if owner.kind != OwnerKind.STACKER:
             continue
-        released.extend(
-            _collect_orphan_ops_slots(
-                paths, repo_dir.name, ops_by_repo.get(repo_dir.name, set()), marker
-            )
-        )
+        slot_path = paths.slot(repo, uuid)
+        if not slot_path.is_dir():
+            pooldb.release(repo, uuid)
+            released.append(slot_mod.Slot(repo=repo, uuid=uuid, path=slot_path))
+            continue
+        branch = _slot_branch(slot_path)
+        if branch and branch in ops_by_repo.get(repo, set()):
+            continue
+        pooldb.release(repo, uuid)
+        released.append(slot_mod.Slot(repo=repo, uuid=uuid, path=slot_path))
     return released
 
 
@@ -281,31 +288,6 @@ def _ops_by_repo(ops: list[OperationState]) -> dict[str, set[str]]:
         if op.branch:
             out[op.repo_name].add(op.branch)
     return out
-
-
-def _collect_orphan_ops_slots(
-    paths: Paths, repo_name: str, live_branches: set[str], marker: Path
-) -> list[slot_mod.Slot]:
-    released: list[slot_mod.Slot] = []
-    for slot in slot_mod.list_slots(paths, repo_name):
-        if not _points_at_marker(slot, marker):
-            continue
-        branch = _slot_branch(slot.path)
-        if branch and branch in live_branches:
-            continue
-        slot_mod.release(slot)
-        released.append(slot)
-    return released
-
-
-def _points_at_marker(slot: slot_mod.Slot, marker: Path) -> bool:
-    target = slot.owner_target()
-    if target is None:
-        return False
-    try:
-        return target.resolve() == marker
-    except OSError:
-        return False
 
 
 def _slot_branch(slot_path: Path) -> str | None:

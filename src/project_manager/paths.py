@@ -18,9 +18,6 @@ class Paths:
     def slot(self, repo: str, uuid: str) -> Path:
         return self.worktrees / repo / uuid
 
-    def owner(self, repo: str, uuid: str) -> Path:
-        return self.worktrees / repo / uuid / ".owner"
-
     def project(self, name: str) -> Path:
         return self.projects / name
 
@@ -33,5 +30,5 @@ class Paths:
     def stacker_db(self) -> Path:
         return self.stacker_root / "db.sqlite"
 
-    def stacker_ops_marker(self) -> Path:
-        return self.stacker_root / "ops"
+    def pool_db(self) -> Path:
+        return self.worktrees / "pool.db"

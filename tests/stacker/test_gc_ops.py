@@ -5,6 +5,7 @@ from pathlib import Path
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool import worktree as wt
+from project_manager.pool.db import PoolDB
 from project_manager.stacker import ops_slot
 from project_manager.stacker.cli import gc_ops
 from project_manager.stacker.db import StackerDB
@@ -21,11 +22,12 @@ def test_gc_ops_releases_orphan_slot(
     # no matching operations row.
     wt._git(three_slots[0].path, "checkout", "-b", "orphaned")
     wt._git(three_slots[0].path, "checkout", "--detach", "HEAD")
-    ops_slot.acquire(pm_env, repo_name, "orphaned")
+    pooldb = PoolDB(pm_env.pool_db())
+    ops_slot.acquire(pm_env, pooldb, repo_name, "orphaned")
 
     released = gc_ops(pm_env)
     assert len(released) == 1
-    assert released[0].owner_target() is None
+    assert pooldb.get_owner(released[0].repo, released[0].uuid) is None
 
 
 def test_gc_ops_leaves_live_op_alone(
@@ -36,7 +38,8 @@ def test_gc_ops_leaves_live_op_alone(
     repo_name, _ = stacker_repo
     wt._git(three_slots[0].path, "checkout", "-b", "live")
     wt._git(three_slots[0].path, "checkout", "--detach", "HEAD")
-    acquired = ops_slot.acquire(pm_env, repo_name, "live")
+    pooldb = PoolDB(pm_env.pool_db())
+    acquired = ops_slot.acquire(pm_env, pooldb, repo_name, "live")
 
     # Simulate a live operation row matching the claimed branch.
     db = StackerDB(pm_env.stacker_db())
@@ -51,4 +54,4 @@ def test_gc_ops_leaves_live_op_alone(
 
     released = gc_ops(pm_env)
     assert released == []
-    assert acquired.owner_target() is not None
+    assert pooldb.get_owner(acquired.repo, acquired.uuid) is not None

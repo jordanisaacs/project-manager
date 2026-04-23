@@ -2,7 +2,7 @@ import shutil
 
 from project_manager import check
 from project_manager.paths import Paths
-from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import OWNER_STACKER_OPS, Owner, OwnerKind, PoolDB
 from project_manager.project import attach as attach_mod
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
@@ -45,11 +45,11 @@ def test_broken_forward(pm_env: Paths) -> None:
     assert not (pm_env.projects / "demo" / "foo").exists()
 
 
-def test_stale_when_owner_missing(pm_env: Paths) -> None:
+def test_stale_when_pool_row_missing(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     new_mod.new(pm_env, "demo", ["foo"])
-    # manually remove .owner to simulate a crash
-    (pm_env.worktrees / "foo" / "a" / ".owner").unlink()
+    # Manually delete the pool-db row to simulate a crashed claim.
+    PoolDB(pm_env.pool_db()).release("foo", "a")
     findings = check.check(pm_env)
     assert check.Kind.STALE in _kinds(findings)
     check.fix(pm_env, findings)
@@ -60,10 +60,10 @@ def test_drift_is_informational(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a", "b"])
     new_mod.new(pm_env, "demo", ["foo"])
     detach_mod.detach(pm_env, "demo", repos=None)
-    # simulate drift: db says slot "a", but attach finds b taken, wait...
-    # manually rewire demo's forward to point at slot b with a matching .owner
+    # Simulate drift: forward and pool row both point at slot b, but the
+    # project db still remembers slot a.
     fwd = pm_env.projects / "demo" / "foo"
-    (pm_env.worktrees / "foo" / "b" / ".owner").symlink_to(fwd)
+    PoolDB(pm_env.pool_db()).claim("foo", "b", Owner(OwnerKind.PROJECT, "demo"))
     fwd.symlink_to(pm_env.worktrees / "foo" / "b")
     findings = check.check(pm_env)
     assert check.Kind.DRIFT in _kinds(findings)
@@ -87,12 +87,12 @@ def test_orphan_forward_no_db_row(pm_env: Paths) -> None:
 def test_orphan_owner_points_at_nonmember_forward(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     new_mod.new(pm_env, "demo", ["foo"])
-    # manually detach by just removing the forward (leaves .owner dangling)
+    # manually remove the forward, leaving the pool row stranded
     (pm_env.projects / "demo" / "foo").unlink()
     findings = check.check(pm_env)
     assert check.Kind.ORPHAN_OWNER in _kinds(findings)
     check.fix(pm_env, findings)
-    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+    assert PoolDB(pm_env.pool_db()).get_owner("foo", "a") is None
 
 
 def test_attach_after_detach_round_trips_clean(pm_env: Paths) -> None:
@@ -106,14 +106,11 @@ def test_attach_after_detach_round_trips_clean(pm_env: Paths) -> None:
 
 def test_ops_owned_slot_is_classified(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
-    # Create the stacker ops marker and claim the slot with it.
-    pm_env.stacker_root.mkdir(parents=True, exist_ok=True)
-    pm_env.stacker_ops_marker().touch()
-    slot = slot_mod.Slot(repo="foo", uuid="a", path=pm_env.slot("foo", "a"))
-    slot_mod.claim(slot, pm_env.stacker_ops_marker())
+    pooldb = PoolDB(pm_env.pool_db())
+    pooldb.claim("foo", "a", OWNER_STACKER_OPS)
 
     findings = check.check(pm_env)
     assert _kinds(findings) == [check.Kind.OPS_OWNED]
     # fix() does NOT touch OPS_OWNED slots — they're intentional.
     assert check.fix(pm_env, findings) == 0
-    assert slot.owner_path.is_symlink()
+    assert pooldb.get_owner("foo", "a") == OWNER_STACKER_OPS

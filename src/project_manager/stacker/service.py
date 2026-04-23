@@ -11,6 +11,7 @@ from urllib.parse import quote
 from project_manager import output
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
 
 from . import config_schema, gh, git, locate, ops_slot, selectors
 from .db import StackerDB
@@ -517,7 +518,7 @@ class StackerService:
         ops = self._existing_ops_slot(op, slot_path) if slot_path else None
         self.db.clear_operation(repo_name)
         if ops is not None:
-            ops_slot.release(ops)
+            ops_slot.release(PoolDB(self.paths.pool_db()), ops)
         if op.branch:
             return f"Aborted operation for {selectors.selector_for(repo_name, op.branch)}."
         return "Aborted operation."
@@ -553,12 +554,12 @@ class StackerService:
         existing = locate.locate_worktree(self.paths, repo_name, branch)
         if existing is not None:
             return _Acquired(path=existing, ops=None)
-        claimed = ops_slot.acquire(self.paths, repo_name, branch)
+        claimed = ops_slot.acquire(self.paths, PoolDB(self.paths.pool_db()), repo_name, branch)
         return _Acquired(path=claimed.path, ops=claimed)
 
     def _release_if_owned(self, acquired: _Acquired) -> None:
         if acquired.ops is not None:
-            ops_slot.release(acquired.ops)
+            ops_slot.release(PoolDB(self.paths.pool_db()), acquired.ops)
 
     def _slot_path_for_active_op(
         self, op: OperationState, *, required: bool = True
@@ -580,24 +581,18 @@ class StackerService:
     ) -> slot_mod.Slot | None:
         """Return the stacker-ops Slot handle backing this op's current branch, or None.
 
-        A slot is an ops slot if its .owner symlink targets paths.stacker_ops_marker.
-        A project-owned slot (or otherwise-claimed slot) returns None — we don't own it.
+        A slot is an ops slot if the pool db records it as stacker-owned. A
+        project-owned slot (or otherwise-claimed slot) returns None — we don't own it.
         """
         if slot_path is None:
             return None
         expected_pool = self.paths.pool(op.repo_name).resolve()
         if slot_path.parent.resolve() != expected_pool:
             return None
-        slot = slot_mod.Slot(repo=op.repo_name, uuid=slot_path.name, path=slot_path)
-        target = slot.owner_target()
-        if target is None:
+        pooldb = PoolDB(self.paths.pool_db())
+        if pooldb.get_owner(op.repo_name, slot_path.name) != OWNER_STACKER_OPS:
             return None
-        try:
-            if target.resolve() == self.paths.stacker_ops_marker().resolve():
-                return slot
-        except OSError:
-            pass
-        return None
+        return slot_mod.Slot(repo=op.repo_name, uuid=slot_path.name, path=slot_path)
 
     def _require_checked_out(self, repo_name: str, branch: str) -> Path:
         path = locate.locate_worktree(self.paths, repo_name, branch)
@@ -1046,7 +1041,7 @@ class StackerService:
                 continuing = False
                 if result is not None:
                     if acquired_ops is not None:
-                        ops_slot.release(acquired_ops)
+                        ops_slot.release(PoolDB(self.paths.pool_db()), acquired_ops)
                     return self._finish(logs, result)
                 op = self.db.get_operation(repo_name)
                 assert op

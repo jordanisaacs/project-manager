@@ -3,6 +3,7 @@ import pytest
 from project_manager import check as check_mod
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
+from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.project import detach as detach_mod
 from project_manager.project import new as new_mod
 from project_manager.project import status as status_mod
@@ -43,19 +44,18 @@ def test_status_raises_on_missing_project(pm_env: Paths) -> None:
 
 
 def test_status_is_scoped_to_one_project(pm_env: Paths) -> None:
-    """Orphan owners pointing at a different project must not leak in."""
+    """Orphan owners for a different project must not leak in."""
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x", "y"])
     new_mod.new(pm_env, "alpha", ["foo", "bar"])
     new_mod.new(pm_env, "beta", ["bar"])  # claims bar/y (x is taken by alpha's bar)
-    # Inject an orphan owner on a fresh bar slot pointing at alpha's bogus forward.
+    # Inject an orphan owner: a fresh bar slot claimed by alpha in the pool db
+    # with no matching forward.
     (pm_env.worktrees / "bar" / "z").mkdir()
-    (pm_env.worktrees / "bar" / "z" / ".owner").symlink_to(
-        pm_env.projects / "alpha" / "bogus",
-    )
+    PoolDB(pm_env.pool_db()).claim("bar", "z", Owner(OwnerKind.PROJECT, "alpha"))
     alpha_rows = status_mod.status(pm_env, "alpha")
     beta_rows = status_mod.status(pm_env, "beta")
-    # alpha sees the orphan owner (it points into alpha/...).
+    # alpha sees the orphan owner (it is owned by alpha).
     assert any(r.finding.kind == check_mod.Kind.ORPHAN_OWNER for r in alpha_rows)
     # beta does not.
     assert all(r.finding.kind != check_mod.Kind.ORPHAN_OWNER for r in beta_rows)

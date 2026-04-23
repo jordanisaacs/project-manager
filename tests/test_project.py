@@ -1,10 +1,8 @@
-import shutil
-import sqlite3
-
 import pytest
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
+from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError
 from project_manager.project import attach as attach_mod
 from project_manager.project import db
@@ -25,15 +23,19 @@ def _db_rows(paths: Paths, project: str) -> list[tuple[str, str]]:
         return db.list_repos(conn)
 
 
+def _pool_owner(paths: Paths, repo: str, uuid: str) -> Owner | None:
+    return PoolDB(paths.pool_db()).get_owner(repo, uuid)
+
+
 # --- new ---
 
 
-def test_new_single_repo_creates_db_and_symlinks(pm_env: Paths) -> None:
+def test_new_single_repo_creates_db_and_pool_row(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     new_mod.new(pm_env, "demo", ["foo"])
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
     assert (pm_env.projects / "demo" / "foo").is_symlink()
-    assert (pm_env.worktrees / "foo" / "a" / ".owner").is_symlink()
+    assert _pool_owner(pm_env, "foo", "a") == Owner(OwnerKind.PROJECT, "demo")
     assert _db_rows(pm_env, "demo") == [("foo", "a")]
 
 
@@ -49,8 +51,8 @@ def test_new_rolls_back_when_second_repo_exhausted(pm_env: Paths) -> None:
     _mk_pool(pm_env, "bar", [])
     with pytest.raises(PoolExhaustedError):
         new_mod.new(pm_env, "demo", ["foo", "bar"])
-    # filesystem rolled back
-    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+    # filesystem and pool db rolled back
+    assert _pool_owner(pm_env, "foo", "a") is None
     assert not (pm_env.projects / "demo").exists()
 
 
@@ -94,12 +96,12 @@ def test_new_rollback_does_not_leave_readme(pm_env: Paths) -> None:
 # --- detach ---
 
 
-def test_detach_unlinks_forward_and_owner_but_keeps_db(pm_env: Paths) -> None:
+def test_detach_unlinks_forward_and_releases_pool_row_but_keeps_db(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     new_mod.new(pm_env, "demo", ["foo"])
     detach_mod.detach(pm_env, "demo", repos=None)
     assert not (pm_env.projects / "demo" / "foo").exists()
-    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+    assert _pool_owner(pm_env, "foo", "a") is None
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
     assert _db_rows(pm_env, "demo") == [("foo", "a")]
 
@@ -190,7 +192,7 @@ def test_delete_whole_removes_db_and_dir(pm_env: Paths) -> None:
     new_mod.new(pm_env, "demo", ["foo"])
     delete_mod.delete(pm_env, "demo", repos=None)
     assert not (pm_env.projects / "demo").exists()
-    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+    assert _pool_owner(pm_env, "foo", "a") is None
 
 
 def test_delete_whole_removes_readme(pm_env: Paths) -> None:
@@ -207,7 +209,7 @@ def test_delete_per_repo_implicit_detach(pm_env: Paths) -> None:
     new_mod.new(pm_env, "demo", ["foo", "bar"])
     delete_mod.delete(pm_env, "demo", repos=["foo"])
     assert not (pm_env.projects / "demo" / "foo").exists()
-    assert not (pm_env.worktrees / "foo" / "a" / ".owner").exists()
+    assert _pool_owner(pm_env, "foo", "a") is None
     assert (pm_env.projects / "demo" / "bar").is_symlink()
     assert _db_rows(pm_env, "demo") == [("bar", "x")]
 
@@ -254,51 +256,13 @@ def test_ls_reports_mixed_states(pm_env: Paths) -> None:
 def test_ls_drift(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a", "b"])
     new_mod.new(pm_env, "demo", ["foo"])
-    # detach, swap forward to a different (claimed) slot manually to simulate drift
+    # detach, then manually claim slot b in the pool db and forward-link to b
+    # while the project db still remembers a.
     detach_mod.detach(pm_env, "demo", repos=None)
-    # manually claim slot b and forward-link to b instead of a (while db remembers a)
+    PoolDB(pm_env.pool_db()).claim("foo", "b", Owner(OwnerKind.PROJECT, "demo"))
     other_forward = pm_env.projects / "demo" / "foo"
-    (pm_env.worktrees / "foo" / "b" / ".owner").symlink_to(other_forward)
     other_forward.symlink_to(pm_env.worktrees / "foo" / "b")
     rows = ls_mod.ls(pm_env)
     assert rows[0].status == "drift"
 
 
-# --- migration snippet ---
-
-
-def test_migration_snippet(pm_env: Paths) -> None:
-    # v1-style state: forward symlinks, owner markers, but no .pm.db
-    _mk_pool(pm_env, "foo", ["a"])
-    _mk_pool(pm_env, "bar", ["x"])
-    (pm_env.projects / "demo").mkdir()
-    (pm_env.projects / "demo" / "foo").symlink_to(pm_env.worktrees / "foo" / "a")
-    (pm_env.projects / "demo" / "bar").symlink_to(pm_env.worktrees / "bar" / "x")
-    (pm_env.worktrees / "foo" / "a" / ".owner").symlink_to(pm_env.projects / "demo" / "foo")
-    (pm_env.worktrees / "bar" / "x" / ".owner").symlink_to(pm_env.projects / "demo" / "bar")
-
-    # run the migration snippet from the plan
-    for proj in pm_env.projects.iterdir():
-        if not proj.is_dir() or (proj / ".pm.db").exists():
-            continue
-        conn = sqlite3.connect(proj / ".pm.db")
-        conn.execute(
-            "CREATE TABLE repos (name TEXT PRIMARY KEY, slot_uuid TEXT NOT NULL)"
-        )
-        for entry in proj.iterdir():
-            if entry.is_symlink():
-                conn.execute(
-                    "INSERT INTO repos (name, slot_uuid) VALUES (?, ?)",
-                    (entry.name, entry.readlink().name),
-                )
-        conn.commit()
-        conn.close()
-
-    assert sorted(_db_rows(pm_env, "demo")) == [("bar", "x"), ("foo", "a")]
-    # pm sees this project fully
-    rows = ls_mod.ls(pm_env)
-    assert {(r.repo, r.status) for r in rows} == {("foo", "attached"), ("bar", "attached")}
-
-
-# silences unused-import warning if test layout changes
-_ = shutil

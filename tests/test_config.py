@@ -15,7 +15,7 @@ def test_defaults_when_no_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert paths.projects == tmp_path / ".projects"
     assert paths.stacker_root == tmp_path / ".stacker"
     assert paths.stacker_db() == tmp_path / ".stacker" / "db.sqlite"
-    assert paths.stacker_ops_marker() == tmp_path / ".stacker" / "ops"
+    assert paths.pool_db() == tmp_path / ".worktrees" / "pool.db"
 
 
 def test_pm_config_overrides(pm_env) -> None:

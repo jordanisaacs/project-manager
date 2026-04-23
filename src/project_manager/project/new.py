@@ -1,10 +1,10 @@
 import contextlib
 import sqlite3
-from pathlib import Path
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import db
 
@@ -27,9 +27,11 @@ symlinks by hand — use `pm project attach|detach|delete`.
 """
 
 
-def _claim_any_free(paths: Paths, repo: str, forward: Path, retries: int = 3) -> Slot:
+def _claim_any_free(
+    paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, retries: int = 3,
+) -> Slot:
     for _ in range(retries):
-        free = slot_mod.free_slots(paths, repo)
+        free = slot_mod.free_slots(paths, pooldb, repo)
         if not free:
             raise PoolExhaustedError(
                 f"no free slots for repo '{repo}' — run `pm pool add {repo}` or "
@@ -37,7 +39,7 @@ def _claim_any_free(paths: Paths, repo: str, forward: Path, retries: int = 3) ->
             )
         for s in free:
             try:
-                slot_mod.claim(s, forward)
+                pooldb.claim(repo, s.uuid, owner)
             except SlotBusyError:
                 continue
             else:
@@ -46,29 +48,34 @@ def _claim_any_free(paths: Paths, repo: str, forward: Path, retries: int = 3) ->
 
 
 def _claim_one(
-    paths: Paths, project: str, repo: str, conn: sqlite3.Connection
-) -> tuple[Slot, Path]:
+    paths: Paths,
+    pooldb: PoolDB,
+    project: str,
+    repo: str,
+    conn: sqlite3.Connection,
+) -> Slot:
     if db.get_slot(conn, repo) is not None:
         raise ProjectError(f"project '{project}' already has repo '{repo}'")
     forward = paths.forward(project, repo)
     if forward.is_symlink() or forward.exists():
         raise ProjectError(f"{forward} already exists")
-    s = _claim_any_free(paths, repo, forward)
+    owner = Owner(OwnerKind.PROJECT, project)
+    s = _claim_any_free(paths, pooldb, owner, repo)
     try:
         forward.symlink_to(s.path)
         db.add_repo(conn, repo, s.uuid)
     except BaseException:
-        slot_mod.release(s)
+        pooldb.release(repo, s.uuid)
         raise
-    return s, forward
+    return s
 
 
 def new(paths: Paths, project: str, repos: list[str]) -> list[tuple[str, Slot]]:
     """Create a new project. Claim a slot for each repo, insert db rows, forward-link.
 
     Best-effort rollback on any failure: db transaction rolls back via the context
-    manager; filesystem side-effects (symlinks, .owner markers) are unwound by the
-    outer except block.
+    manager; filesystem side-effects (symlinks) and pool-db rows are unwound by
+    the outer except block.
 
     Returns [(repo, slot), ...] on success.
     """
@@ -80,17 +87,19 @@ def new(paths: Paths, project: str, repos: list[str]) -> list[tuple[str, Slot]]:
     created_dir = not project_dir.exists()
     db_existed = db_path.exists()
 
-    claimed: list[tuple[str, Slot, Path]] = []
+    pooldb = PoolDB(paths.pool_db())
+    claimed: list[tuple[str, Slot]] = []
     try:
         with db.transaction(db_path) as conn:
             for repo in repos:
-                s, fwd = _claim_one(paths, project, repo, conn)
-                claimed.append((repo, s, fwd))
+                s = _claim_one(paths, pooldb, project, repo, conn)
+                claimed.append((repo, s))
     except BaseException:
-        for _repo, s, f in reversed(claimed):
+        for repo, s in reversed(claimed):
+            forward = paths.forward(project, repo)
             with contextlib.suppress(FileNotFoundError):
-                f.unlink()
-            slot_mod.release(s)
+                forward.unlink()
+            pooldb.release(repo, s.uuid)
         if not db_existed:
             with contextlib.suppress(FileNotFoundError):
                 db_path.unlink()
@@ -103,4 +112,4 @@ def new(paths: Paths, project: str, repos: list[str]) -> list[tuple[str, Slot]]:
     if not readme.exists():
         readme.write_text(_README_TEMPLATE.format(project=project), encoding="utf-8")
 
-    return [(r, s) for r, s, _ in claimed]
+    return claimed

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
+from project_manager.pool.db import OwnerKind, PoolDB
 
 
 def _cwd_candidates() -> list[Path]:
@@ -37,7 +38,7 @@ def project_from_projects_path(path: Path, paths: Paths) -> str | None:
 
 
 def project_from_worktree_path(path: Path, paths: Paths) -> str | None:
-    """If `path` is under `paths.worktrees`, read `<repo>/<uuid>/.owner` to find project."""
+    """If `path` is under `paths.worktrees`, look up the owning project in pool db."""
     try:
         rel = path.relative_to(paths.worktrees)
     except ValueError:
@@ -45,17 +46,10 @@ def project_from_worktree_path(path: Path, paths: Paths) -> str | None:
     if len(rel.parts) < 2:  # noqa: PLR2004
         return None
     repo, uuid = rel.parts[0], rel.parts[1]
-    owner = paths.owner(repo, uuid)
-    if not owner.is_symlink():
+    owner = PoolDB(paths.pool_db()).get_owner(repo, uuid)
+    if owner is None or owner.kind != OwnerKind.PROJECT:
         return None
-    target = owner.readlink()
-    try:
-        target_rel = target.relative_to(paths.projects)
-    except ValueError:
-        return None
-    if not target_rel.parts:
-        return None
-    return target_rel.parts[0]
+    return owner.id
 
 
 def detect_current_project(paths: Paths) -> str | None:

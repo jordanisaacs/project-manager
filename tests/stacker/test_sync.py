@@ -4,6 +4,7 @@ from pathlib import Path
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker import locate
 from project_manager.stacker.models import ParentLocator, SelectorTarget
@@ -61,8 +62,9 @@ def test_sync_branch_not_checked_out_acquires_ops_slot(
     commit_file(feature_slot.path, "feat.txt", "work\n", "feature work")
     # Simulate the branch moving out of any pool slot: detach the slot.
     stacker_git.git(feature_slot.path, "checkout", "--detach", "HEAD")
-    if feature_slot.owner_path.exists():
-        slot_mod.release(feature_slot)
+    pooldb = PoolDB(pm_env.pool_db())
+    if not pooldb.is_free(feature_slot.repo, feature_slot.uuid):
+        pooldb.release(feature_slot.repo, feature_slot.uuid)
     assert locate.locate_worktree(pm_env, repo_name, "feature-b") is None
 
     _advance_main(repo_path)
@@ -70,12 +72,9 @@ def test_sync_branch_not_checked_out_acquires_ops_slot(
     result = service.sync(SelectorTarget(repo_name=repo_name, branch="feature-b"))
     assert "Sync complete." in result
     # After clean completion no slot should be held by the ops marker.
-    ops_marker = pm_env.stacker_ops_marker().resolve()
     for slot in slot_mod.list_slots(pm_env, repo_name):
-        target = slot.owner_target()
-        if target is None:
-            continue
-        assert target.resolve() != ops_marker
+        owner = pooldb.get_owner(slot.repo, slot.uuid)
+        assert owner != OWNER_STACKER_OPS
 
 
 def test_sync_paused_on_conflict_keeps_slot_claimed(

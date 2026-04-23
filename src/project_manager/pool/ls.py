@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import OwnerKind, PoolDB
 
 
 @dataclass(frozen=True)
@@ -22,24 +23,16 @@ def ls(paths: Paths, repo: str | None) -> list[PoolRow]:
             entry.name for entry in paths.worktrees.iterdir() if entry.is_dir()
         )
 
-    ops_marker = paths.stacker_ops_marker()
+    pooldb = PoolDB(paths.pool_db())
     rows: list[PoolRow] = []
     for r in repos:
         for s in slot_mod.list_slots(paths, r):
-            owner = s.owner_target()
+            owner = pooldb.get_owner(r, s.uuid)
             if owner is None:
                 status = "FREE"
-            elif _is_ops_marker(owner, ops_marker):
+            elif owner.kind == OwnerKind.STACKER:
                 status = "OPS"
             else:
-                # owner points at <projects>/<project>/<repo>; parent.name is the project
-                status = owner.parent.name
+                status = owner.id
             rows.append(PoolRow(repo=r, uuid=s.uuid, status=status))
     return rows
-
-
-def _is_ops_marker(owner, ops_marker) -> bool:  # noqa: ANN001
-    try:
-        return owner.resolve() == ops_marker.resolve()
-    except OSError:
-        return False

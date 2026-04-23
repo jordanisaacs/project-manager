@@ -2,13 +2,13 @@ import contextlib
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
-from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import Slot
 from project_manager.project import db
 
 
 def detach(paths: Paths, project: str, repos: list[str] | None) -> list[Slot]:
-    """Unlink forward symlinks and release `.owner` for the given repos (or all).
+    """Unlink forward symlinks and release pool-db rows for the given repos (or all).
 
     Db rows are untouched — re-attach remembers the slot.
     Returns the list of slots that were released.
@@ -31,17 +31,18 @@ def detach(paths: Paths, project: str, repos: list[str] | None) -> list[Slot]:
             )
         to_detach = list(repos)
 
+    pooldb = PoolDB(paths.pool_db())
+    owner = Owner(OwnerKind.PROJECT, project)
     released: list[Slot] = []
     for repo in to_detach:
         forward = paths.forward(project, repo)
         if not forward.is_symlink():
             continue  # already detached
         target = forward.readlink()
-        s = Slot(repo=repo, uuid=target.name, path=target)
-        owner = s.owner_target()
-        if owner == forward:
-            slot_mod.release(s)
-            released.append(s)
+        uuid = target.name
+        if pooldb.get_owner(repo, uuid) == owner:
+            pooldb.release(repo, uuid)
+            released.append(Slot(repo=repo, uuid=uuid, path=target))
         with contextlib.suppress(FileNotFoundError):
             forward.unlink()
     return released

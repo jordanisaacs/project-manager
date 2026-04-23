@@ -1,10 +1,10 @@
 import contextlib
 import sqlite3
-from pathlib import Path
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
+from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import db
 
@@ -25,24 +25,27 @@ def _resolve_repos(
     return [(r, known[r]) for r in repos]
 
 
-def _try_reclaim(paths: Paths, repo: str, slot_uuid: str, forward: Path) -> Slot | None:
+def _try_reclaim(
+    paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, slot_uuid: str,
+) -> Slot | None:
     """Attempt to reclaim the remembered slot. Returns the claimed Slot, or None if unavailable."""
     slot_path = paths.slot(repo, slot_uuid)
     if not slot_path.is_dir():
         return None
-    s = Slot(repo=repo, uuid=slot_uuid, path=slot_path)
-    if not s.is_free():
+    if not pooldb.is_free(repo, slot_uuid):
         return None
     try:
-        slot_mod.claim(s, forward)
+        pooldb.claim(repo, slot_uuid, owner)
     except SlotBusyError:
         return None
-    return s
+    return Slot(repo=repo, uuid=slot_uuid, path=slot_path)
 
 
-def _claim_fallback(paths: Paths, repo: str, forward: Path, retries: int = 3) -> Slot:
+def _claim_fallback(
+    paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, retries: int = 3,
+) -> Slot:
     for _ in range(retries):
-        free = slot_mod.free_slots(paths, repo)
+        free = slot_mod.free_slots(paths, pooldb, repo)
         if not free:
             raise PoolExhaustedError(
                 f"no free slots for repo '{repo}' — run `pm pool add {repo}` or "
@@ -50,7 +53,7 @@ def _claim_fallback(paths: Paths, repo: str, forward: Path, retries: int = 3) ->
             )
         for s in free:
             try:
-                slot_mod.claim(s, forward)
+                pooldb.claim(repo, s.uuid, owner)
             except SlotBusyError:
                 continue
             else:
@@ -58,8 +61,9 @@ def _claim_fallback(paths: Paths, repo: str, forward: Path, retries: int = 3) ->
     raise SlotBusyError(f"lost {retries} claim races for repo '{repo}'")
 
 
-def _attach_one(
+def _attach_one(  # noqa: PLR0913
     paths: Paths,
+    pooldb: PoolDB,
     project: str,
     repo: str,
     remembered_uuid: str,
@@ -67,25 +71,25 @@ def _attach_one(
 ) -> Slot | None:
     """Attach a single repo. Returns the newly-claimed slot, or None if already attached."""
     forward = paths.forward(project, repo)
+    owner = Owner(OwnerKind.PROJECT, project)
 
     if forward.is_symlink():
         target = forward.readlink()
-        s = Slot(repo=repo, uuid=target.name, path=target)
-        owner = s.owner_target()
-        if owner == forward:
+        existing = pooldb.get_owner(repo, target.name)
+        if existing == owner:
             return None  # already active (idempotent)
         raise ProjectError(
             f"{forward} exists but is not owned by this project — run `pm check`"
         )
 
-    s = _try_reclaim(paths, repo, remembered_uuid, forward)
+    s = _try_reclaim(paths, pooldb, owner, repo, remembered_uuid)
     if s is None:
-        s = _claim_fallback(paths, repo, forward)
+        s = _claim_fallback(paths, pooldb, owner, repo)
         db.update_slot(conn, repo, s.uuid)
     try:
         forward.symlink_to(s.path)
     except BaseException:
-        slot_mod.release(s)
+        pooldb.release(repo, s.uuid)
         raise
     return s
 
@@ -103,18 +107,20 @@ def attach(paths: Paths, project: str, repos: list[str] | None) -> list[Slot]:
     if not db_path.is_file():
         raise ProjectError(f"project '{project}' does not exist")
 
-    attached: list[tuple[Slot, Path]] = []
+    pooldb = PoolDB(paths.pool_db())
+    attached: list[tuple[str, Slot]] = []
     try:
         with db.transaction(db_path) as conn:
             to_attach = _resolve_repos(project, repos, db.list_repos(conn))
             for repo, remembered in to_attach:
-                s = _attach_one(paths, project, repo, remembered, conn)
+                s = _attach_one(paths, pooldb, project, repo, remembered, conn)
                 if s is not None:
-                    attached.append((s, paths.forward(project, repo)))
+                    attached.append((repo, s))
     except BaseException:
-        for s, f in reversed(attached):
+        for repo, s in reversed(attached):
+            forward = paths.forward(project, repo)
             with contextlib.suppress(FileNotFoundError):
-                f.unlink()
-            slot_mod.release(s)
+                forward.unlink()
+            pooldb.release(repo, s.uuid)
         raise
-    return [s for s, _ in attached]
+    return [s for _, s in attached]

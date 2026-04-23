@@ -25,7 +25,7 @@ def test_detects_from_forward_path(pm_env: Paths, monkeypatch: pytest.MonkeyPatc
     assert current.detect_current_project(pm_env) == "demo"
 
 
-def test_detects_from_physical_worktree_via_owner(
+def test_detects_from_physical_worktree_via_pool_db(
     pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mk_pool(pm_env, "foo", ["a"])
@@ -37,7 +37,7 @@ def test_detects_from_physical_worktree_via_owner(
 def test_detach_while_inside_worktree_clears_detection(
     pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """After detach the slot's .owner is gone, so worktree-path detection can't recover
+    """After detach the pool row is gone, so worktree-path detection can't recover
     the project name. Users in this corner case must pass the name explicitly.
     """
     _mk_pool(pm_env, "foo", ["a"])
