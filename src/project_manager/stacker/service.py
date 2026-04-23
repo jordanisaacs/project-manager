@@ -1,218 +1,174 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import re
-import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import quote
 
+from project_manager.paths import Paths
+from project_manager.pool import slot as slot_mod
+
+from . import gh, git, locate, ops_slot, selectors
 from .db import StackerDB
 from .models import OperationState, ParentLocator, RepoPRConfig, SelectorTarget, TrackedBranch
-from . import gh, git, selectors
+
+
+@dataclass
+class _Acquired:
+    """A worktree path to run git commands in, plus the ops slot if we acquired one.
+
+    If `ops` is set, the caller claimed it via ops_slot.acquire. Clean completion
+    must call release(). A paused/failed op must NOT release — the claim is the
+    resumable state that `continue` / `abort` drive.
+    """
+
+    path: str
+    ops: slot_mod.Slot | None
 
 
 class StackerService:
-    def __init__(self, db: StackerDB, *, progress: Callable[[str], None] | None = None) -> None:
+    def __init__(
+        self,
+        db: StackerDB,
+        paths: Paths,
+        *,
+        progress: Callable[[str], None] | None = None,
+    ) -> None:
         self.db = db
+        self.paths = paths
         self.progress = progress
 
-    def create(self, branch_ref: str, create_branch: bool, base_branch: str | None) -> str:
-        current = self._current_context_or_none()
-        target_repo_root = self._target_repo_for_create(branch_ref, current.repo_root if current else None)
-        if base_branch is None:
-            if current is None:
-                raise git.GitError("Without -B/--base, stacker create must be run from the parent worktree.")
-            if current.repo_root != target_repo_root:
-                raise git.GitError("Without -B/--base, stacker create must be run from the parent worktree in the same repo.")
-            parent = ParentLocator(
-                repo_root=current.repo_root,
-                worktree_path=current.worktree_path,
-                branch=current.branch,
-            )
-        else:
-            parent = selectors.resolve_parent_for_base(target_repo_root, base_branch, current)
+    # -------------------------------------------------------------
+    # High-level operations
+    # -------------------------------------------------------------
 
-        result_file = Path(os.environ.get("TMPDIR", "/tmp")) / f"stacker-create-{os.getpid()}.txt"
-        if result_file.exists():
-            result_file.unlink()
-        cmd = ["wt", "create", "--result-file", str(result_file)]
-        if create_branch:
-            cmd.append("-b")
-        if base_branch is not None:
-            cmd.extend(["-B", parent.branch])
-        cmd.append(branch_ref)
-        proc = subprocess.run(cmd, text=True, stdout=sys.stderr, stderr=sys.stderr)
-        if proc.returncode != 0:
-            raise git.GitError(f"'{' '.join(cmd)}' failed with exit code {proc.returncode}.")
-        worktree_path = result_file.read_text().strip()
-        result_file.unlink(missing_ok=True)
-        branch = git.current_branch(worktree_path)
-        parent_head = git.rev_parse(parent.worktree_path, parent.branch)
-        self.db.upsert_worktree(
-            TrackedBranch(
-                repo_root=target_repo_root,
-                worktree_path=worktree_path,
-                branch=branch,
-                parent_repo_root=parent.repo_root,
-                parent_worktree_path=parent.worktree_path,
-                parent_branch=parent.branch,
-                managed_base_commit=parent_head,
-                last_synced_parent_commit=parent_head,
-                last_clean_head=git.rev_parse(worktree_path, "HEAD"),
-            )
-        )
-        return worktree_path
+    def initialize_worktree(
+        self,
+        repo_name: str,
+        worktree_path: Path,
+        branch: str,
+        *,
+        create_branch: bool,
+        parent: ParentLocator | None,
+    ) -> TrackedBranch | None:
+        """Seed a caller-supplied slot with `branch` and optionally track it.
 
-    def track(self, target: SelectorTarget, parent: ParentLocator) -> TrackedBranch:
-        if target.repo_root != parent.repo_root:
+        - `create_branch=True`, `parent` required: create `branch` off the
+          parent's tip, track with managed_base = parent_tip.
+        - `create_branch=False`, `parent` given: check out existing `branch`,
+          track with managed_base = merge-base(branch, parent_branch).
+        - `create_branch=False`, `parent=None`: plain checkout, no tracking.
+        """
+        if parent is not None and parent.repo_name != repo_name:
             raise git.GitError("Parent and child must be in the same repo.")
-        base_commit = git.merge_base(target.repo_root, parent.branch, target.branch)
+        repo_path = str(self.paths.repo(repo_name))
+        slot_path = str(worktree_path)
+
+        if create_branch:
+            if parent is None:
+                raise git.GitError("create_branch=True requires a parent.")
+            parent_head = git.rev_parse(repo_path, parent.branch)
+            git.git(slot_path, "checkout", "-b", branch, parent_head)
+            managed_base = parent_head
+        else:
+            git.git(slot_path, "checkout", branch)
+            if parent is None:
+                return None
+            managed_base = git.merge_base(repo_path, parent.branch, branch)
+
+        assert parent is not None
         tracked = TrackedBranch(
-            repo_root=target.repo_root,
-            worktree_path=target.worktree_path,
-            branch=target.branch,
-            parent_repo_root=parent.repo_root,
-            parent_worktree_path=parent.worktree_path,
+            repo_name=repo_name,
+            branch=branch,
+            parent_repo_name=parent.repo_name,
             parent_branch=parent.branch,
-            managed_base_commit=base_commit,
-            last_synced_parent_commit=git.rev_parse(parent.worktree_path, parent.branch),
-            last_clean_head=git.rev_parse(target.worktree_path, "HEAD"),
+            managed_base_commit=managed_base,
+            last_synced_parent_commit=git.rev_parse(repo_path, parent.branch),
+            last_clean_head=git.rev_parse(slot_path, "HEAD"),
         )
-        self.db.upsert_worktree(tracked)
+        self.db.upsert_branch(tracked)
         return tracked
 
-    def resolve_untrack_target(self, selector: str | None) -> SelectorTarget:
-        try:
-            return selectors.resolve_target(selector, allow_branch_without_worktree=False)
-        except git.GitError as original_error:
-            if selector is None:
-                raise
-            parsed = selectors.parse_selector(selector)
-            if parsed.is_root or not parsed.branch:
-                raise
-            current = self._current_context_or_none()
-            repo_root = current.repo_root if parsed.repo_query is None and current else None
-            if parsed.repo_query is not None:
-                repo_root = selectors.resolve_repo_path(parsed.repo_query, current.repo_root if current else None)
-            if repo_root is None:
-                raise original_error
-            tracked = self.db.get_worktree_by_branch(repo_root, parsed.branch)
-            if tracked:
-                return SelectorTarget(
-                    repo_root=tracked.repo_root,
-                    worktree_path=tracked.worktree_path,
-                    branch=tracked.branch,
-                )
-            raise original_error
-
-    def guard_no_rebase(self) -> None:
-        current = git.current_context()
-        tracked = self.db.get_worktree_by_branch(current.repo_root, current.branch)
-        if not tracked:
-            return
-        if self.db.get_operation(current.repo_root):
+    def track(self, target: SelectorTarget, parent: ParentLocator) -> TrackedBranch:
+        if target.repo_name != parent.repo_name:
+            raise git.GitError("Parent and child must be in the same repo.")
+        repo_path = str(self.paths.repo(target.repo_name))
+        base_commit = git.merge_base(repo_path, parent.branch, target.branch)
+        parent_head = git.rev_parse(repo_path, parent.branch)
+        branch_slot = locate.locate_worktree(self.paths, target.repo_name, target.branch)
+        if branch_slot is None:
             raise git.GitError(
-                f"{selectors.selector_for(current.repo_root, current.branch)} is managed by stacker and "
-                "has an active stacker operation. Do not rebase it; use 'stacker continue' or 'stacker abort'."
+                f"{selectors.selector_for(target.repo_name, target.branch)} is not checked out "
+                "in any worktree; nothing to adopt."
             )
-        raise git.GitError(
-            f"{selectors.selector_for(current.repo_root, current.branch)} is managed by stacker. "
-            "Do not rebase it; use stacker sync/push/repair instead."
+        tracked = TrackedBranch(
+            repo_name=target.repo_name,
+            branch=target.branch,
+            parent_repo_name=parent.repo_name,
+            parent_branch=parent.branch,
+            managed_base_commit=base_commit,
+            last_synced_parent_commit=parent_head,
+            last_clean_head=git.rev_parse(str(branch_slot), "HEAD"),
         )
-
-    def complete_untrack_targets(self, prefix: str, current_repo_root: str | None) -> list[str]:
-        parsed = selectors.parse_selector(prefix) if prefix else selectors.ParsedSelector(None, None, False)
-        if parsed.repo_query is None and current_repo_root:
-            items = self.db.list_worktrees(current_repo_root)
-            values = [item.branch for item in items]
-        else:
-            items = self.db.list_worktrees()
-            values = [f"{selectors.repo_display_name(item.repo_root)}:{item.branch}" for item in items]
-        seen: set[str] = set()
-        matches: list[str] = []
-        for value in values:
-            if not value.startswith(prefix):
-                continue
-            if value in seen:
-                continue
-            seen.add(value)
-            matches.append(value)
-        matches.sort()
-        return matches
+        self.db.upsert_branch(tracked)
+        return tracked
 
     def untrack(self, target: SelectorTarget) -> str:
-        existing = self.db.get_operation(target.repo_root)
-        if existing:
-            raise git.GitError("Another stacker operation is active for this repo. Use 'stacker continue' or 'stacker abort'.")
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
+            )
+        tracked = self.db.get_branch(target.repo_name, target.branch)
         if not tracked:
             raise git.GitError(
-                f"{selectors.selector_for(target.repo_root, target.branch)} is not tracked."
+                f"{selectors.selector_for(target.repo_name, target.branch)} is not tracked."
             )
-        for child in self.db.get_children(tracked.repo_root, tracked.worktree_path, tracked.branch):
-            self.db.upsert_worktree(
+        for child in self.db.get_children(target.repo_name, target.branch):
+            self.db.upsert_branch(
                 TrackedBranch(
-                    repo_root=child.repo_root,
-                    worktree_path=child.worktree_path,
+                    repo_name=child.repo_name,
                     branch=child.branch,
-                    parent_repo_root=tracked.parent_repo_root,
-                    parent_worktree_path=tracked.parent_worktree_path,
+                    parent_repo_name=tracked.parent_repo_name,
                     parent_branch=tracked.parent_branch,
                     managed_base_commit=child.managed_base_commit,
                     last_synced_parent_commit=child.last_synced_parent_commit,
                     last_clean_head=child.last_clean_head,
                 )
             )
-        deleted = self.db.delete_worktree(target.repo_root, target.worktree_path, target.branch)
-        if deleted == 0:
-            raise git.GitError(f"{selectors.selector_for(target.repo_root, target.branch)} is not tracked.")
-        return f"Untracked {selectors.selector_for(target.repo_root, target.branch)}"
-
-    def delete(self, target: SelectorTarget, *, delete_branch: bool = False) -> str:
-        existing = self.db.get_operation(target.repo_root)
-        if existing:
-            raise git.GitError("Another stacker operation is active for this repo. Use 'stacker continue' or 'stacker abort'.")
-        selector = selectors.selector_for(target.repo_root, target.branch)
-        cmd = ["wt", "delete"]
-        if delete_branch:
-            cmd.append("-b")
-        cmd.append(selector)
-        proc = subprocess.run(cmd, text=True, stdout=sys.stderr, stderr=sys.stderr)
-        if proc.returncode != 0:
-            raise git.GitError(f"'{' '.join(cmd)}' failed with exit code {proc.returncode}.")
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
-        if tracked:
-            self.untrack(target)
-            return f"Deleted and untracked {selector}"
-        return f"Deleted {selector}"
+        self.db.delete_branch(target.repo_name, target.branch)
+        return f"Untracked {selectors.selector_for(target.repo_name, target.branch)}"
 
     def status_text(self, target: SelectorTarget) -> str:
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
-        op = self.db.get_operation(target.repo_root)
-        lines = [f"{selectors.selector_for(target.repo_root, target.branch)}", f"path: {target.worktree_path}"]
+        tracked = self.db.get_branch(target.repo_name, target.branch)
+        op = self.db.get_operation(target.repo_name)
+        slot_path = locate.locate_worktree(self.paths, target.repo_name, target.branch)
+        lines = [selectors.selector_for(target.repo_name, target.branch)]
+        lines.append(f"checked out in: {slot_path or '-'}")
         if tracked:
             lines.extend(
                 [
-                    f"parent: {selectors.selector_for(tracked.parent_repo_root, tracked.parent_branch)}",
-                    f"parent path: {tracked.parent_worktree_path}",
+                    f"parent: {selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)}",
                     f"managed base: {tracked.managed_base_commit}",
                     f"last synced parent: {tracked.last_synced_parent_commit or '-'}",
                     f"last clean head: {tracked.last_clean_head or '-'}",
                 ]
             )
         else:
-            children = self.db.get_children(target.repo_root, target.worktree_path, target.branch)
+            children = self.db.get_children(target.repo_name, target.branch)
             if children:
                 lines.append(f"untracked root with {len(children)} tracked child(ren)")
             else:
                 lines.append("not tracked")
         if op:
             lines.append(f"operation: {op.op_type} ({op.status})")
-            if op.worktree_path:
-                lines.append(f"active worktree: {op.worktree_path}")
+            if op.branch:
+                lines.append(f"active branch: {op.branch}")
             if op.error_message:
                 lines.append(f"last error: {op.error_message}")
         else:
@@ -221,16 +177,15 @@ class StackerService:
 
     def log_text(self, target: SelectorTarget) -> str:
         tracked = self._require_tracked(target)
-        entries = git.log_subject_and_author(
-            tracked.worktree_path,
-            f"{tracked.managed_base_commit}..HEAD",
-        )
+        path = self._require_checked_out(target.repo_name, target.branch)
+        entries = git.log_subject_and_author(path, f"{tracked.managed_base_commit}..HEAD")
         if not entries:
             return (
-                f"No commits since {selectors.selector_for(tracked.parent_repo_root, tracked.parent_branch)} "
+                f"No commits since "
+                f"{selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)} "
                 f"at {self._short(tracked.managed_base_commit)}."
             )
-        lines = [f"{selectors.selector_for(tracked.repo_root, tracked.branch)} commits since parent:"]
+        lines = [f"{selectors.selector_for(tracked.repo_name, tracked.branch)} commits since parent:"]
         for subject, author in entries:
             lines.append(f"{subject} ({author})" if author else subject)
         return "\n".join(lines)
@@ -239,40 +194,52 @@ class StackerService:
         tracked = self._require_tracked(target)
         return tracked.managed_base_commit
 
-    def graph_text(self, repo_root: str | None = None) -> str:
-        worktrees = self.db.list_worktrees(repo_root)
-        if not worktrees:
-            return "No tracked worktrees."
-        current = self._current_context_or_none()
-        tracked_index = {(item.worktree_path, item.branch): item for item in worktrees}
+    def graph_text(self, repo_name: str | None = None) -> str:
+        branches = self.db.list_branches(repo_name)
+        if not branches:
+            return "No tracked branches."
         by_repo: dict[str, list[TrackedBranch]] = {}
-        for item in worktrees:
-            by_repo.setdefault(item.repo_root, []).append(item)
+        for item in branches:
+            by_repo.setdefault(item.repo_name, []).append(item)
         lines: list[str] = []
         for repo, items in sorted(by_repo.items()):
-            live_worktrees = {
-                (info.path, info.branch): info
-                for info in git.worktree_list(repo)
-                if info.branch
-            }
-            header = f"{selectors.repo_display_name(repo)} ({repo})"
-            lines.append(self._style(header, fg="blue", bold=True))
-            tracked_keys = {(w.worktree_path, w.branch) for w in items}
-            roots: list[tuple[str, str, bool]] = []
+            repo_path = str(self.paths.repo(repo))
+            try:
+                live = {info.branch: info for info in git.worktree_list(repo_path) if info.branch}
+            except git.GitError:
+                live = {}
+            lines.append(self._style(repo, fg="blue", bold=True))
+            tracked_branches = {item.branch for item in items}
+            roots: list[tuple[str, bool]] = []
+            seen_roots: set[str] = set()
             for item in items:
-                parent_key = (item.parent_worktree_path, item.parent_branch)
-                if parent_key not in tracked_keys:
-                    roots.append((item.parent_worktree_path, item.parent_branch, True))
-            seen_roots: set[tuple[str, str]] = set()
-            for path, branch, implicit in sorted(roots, key=lambda it: (it[1], it[0])):
-                key = (path, branch)
-                if key in seen_roots:
-                    continue
-                seen_roots.add(key)
-                self._render_graph_node(lines, repo, path, branch, items, tracked_index, live_worktrees, "", True, implicit, current)
+                if item.parent_branch not in tracked_branches and item.parent_branch not in seen_roots:
+                    roots.append((item.parent_branch, True))
+                    seen_roots.add(item.parent_branch)
+            for parent_branch, implicit in sorted(roots):
+                self._render_graph_node(
+                    lines,
+                    repo_name=repo,
+                    branch=parent_branch,
+                    items=items,
+                    live=live,
+                    prefix="",
+                    is_last=True,
+                    implicit=implicit,
+                )
         return "\n".join(lines)
 
-    def set_pr_mode(self, repo_root: str, mode: str, trunk_branch: str, main_repo: str | None) -> RepoPRConfig:
+    # -------------------------------------------------------------
+    # PR configuration
+    # -------------------------------------------------------------
+
+    def set_pr_mode(
+        self,
+        repo_name: str,
+        mode: str,
+        trunk_branch: str,
+        main_repo: str | None,
+    ) -> RepoPRConfig:
         if mode not in {"normal", "forked"}:
             raise git.GitError("PR mode must be 'normal' or 'forked'.")
         if mode == "normal" and main_repo:
@@ -280,7 +247,7 @@ class StackerService:
         if mode == "forked" and not main_repo:
             raise git.GitError("--main-repo is required for forked mode.")
         config = RepoPRConfig(
-            repo_root=repo_root,
+            repo_name=repo_name,
             mode=mode,
             trunk_branch=trunk_branch,
             main_repo=main_repo,
@@ -288,99 +255,129 @@ class StackerService:
         self.db.upsert_repo_pr_config(config)
         return config
 
-    def show_pr_mode(self, repo_root: str) -> str:
-        config = self._pr_config(repo_root)
+    def show_pr_mode(self, repo_name: str) -> str:
+        config = self._pr_config(repo_name)
         lines = [
-            f"repo: {selectors.repo_display_name(repo_root)}",
+            f"repo: {repo_name}",
             f"mode: {config.mode}",
             f"trunk: {config.trunk_branch}",
         ]
         if config.main_repo:
             lines.append(f"main repo: {config.main_repo}")
         else:
-            lines.append(f"main repo: {self._current_repo_slug(repo_root)}")
+            lines.append(f"main repo: {self._current_repo_slug(repo_name)}")
         return "\n".join(lines)
 
-    def pr(self, target: SelectorTarget, *, draft: bool) -> str:
-        tracked = self._require_tracked(target)
-        config = self._pr_config(tracked.repo_root)
-        logs: list[str] = []
-        current_repo = gh.repo_info(cwd=tracked.repo_root)
-        self._run_single_pp(tracked, logs)
-        current_pr = self._create_or_update_current_pr(tracked, config, current_repo, draft=draft, logs=logs)
-        self._refresh_component_pr_bodies(tracked, config, current_repo, current_pr, logs)
-        return self._finish(logs, f"PR ready: {current_pr.url}")
+    # -------------------------------------------------------------
+    # Sync / repair / push / pp / pr
+    # -------------------------------------------------------------
 
     def sync(self, target: SelectorTarget) -> str:
         tracked = self._require_tracked(target)
-        existing = self.db.get_operation(target.repo_root)
-        if existing:
-            raise git.GitError("Another stacker operation is active for this repo. Use 'stacker continue' or 'stacker abort'.")
-        parent_head, _, _ = self._sync_plan(tracked)
-        if parent_head == tracked.managed_base_commit:
-            return (
-                f"Nothing to sync for {selectors.selector_for(tracked.repo_root, tracked.branch)}.\n"
-                f"Parent {selectors.selector_for(tracked.parent_repo_root, tracked.parent_branch)} is unchanged at {self._short(parent_head)}."
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
             )
-        self._ensure_syncable(target.worktree_path)
+        # Write the operation row *before* claiming a slot so pm pool gc-ops
+        # can always reconcile claim vs. active-op state.
+        self.db.put_operation(
+            OperationState(
+                repo_name=target.repo_name,
+                op_type="local_sync",
+                status="running",
+                branch=target.branch,
+                parent_branch=tracked.parent_branch,
+            )
+        )
+        try:
+            acquired = self._acquire(target.repo_name, target.branch)
+        except Exception:
+            self.db.clear_operation(target.repo_name)
+            raise
+        parent_head, _, _ = self._sync_plan(tracked, acquired.path)
+        if parent_head == tracked.managed_base_commit:
+            self.db.clear_operation(target.repo_name)
+            self._release_if_owned(acquired)
+            return (
+                f"Nothing to sync for {selectors.selector_for(tracked.repo_name, tracked.branch)}.\n"
+                f"Parent {selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)} "
+                f"is unchanged at {self._short(parent_head)}."
+            )
+        try:
+            self._ensure_syncable(acquired.path)
+        except git.GitError:
+            self.db.clear_operation(target.repo_name)
+            self._release_if_owned(acquired)
+            raise
         logs: list[str] = []
-        self._prepare_local_operation(tracked, op_type="local_sync", logs=logs)
-        return self._run_until_pause_or_finish(target.repo_root, logs=logs)
+        self._prepare_local_operation(tracked, op_type="local_sync", slot_path=acquired.path, logs=logs)
+        return self._run_until_pause_or_finish(
+            target.repo_name,
+            slot_path=acquired.path,
+            acquired_ops=acquired.ops,
+            logs=logs,
+        )
 
     def repair(self, target: SelectorTarget, base_ref: str) -> str:
         tracked = self._require_tracked(target)
-        if self.db.get_operation(target.repo_root):
-            raise git.GitError("Another stacker operation is active for this repo. Use 'stacker continue' or 'stacker abort'.")
-        self._ensure_syncable(target.worktree_path)
-        actual_base = git.rev_parse(tracked.worktree_path, base_ref)
-        current_head = git.rev_parse(tracked.worktree_path, "HEAD")
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
+            )
+        path = self._require_checked_out(target.repo_name, target.branch)
+        self._ensure_syncable(path)
+        actual_base = git.rev_parse(path, base_ref)
+        current_head = git.rev_parse(path, "HEAD")
         if (
             actual_base == tracked.managed_base_commit
             and actual_base == (tracked.last_synced_parent_commit or "")
             and current_head == (tracked.last_clean_head or "")
         ):
             return (
-                f"No repair needed for {selectors.selector_for(tracked.repo_root, tracked.branch)}.\n"
+                f"No repair needed for {selectors.selector_for(tracked.repo_name, tracked.branch)}.\n"
                 f"Stored base already matches {self._short(actual_base)}."
             )
-        repaired = TrackedBranch(
-            repo_root=tracked.repo_root,
-            worktree_path=tracked.worktree_path,
-            branch=tracked.branch,
-            parent_repo_root=tracked.parent_repo_root,
-            parent_worktree_path=tracked.parent_worktree_path,
-            parent_branch=tracked.parent_branch,
-            managed_base_commit=actual_base,
-            last_synced_parent_commit=actual_base,
-            last_clean_head=current_head,
+        self.db.upsert_branch(
+            TrackedBranch(
+                repo_name=tracked.repo_name,
+                branch=tracked.branch,
+                parent_repo_name=tracked.parent_repo_name,
+                parent_branch=tracked.parent_branch,
+                managed_base_commit=actual_base,
+                last_synced_parent_commit=actual_base,
+                last_clean_head=current_head,
+            )
         )
-        self.db.upsert_worktree(repaired)
         return (
-            f"Repaired {selectors.selector_for(tracked.repo_root, tracked.branch)}.\n"
+            f"Repaired {selectors.selector_for(tracked.repo_name, tracked.branch)}.\n"
             f"Stored base ref: {base_ref} -> {self._short(actual_base)}\n"
-            f"Managed base: {self._short(tracked.managed_base_commit)} -> {self._short(actual_base)}\n"
-            f"Last synced parent: {self._short(tracked.last_synced_parent_commit or '-') if tracked.last_synced_parent_commit else '-'} -> {self._short(actual_base)}"
+            f"Managed base: {self._short(tracked.managed_base_commit)} -> "
+            f"{self._short(actual_base)}"
         )
 
     def push(self, target: SelectorTarget) -> str:
-        if self.db.get_operation(target.repo_root):
-            raise git.GitError("Another stacker operation is active for this repo. Use 'stacker continue' or 'stacker abort'.")
-        queue = self._toposorted_descendants(target.repo_root, target.worktree_path, target.branch)
+        if self.db.get_operation(target.repo_name):
+            raise git.GitError(
+                "Another stacker operation is active for this repo. "
+                "Use 'stacker continue' or 'stacker abort'."
+            )
+        queue = self._toposorted_descendants(target.repo_name, target.branch)
         if not queue:
-            return "No downstream tracked worktrees to sync."
-        for child in queue:
-            self._ensure_syncable(child.worktree_path)
-        op = OperationState(
-            repo_root=target.repo_root,
-            op_type="downstream_sync",
-            status="running",
-            root_path=target.worktree_path,
-            root_branch=target.branch,
-            queue=[child.worktree_path for child in queue],
-            current_index=0,
+            return "No downstream tracked branches to sync."
+        # Write op row before claiming any slot.
+        self.db.put_operation(
+            OperationState(
+                repo_name=target.repo_name,
+                op_type="downstream_sync",
+                status="running",
+                root_branch=target.branch,
+                queue=[child.branch for child in queue],
+                current_index=0,
+            )
         )
-        self.db.put_operation(op)
-        return self._run_until_pause_or_finish(target.repo_root, logs=[])
+        return self._run_until_pause_or_finish(target.repo_name, logs=[])
 
     def pp(
         self,
@@ -391,16 +388,17 @@ class StackerService:
     ) -> str:
         logs: list[str] = []
         queue: list[TrackedBranch] = []
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
+        tracked = self.db.get_branch(target.repo_name, target.branch)
         if tracked:
             queue.append(tracked)
-        queue.extend(self._toposorted_descendants(target.repo_root, target.worktree_path, target.branch))
+        queue.extend(self._toposorted_descendants(target.repo_name, target.branch))
         if not queue:
-            return "No tracked worktrees to push."
+            return "No tracked branches to push."
 
-        config = self._pr_config(target.repo_root)
+        config = self._pr_config(target.repo_name)
+        repo_path = str(self.paths.repo(target.repo_name))
         try:
-            current_repo = gh.repo_info(cwd=target.repo_root)
+            current_repo = gh.repo_info(cwd=repo_path)
         except git.GitError:
             current_repo = None
         refresh_root: TrackedBranch | None = None
@@ -409,7 +407,9 @@ class StackerService:
                 return self._finish(logs, "PP complete.")
             if current_repo and refresh_root is None and self._find_open_pr(item, config, current_repo):
                 refresh_root = item
-        should_refresh_block = config.mode == "forked" or force_stack_block or erase_stack_block
+        should_refresh_block = (
+            config.mode == "forked" or force_stack_block or erase_stack_block
+        )
         if should_refresh_block and current_repo and refresh_root is not None:
             if erase_stack_block:
                 self._erase_component_pr_bodies(refresh_root, config, current_repo, logs)
@@ -417,66 +417,166 @@ class StackerService:
                 self._refresh_component_pr_bodies(refresh_root, config, current_repo, None, logs)
         return self._finish(logs, "PP complete.")
 
-    def next_path(self, target: SelectorTarget) -> str:
-        child = self._only_child(target)
-        if not Path(child.worktree_path).exists():
-            raise git.GitError(f"Tracked worktree path does not exist: {child.worktree_path}")
-        return child.worktree_path
+    def pr(self, target: SelectorTarget, *, draft: bool) -> str:
+        tracked = self._require_tracked(target)
+        config = self._pr_config(tracked.repo_name)
+        repo_path = str(self.paths.repo(tracked.repo_name))
+        logs: list[str] = []
+        current_repo = gh.repo_info(cwd=repo_path)
+        self._run_single_pp(tracked, logs)
+        current_pr = self._create_or_update_current_pr(tracked, config, current_repo, draft=draft, logs=logs)
+        self._refresh_component_pr_bodies(tracked, config, current_repo, current_pr, logs)
+        return self._finish(logs, f"PR ready: {current_pr.url}")
 
-    def next_revision(self, target: SelectorTarget) -> str:
-        child = self._only_child(target)
-        return child.branch
-
-    def prev_path(self, target: SelectorTarget) -> str:
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
-        if not tracked:
-            raise git.GitError(
-                f"No tracked parent for {selectors.selector_for(target.repo_root, target.branch)}."
-            )
-        if not Path(tracked.parent_worktree_path).exists():
-            raise git.GitError(f"Tracked parent path does not exist: {tracked.parent_worktree_path}")
-        return tracked.parent_worktree_path
-
-    def prev_revision(self, target: SelectorTarget) -> str:
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
-        if not tracked:
-            raise git.GitError(
-                f"No tracked parent for {selectors.selector_for(target.repo_root, target.branch)}."
-            )
-        return tracked.parent_branch
-
-    def continue_operation(self, target_repo_root: str | None = None) -> str:
-        repo_root = target_repo_root or git.current_context().repo_root
-        op = self.db.get_operation(repo_root)
+    def continue_operation(self, repo_name: str) -> str:
+        op = self.db.get_operation(repo_name)
         if not op:
             raise git.GitError("No paused stacker operation for this repo.")
-        return self._run_until_pause_or_finish(repo_root, continuing=True, logs=[])
+        slot_path = self._slot_path_for_active_op(op)
+        acquired_ops = self._existing_ops_slot(op, slot_path)
+        return self._run_until_pause_or_finish(
+            repo_name,
+            slot_path=slot_path,
+            acquired_ops=acquired_ops,
+            continuing=True,
+            logs=[],
+        )
 
-    def abort_operation(self, target_repo_root: str | None = None) -> str:
-        repo_root = target_repo_root or git.current_context().repo_root
-        op = self.db.get_operation(repo_root)
+    def abort_operation(self, repo_name: str) -> str:
+        op = self.db.get_operation(repo_name)
         if not op:
             raise git.GitError("No active stacker operation for this repo.")
-        if op.worktree_path and git.cherry_pick_in_progress(op.worktree_path):
-            git.cherry_pick_abort(op.worktree_path)
-        if op.worktree_path and op.start_head:
-            git.reset_hard(op.worktree_path, op.start_head)
-        self.db.clear_operation(repo_root)
-        if op.worktree_path and op.worktree_branch:
-            return (
-                f"Aborted operation for {selectors.selector_for(repo_root, op.worktree_branch)}.\n"
-                f"Inspect with: wt cd {selectors.selector_for(repo_root, op.worktree_branch)}"
-            )
+        slot_path = self._slot_path_for_active_op(op, required=False)
+        if slot_path and git.cherry_pick_in_progress(slot_path):
+            git.cherry_pick_abort(slot_path)
+        if slot_path and op.start_head:
+            git.reset_hard(slot_path, op.start_head)
+        ops = self._existing_ops_slot(op, slot_path) if slot_path else None
+        self.db.clear_operation(repo_name)
+        if ops is not None:
+            ops_slot.release(ops)
+        if op.branch:
+            return f"Aborted operation for {selectors.selector_for(repo_name, op.branch)}."
         return "Aborted operation."
 
-    def _run_single_pp(self, tracked: TrackedBranch, logs: list[str], *, require_upstream_before: bool = False) -> bool:
-        label = selectors.selector_for(tracked.repo_root, tracked.branch)
-        upstream = git.upstream_branch(tracked.worktree_path)
+    def guard_no_rebase(self) -> None:
+        """Hook entry point: error out if cwd is on a stacker-tracked branch.
+
+        Requires cwd to be inside a worktree in a known pm repo.
+        """
+        context = git.current_context()
+        repo_name = self._repo_name_for_path(context.worktree_path)
+        if repo_name is None:
+            return
+        tracked = self.db.get_branch(repo_name, context.branch)
+        if not tracked:
+            return
+        if self.db.get_operation(repo_name):
+            raise git.GitError(
+                f"{selectors.selector_for(repo_name, context.branch)} is managed by stacker and has "
+                "an active stacker operation. Do not rebase it; use 'stacker continue' or "
+                "'stacker abort'."
+            )
+        raise git.GitError(
+            f"{selectors.selector_for(repo_name, context.branch)} is managed by stacker. "
+            "Do not rebase it; use stacker sync/push/repair instead."
+        )
+
+    # -------------------------------------------------------------
+    # Slot acquisition
+    # -------------------------------------------------------------
+
+    def _acquire(self, repo_name: str, branch: str) -> _Acquired:
+        existing = locate.locate_worktree(self.paths, repo_name, branch)
+        if existing is not None:
+            return _Acquired(path=str(existing), ops=None)
+        claimed = ops_slot.acquire(self.paths, repo_name, branch)
+        return _Acquired(path=str(claimed.path), ops=claimed)
+
+    def _release_if_owned(self, acquired: _Acquired) -> None:
+        if acquired.ops is not None:
+            ops_slot.release(acquired.ops)
+
+    def _slot_path_for_active_op(
+        self, op: OperationState, *, required: bool = True
+    ) -> str | None:
+        if op.branch is None:
+            return None
+        path = locate.locate_worktree(self.paths, op.repo_name, op.branch)
+        if path is None:
+            if required:
+                raise git.GitError(
+                    f"Operation references {selectors.selector_for(op.repo_name, op.branch)} "
+                    "but the branch is not checked out anywhere."
+                )
+            return None
+        return str(path)
+
+    def _existing_ops_slot(
+        self, op: OperationState, slot_path: str | None
+    ) -> slot_mod.Slot | None:
+        """Return the stacker-ops Slot handle backing this op's current branch, or None.
+
+        A slot is an ops slot if its .owner symlink targets paths.stacker_ops_marker.
+        A project-owned slot (or otherwise-claimed slot) returns None — we don't own it.
+        """
+        if not slot_path:
+            return None
+        path = Path(slot_path)
+        parent = path.parent
+        expected_pool = self.paths.pool(op.repo_name).resolve()
+        if parent.resolve() != expected_pool:
+            return None
+        slot = slot_mod.Slot(repo=op.repo_name, uuid=path.name, path=path)
+        target = slot.owner_target()
+        if target is None:
+            return None
+        try:
+            if target.resolve() == self.paths.stacker_ops_marker().resolve():
+                return slot
+        except OSError:
+            pass
+        return None
+
+    def _require_checked_out(self, repo_name: str, branch: str) -> str:
+        path = locate.locate_worktree(self.paths, repo_name, branch)
+        if path is None:
+            raise git.GitError(
+                f"{selectors.selector_for(repo_name, branch)} is not checked out in any "
+                "worktree. Check it out in a pm pool slot first."
+            )
+        return str(path)
+
+    def _repo_name_for_path(self, worktree_path: str) -> str | None:
+        resolved = Path(worktree_path).resolve()
+        try:
+            relative = resolved.relative_to(self.paths.worktrees.resolve())
+        except ValueError:
+            return None
+        parts = relative.parts
+        if not parts:
+            return None
+        return parts[0]
+
+    # -------------------------------------------------------------
+    # PR helpers (inherited logic; all paths resolved via locate)
+    # -------------------------------------------------------------
+
+    def _run_single_pp(
+        self,
+        tracked: TrackedBranch,
+        logs: list[str],
+        *,
+        require_upstream_before: bool = False,
+    ) -> bool:
+        label = selectors.selector_for(tracked.repo_name, tracked.branch)
+        path = self._require_checked_out(tracked.repo_name, tracked.branch)
+        upstream = git.upstream_branch(path)
         if require_upstream_before and not upstream:
             self._record(logs, f"Stopping at {label}: no upstream remote is configured.")
             return False
         self._record(logs, f"Running git pp --force in {label}")
-        proc = git.pp_force(tracked.worktree_path)
+        proc = git.pp_force(path)
         if proc.stdout.strip():
             for line in proc.stdout.strip().splitlines():
                 self._record(logs, line)
@@ -484,38 +584,27 @@ class StackerService:
             for line in proc.stderr.strip().splitlines():
                 self._record(logs, line)
         if proc.returncode != 0:
-            raise git.GitError(f"git pp --force failed in {label}.\nInspect with: wt cd {label}")
-        upstream_after = git.upstream_branch(tracked.worktree_path)
+            raise git.GitError(f"git pp --force failed in {label}.")
+        upstream_after = git.upstream_branch(path)
         if not upstream_after:
             self._record(logs, f"Stopping at {label}: no upstream remote is configured.")
             raise git.GitError(f"{label} has no upstream remote after git pp --force.")
         return True
 
-    def _only_child(self, target: SelectorTarget) -> TrackedBranch:
-        children = self.db.get_children(target.repo_root, target.worktree_path, target.branch)
-        if not children:
-            raise git.GitError(
-                f"No tracked child worktree for {selectors.selector_for(target.repo_root, target.branch)}."
-            )
-        if len(children) > 1:
-            raise git.GitError(
-                "stacker next is not implemented for worktrees with multiple tracked children yet."
-            )
-        return children[0]
-
-    def _pr_config(self, repo_root: str) -> RepoPRConfig:
-        stored = self.db.get_repo_pr_config(repo_root)
+    def _pr_config(self, repo_name: str) -> RepoPRConfig:
+        stored = self.db.get_repo_pr_config(repo_name)
         if stored:
             return stored
+        repo_path = str(self.paths.repo(repo_name))
         return RepoPRConfig(
-            repo_root=repo_root,
+            repo_name=repo_name,
             mode="normal",
-            trunk_branch=git.guess_trunk_branch(repo_root),
+            trunk_branch=git.guess_trunk_branch(repo_path),
             main_repo=None,
         )
 
-    def _current_repo_slug(self, repo_root: str) -> str:
-        return gh.repo_info(cwd=repo_root).name_with_owner
+    def _current_repo_slug(self, repo_name: str) -> str:
+        return gh.repo_info(cwd=str(self.paths.repo(repo_name))).name_with_owner
 
     def _create_or_update_current_pr(
         self,
@@ -533,18 +622,24 @@ class StackerService:
         base = self._pr_base_for_current_branch(tracked, config, current_repo)
         existing = self._find_open_pr(tracked, config, current_repo)
         head = self._head_ref_for_branch(config, current_repo, remote_branch)
+        label = selectors.selector_for(tracked.repo_name, tracked.branch)
         if existing:
-            self._record(logs, f"Updating PR #{existing.number} for {selectors.selector_for(tracked.repo_root, tracked.branch)}")
+            self._record(logs, f"Updating PR #{existing.number} for {label}")
             gh.edit_pr(repo=target_repo, number=existing.number, title=title, base=base)
         else:
-            self._record(logs, f"Creating PR for {selectors.selector_for(tracked.repo_root, tracked.branch)}")
+            self._record(logs, f"Creating PR for {label}")
             with self._body_file(body) as body_file:
-                gh.create_pr(repo=target_repo, base=base, head=head, title=title, body_file=body_file, draft=draft)
+                gh.create_pr(
+                    repo=target_repo,
+                    base=base,
+                    head=head,
+                    title=title,
+                    body_file=body_file,
+                    draft=draft,
+                )
         refreshed = self._find_open_pr(tracked, config, current_repo)
         if not refreshed:
-            raise git.GitError(
-                f"Could not find the open PR for {selectors.selector_for(tracked.repo_root, tracked.branch)} after create/update."
-            )
+            raise git.GitError(f"Could not find the open PR for {label} after create/update.")
         return refreshed
 
     def _refresh_component_pr_bodies(
@@ -558,18 +653,26 @@ class StackerService:
         component = self._component_nodes(tracked)
         pr_map = self._open_pr_map(component, config, current_repo)
         if current_pr:
-            pr_map[(tracked.worktree_path, tracked.branch)] = current_pr
+            pr_map[tracked.branch] = current_pr
         if not pr_map:
             return
         for node in component:
-            pr = pr_map.get((node.worktree_path, node.branch))
+            pr = pr_map.get(node.branch)
             if not pr:
                 continue
             block = self._render_stack_block(component, node, pr_map, config, current_repo)
             base_body = self._pr_base_body(pr)
             with self._body_file(self._compose_body_with_block(base_body, block)) as body_file:
-                gh.edit_pr(repo=self._target_repo_slug(config, current_repo), number=pr.number, body_file=body_file)
-            self._record(logs, f"Updated stack block for PR #{pr.number} ({selectors.selector_for(node.repo_root, node.branch)})")
+                gh.edit_pr(
+                    repo=self._target_repo_slug(config, current_repo),
+                    number=pr.number,
+                    body_file=body_file,
+                )
+            self._record(
+                logs,
+                f"Updated stack block for PR #{pr.number} "
+                f"({selectors.selector_for(node.repo_name, node.branch)})",
+            )
 
     def _erase_component_pr_bodies(
         self,
@@ -583,33 +686,45 @@ class StackerService:
         if not pr_map:
             return
         for node in component:
-            pr = pr_map.get((node.worktree_path, node.branch))
+            pr = pr_map.get(node.branch)
             if not pr:
                 continue
             with self._body_file(self._pr_base_body(pr)) as body_file:
-                gh.edit_pr(repo=self._target_repo_slug(config, current_repo), number=pr.number, body_file=body_file)
-            self._record(logs, f"Erased stack block for PR #{pr.number} ({selectors.selector_for(node.repo_root, node.branch)})")
+                gh.edit_pr(
+                    repo=self._target_repo_slug(config, current_repo),
+                    number=pr.number,
+                    body_file=body_file,
+                )
+            self._record(
+                logs,
+                f"Erased stack block for PR #{pr.number} "
+                f"({selectors.selector_for(node.repo_name, node.branch)})",
+            )
 
     def _component_nodes(self, tracked: TrackedBranch) -> list[TrackedBranch]:
         ancestors: list[TrackedBranch] = []
         current = tracked
         while True:
-            parent = self.db.get_worktree(current.parent_repo_root, current.parent_worktree_path, current.parent_branch)
+            parent = self.db.get_branch(current.parent_repo_name, current.parent_branch)
             if not parent:
                 break
             ancestors.append(parent)
             current = parent
         ancestors.reverse()
-        return [*ancestors, tracked, *self._toposorted_descendants(tracked.repo_root, tracked.worktree_path, tracked.branch)]
+        return [
+            *ancestors,
+            tracked,
+            *self._toposorted_descendants(tracked.repo_name, tracked.branch),
+        ]
 
     def _open_pr_map(
         self,
         component: list[TrackedBranch],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
-    ) -> dict[tuple[str, str], gh.PullRequest]:
+    ) -> dict[str, gh.PullRequest]:
         return {
-            (node.worktree_path, node.branch): pr
+            node.branch: pr
             for node in component
             if (pr := self._find_open_pr(node, config, current_repo)) is not None
         }
@@ -621,7 +736,10 @@ class StackerService:
         current_repo: gh.RepoInfo,
     ) -> gh.PullRequest | None:
         target_repo = self._target_repo_slug(config, current_repo)
-        remote_branch = git.upstream_branch_name(tracked.worktree_path)
+        path = locate.locate_worktree(self.paths, tracked.repo_name, tracked.branch)
+        if path is None:
+            return None
+        remote_branch = git.upstream_branch_name(str(path))
         if not remote_branch:
             return None
         if config.mode == "forked":
@@ -641,40 +759,42 @@ class StackerService:
             return config.trunk_branch
         if tracked.parent_branch == config.trunk_branch:
             return config.trunk_branch
-        parent_tracked = self.db.get_worktree(tracked.parent_repo_root, tracked.parent_worktree_path, tracked.parent_branch)
+        parent_tracked = self.db.get_branch(tracked.parent_repo_name, tracked.parent_branch)
+        parent_label = selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)
         if not parent_tracked:
-            raise git.GitError(
-                f"Direct parent {selectors.selector_for(tracked.parent_repo_root, tracked.parent_branch)} must already have an open PR."
-            )
+            raise git.GitError(f"Direct parent {parent_label} must already have an open PR.")
         parent_pr = self._find_open_pr(parent_tracked, config, current_repo)
         if not parent_pr:
-            raise git.GitError(
-                f"Direct parent {selectors.selector_for(parent_tracked.repo_root, parent_tracked.branch)} must already have an open PR."
-            )
-        parent_remote_branch = self._remote_branch_name(parent_tracked)
-        return parent_remote_branch
+            raise git.GitError(f"Direct parent {parent_label} must already have an open PR.")
+        return self._remote_branch_name(parent_tracked)
 
     def _remote_branch_name(self, tracked: TrackedBranch) -> str:
-        remote_branch = git.upstream_branch_name(tracked.worktree_path)
+        path = self._require_checked_out(tracked.repo_name, tracked.branch)
+        remote_branch = git.upstream_branch_name(path)
         if not remote_branch:
             raise git.GitError(
-                f"{selectors.selector_for(tracked.repo_root, tracked.branch)} has no upstream remote branch. "
-                f"Run stacker pp or push it first."
+                f"{selectors.selector_for(tracked.repo_name, tracked.branch)} has no upstream "
+                "remote branch. Run stacker pp or push it first."
             )
         return remote_branch
 
     def _target_repo_slug(self, config: RepoPRConfig, current_repo: gh.RepoInfo) -> str:
         return config.main_repo or current_repo.name_with_owner
 
-    def _head_ref_for_branch(self, config: RepoPRConfig, current_repo: gh.RepoInfo, remote_branch: str) -> str:
+    def _head_ref_for_branch(
+        self,
+        config: RepoPRConfig,
+        current_repo: gh.RepoInfo,
+        remote_branch: str,
+    ) -> str:
         if config.mode == "forked":
             return f"{current_repo.owner}:{remote_branch}"
         return remote_branch
 
     def _first_commit_text(self, tracked: TrackedBranch) -> tuple[str, str]:
+        path = self._require_checked_out(tracked.repo_name, tracked.branch)
         title, body = git.first_commit_title_and_body(
-            tracked.worktree_path,
-            f"{tracked.managed_base_commit}..HEAD",
+            path, f"{tracked.managed_base_commit}..HEAD"
         )
         if not title:
             title = tracked.branch
@@ -683,9 +803,7 @@ class StackerService:
     def _compose_body_with_block(self, body: str, block: str) -> str:
         cleaned = self._strip_managed_block(body).strip()
         if block:
-            if cleaned:
-                return f"{cleaned}\n\n{block}"
-            return block
+            return f"{cleaned}\n\n{block}" if cleaned else block
         return cleaned
 
     def _strip_managed_block(self, body: str) -> str:
@@ -703,34 +821,36 @@ class StackerService:
         self,
         component: list[TrackedBranch],
         current_node: TrackedBranch,
-        pr_map: dict[tuple[str, str], gh.PullRequest],
+        pr_map: dict[str, gh.PullRequest],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
     ) -> str:
         lines = ["<!-- stacker:begin -->", "## Stacker"]
         nav_links: list[str] = []
-        prev_node = self.db.get_worktree(current_node.parent_repo_root, current_node.parent_worktree_path, current_node.parent_branch)
-        if prev_node and (prev_pr := pr_map.get((prev_node.worktree_path, prev_node.branch))):
+        prev_node = self.db.get_branch(current_node.parent_repo_name, current_node.parent_branch)
+        if prev_node and (prev_pr := pr_map.get(prev_node.branch)):
             nav_links.append(f"[<- ({prev_node.branch})]({prev_pr.url})")
         current_changes_url = self._compare_url(current_node, config, current_repo, pr_map)
         if current_changes_url:
             nav_links.append(f"**[{current_node.branch} (changes)]({current_changes_url})**")
-        next_nodes = self.db.get_children(current_node.repo_root, current_node.worktree_path, current_node.branch)
-        if len(next_nodes) == 1 and (next_pr := pr_map.get((next_nodes[0].worktree_path, next_nodes[0].branch))):
+        next_nodes = self.db.get_children(current_node.repo_name, current_node.branch)
+        if len(next_nodes) == 1 and (next_pr := pr_map.get(next_nodes[0].branch)):
             nav_links.append(f"[({next_nodes[0].branch}) ->]({next_pr.url})")
         if nav_links:
             lines.append("&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;".join(nav_links))
         lines.append("")
-        component_keys = {(node.worktree_path, node.branch) for node in component}
+        component_keys = {node.branch for node in component}
         roots = [
-            node
-            for node in component
-            if (node.parent_worktree_path, node.parent_branch) not in component_keys
+            node for node in component if node.parent_branch not in component_keys
         ]
         for index, root in enumerate(sorted(roots, key=lambda item: item.branch)):
             if index:
                 lines.append("")
-            lines.extend(self._render_stack_lines(component, root, current_node, pr_map, config, current_repo, prefix=""))
+            lines.extend(
+                self._render_stack_lines(
+                    component, root, current_node, pr_map, config, current_repo, prefix=""
+                )
+            )
         lines.append("<!-- stacker:end -->")
         return "\n".join(lines)
 
@@ -739,18 +859,20 @@ class StackerService:
         component: list[TrackedBranch],
         node: TrackedBranch,
         current_node: TrackedBranch,
-        pr_map: dict[tuple[str, str], gh.PullRequest],
+        pr_map: dict[str, gh.PullRequest],
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
         *,
         prefix: str,
     ) -> list[str]:
         label = node.branch
-        is_current = node.worktree_path == current_node.worktree_path and node.branch == current_node.branch
-        formatted_label = f"<strong><code>{label}</code></strong>" if is_current else f"`{label}`"
+        is_current = node.branch == current_node.branch
+        formatted_label = (
+            f"<strong><code>{label}</code></strong>" if is_current else f"`{label}`"
+        )
         marker = " (current)" if is_current else ""
         parts = [f"{formatted_label}{marker}"]
-        pr = pr_map.get((node.worktree_path, node.branch))
+        pr = pr_map.get(node.branch)
         if pr:
             parts.append(f"[PR #{pr.number}]({pr.url})")
         compare_url = self._compare_url(node, config, current_repo, pr_map)
@@ -761,11 +883,21 @@ class StackerService:
             content = f"**{content}**"
         lines = [f"{prefix}- {content}"]
         children = sorted(
-            [child for child in component if child.parent_worktree_path == node.worktree_path and child.parent_branch == node.branch],
+            [child for child in component if child.parent_branch == node.branch],
             key=lambda item: item.branch,
         )
         for child in children:
-            lines.extend(self._render_stack_lines(component, child, current_node, pr_map, config, current_repo, prefix=prefix + "  "))
+            lines.extend(
+                self._render_stack_lines(
+                    component,
+                    child,
+                    current_node,
+                    pr_map,
+                    config,
+                    current_repo,
+                    prefix=prefix + "  ",
+                )
+            )
         return lines
 
     def _compare_url(
@@ -773,19 +905,25 @@ class StackerService:
         node: TrackedBranch,
         config: RepoPRConfig,
         current_repo: gh.RepoInfo,
-        pr_map: dict[tuple[str, str], gh.PullRequest],
+        pr_map: dict[str, gh.PullRequest],  # noqa: ARG002
     ) -> str | None:
         target_repo = self._target_repo_slug(config, current_repo)
+        path = locate.locate_worktree(self.paths, node.repo_name, node.branch)
+        if path is None:
+            return None
         try:
-            head_sha = git.rev_parse(node.worktree_path, "HEAD")
+            head_sha = git.rev_parse(str(path), "HEAD")
         except git.GitError:
             return None
         base_sha = node.managed_base_commit
-        return f"https://github.com/{target_repo}/compare/{quote(base_sha, safe=':/')}...{quote(head_sha, safe=':/')}"
+        return (
+            f"https://github.com/{target_repo}/compare/"
+            f"{quote(base_sha, safe=':/')}...{quote(head_sha, safe=':/')}"
+        )
 
-    def _body_file(self, body: str):
+    def _body_file(self, body: str):  # noqa: ANN202
         class _BodyFile:
-            def __enter__(inner_self):
+            def __enter__(inner_self):  # noqa: ANN001, ANN204
                 inner_self.file = NamedTemporaryFile("w", delete=False, encoding="utf-8")
                 inner_self.file.write(body)
                 inner_self.file.flush()
@@ -793,24 +931,32 @@ class StackerService:
                 inner_self.path = inner_self.file.name
                 return inner_self.path
 
-            def __exit__(inner_self, exc_type, exc, tb):
+            def __exit__(inner_self, exc_type, exc, tb):  # noqa: ANN001, ANN204
                 Path(inner_self.path).unlink(missing_ok=True)
                 return False
 
         return _BodyFile()
 
-    def render_zsh(self) -> str:
-        return (Path(__file__).with_name("stacker.zsh").read_text()).strip()
+    # -------------------------------------------------------------
+    # Operation driver
+    # -------------------------------------------------------------
 
-    def _prepare_local_operation(self, tracked: TrackedBranch, *, op_type: str, logs: list[str]) -> OperationState:
-        parent_head, start_head, commit_list = self._sync_plan(tracked)
-        op = self.db.get_operation(tracked.repo_root)
+    def _prepare_local_operation(
+        self,
+        tracked: TrackedBranch,
+        *,
+        op_type: str,
+        slot_path: str,
+        logs: list[str],
+    ) -> OperationState:
+        parent_head, start_head, commit_list = self._sync_plan(tracked, slot_path)
+        op = self.db.get_operation(tracked.repo_name)
         if op is None:
-            op = OperationState(repo_root=tracked.repo_root, op_type=op_type, status="running")
+            op = OperationState(
+                repo_name=tracked.repo_name, op_type=op_type, status="running"
+            )
         op.status = "running"
-        op.worktree_path = tracked.worktree_path
-        op.worktree_branch = tracked.branch
-        op.parent_path = tracked.parent_worktree_path
+        op.branch = tracked.branch
         op.parent_branch = tracked.parent_branch
         op.start_head = start_head
         op.target_parent_head = parent_head
@@ -819,76 +965,122 @@ class StackerService:
         self.db.put_operation(op)
         self._record(
             logs,
-            f"Resetting {selectors.selector_for(tracked.repo_root, tracked.branch)} "
-            f"to {selectors.selector_for(tracked.parent_repo_root, tracked.parent_branch)} "
+            f"Resetting {selectors.selector_for(tracked.repo_name, tracked.branch)} to "
+            f"{selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)} "
             f"({self._short(parent_head)})",
         )
-        git.reset_hard(tracked.worktree_path, parent_head)
+        git.reset_hard(slot_path, parent_head)
         return op
 
-    def _run_until_pause_or_finish(self, repo_root: str, continuing: bool = False, logs: list[str] | None = None) -> str:
+    def _run_until_pause_or_finish(
+        self,
+        repo_name: str,
+        *,
+        slot_path: str | None = None,
+        acquired_ops: slot_mod.Slot | None = None,
+        continuing: bool = False,
+        logs: list[str] | None = None,
+    ) -> str:
         if logs is None:
             logs = []
-        op = self.db.get_operation(repo_root)
+        op = self.db.get_operation(repo_name)
         assert op
         while True:
-            if op.worktree_path:
-                result = self._drive_local(repo_root, op, continuing=continuing, logs=logs)
+            if op.branch:
+                # Resolve slot path if caller didn't provide one (e.g., push advancing).
+                if slot_path is None:
+                    slot_path = self._require_checked_out(repo_name, op.branch)
+                    acquired_ops = self._existing_ops_slot(op, slot_path)
+                result = self._drive_local(
+                    repo_name, op, slot_path=slot_path, continuing=continuing, logs=logs
+                )
                 continuing = False
                 if result is not None:
+                    if acquired_ops is not None:
+                        ops_slot.release(acquired_ops)
                     return self._finish(logs, result)
-                op = self.db.get_operation(repo_root)
+                op = self.db.get_operation(repo_name)
                 assert op
+                slot_path = None
+                acquired_ops = None
                 continue
             if op.op_type == "local_sync":
-                self.db.clear_operation(repo_root)
+                self.db.clear_operation(repo_name)
                 return self._finish(logs, "Sync complete.")
             if op.op_type == "downstream_sync":
                 if op.current_index >= len(op.queue):
-                    self.db.clear_operation(repo_root)
+                    self.db.clear_operation(repo_name)
                     return self._finish(logs, "Push complete.")
-                next_path = op.queue[op.current_index]
-                branch = git.current_branch(next_path)
-                tracked = self.db.get_worktree(repo_root, next_path, branch)
+                next_branch = op.queue[op.current_index]
+                tracked = self.db.get_branch(repo_name, next_branch)
                 if not tracked:
-                    raise git.GitError(f"Tracked worktree disappeared from state: {next_path}")
-                parent_head, _, _ = self._sync_plan(tracked)
+                    raise git.GitError(
+                        f"Tracked branch disappeared from state: "
+                        f"{selectors.selector_for(repo_name, next_branch)}"
+                    )
+                acquired = self._acquire(repo_name, next_branch)
+                slot_path = acquired.path
+                acquired_ops = acquired.ops
+                parent_head, _, _ = self._sync_plan(tracked, slot_path)
                 if parent_head == tracked.managed_base_commit:
                     self._record(
                         logs,
-                        f"Skipping {selectors.selector_for(tracked.repo_root, tracked.branch)}; "
-                        f"parent {selectors.selector_for(tracked.parent_repo_root, tracked.parent_branch)} "
+                        f"Skipping {selectors.selector_for(tracked.repo_name, tracked.branch)}; "
+                        f"parent {selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)} "
                         f"is unchanged at {self._short(parent_head)}",
                     )
                     op.current_index += 1
                     self.db.put_operation(op)
+                    self._release_if_owned(_Acquired(path=slot_path, ops=acquired_ops))
+                    slot_path = None
+                    acquired_ops = None
                     continue
-                self._prepare_local_operation(tracked, op_type="downstream_sync", logs=logs)
-                op = self.db.get_operation(repo_root)
+                self._prepare_local_operation(
+                    tracked, op_type="downstream_sync", slot_path=slot_path, logs=logs
+                )
+                op = self.db.get_operation(repo_name)
                 assert op
                 continue
             raise git.GitError(f"Unknown operation type {op.op_type}.")
 
-    def _drive_local(self, repo_root: str, op: OperationState, *, continuing: bool, logs: list[str]) -> str | None:
-        assert op.worktree_path
-        path = op.worktree_path
+    def _drive_local(
+        self,
+        repo_name: str,
+        op: OperationState,
+        *,
+        slot_path: str,
+        continuing: bool,
+        logs: list[str],
+    ) -> str | None:
+        assert op.branch
+        path = slot_path
         if continuing:
             op.next_commit_index = self._recompute_progress(path, op)
             if git.cherry_pick_in_progress(path):
-                label = selectors.selector_for(repo_root, op.worktree_branch or git.current_branch(path))
+                label = selectors.selector_for(repo_name, op.branch)
                 self._record(logs, f"Continuing cherry-pick in {label}")
                 proc = git.cherry_pick_continue(path)
                 if proc.returncode != 0:
-                    message = proc.stderr.strip() or proc.stdout.strip() or "cherry-pick --continue failed"
+                    message = (
+                        proc.stderr.strip()
+                        or proc.stdout.strip()
+                        or "cherry-pick --continue failed"
+                    )
                     if self._is_empty_cherry_pick_message(message):
                         commit = op.commit_list[op.next_commit_index]
                         skip = git.cherry_pick_skip(path)
                         if skip.returncode != 0:
                             op.status = "paused"
-                            op.error_message = skip.stderr.strip() or skip.stdout.strip() or "cherry-pick --skip failed"
+                            op.error_message = (
+                                skip.stderr.strip()
+                                or skip.stdout.strip()
+                                or "cherry-pick --skip failed"
+                            )
                             self.db.put_operation(op)
-                            return self._failure_message(op)
-                        self._record(logs, f"Skipping empty cherry-pick {self._short(commit)} on {label}")
+                            return self._failure_message(op, slot_path)
+                        self._record(
+                            logs, f"Skipping empty cherry-pick {self._short(commit)} on {label}"
+                        )
                         op.next_commit_index += 1
                         op.error_message = None
                         op.status = "running"
@@ -897,7 +1089,7 @@ class StackerService:
                         op.status = "paused"
                         op.error_message = message
                         self.db.put_operation(op)
-                        return self._failure_message(op)
+                        return self._failure_message(op, slot_path)
                 else:
                     op.next_commit_index += 1
                     self.db.put_operation(op)
@@ -906,7 +1098,7 @@ class StackerService:
                 self._record(
                     logs,
                     f"Skipping empty cherry-pick {self._short(commit)} on "
-                    f"{selectors.selector_for(repo_root, op.worktree_branch or git.current_branch(path))}",
+                    f"{selectors.selector_for(repo_name, op.branch)}",
                 )
                 op.next_commit_index += 1
                 op.error_message = None
@@ -917,35 +1109,38 @@ class StackerService:
             self._record(
                 logs,
                 f"Cherry-picking {self._short(commit)} onto "
-                f"{selectors.selector_for(repo_root, op.worktree_branch or git.current_branch(path))}",
+                f"{selectors.selector_for(repo_name, op.branch)}",
             )
             proc = git.cherry_pick(path, commit)
             if proc.returncode != 0:
                 op.status = "paused"
-                op.error_message = proc.stderr.strip() or proc.stdout.strip() or f"cherry-pick failed for {commit}"
+                op.error_message = (
+                    proc.stderr.strip()
+                    or proc.stdout.strip()
+                    or f"cherry-pick failed for {commit}"
+                )
                 self.db.put_operation(op)
-                return self._failure_message(op)
+                return self._failure_message(op, slot_path)
             op.next_commit_index += 1
             self.db.put_operation(op)
-        tracked = self._require_tracked(SelectorTarget(repo_root=repo_root, worktree_path=path, branch=op.worktree_branch or git.current_branch(path)))
-        updated = TrackedBranch(
-            repo_root=tracked.repo_root,
-            worktree_path=tracked.worktree_path,
-            branch=tracked.branch,
-            parent_repo_root=tracked.parent_repo_root,
-            parent_worktree_path=tracked.parent_worktree_path,
-            parent_branch=tracked.parent_branch,
-            managed_base_commit=op.target_parent_head or tracked.managed_base_commit,
-            last_synced_parent_commit=op.target_parent_head or tracked.last_synced_parent_commit,
-            last_clean_head=git.rev_parse(path, "HEAD"),
+        tracked = self._require_tracked(
+            SelectorTarget(repo_name=repo_name, branch=op.branch)
         )
-        self.db.upsert_worktree(updated)
+        self.db.upsert_branch(
+            TrackedBranch(
+                repo_name=tracked.repo_name,
+                branch=tracked.branch,
+                parent_repo_name=tracked.parent_repo_name,
+                parent_branch=tracked.parent_branch,
+                managed_base_commit=op.target_parent_head or tracked.managed_base_commit,
+                last_synced_parent_commit=op.target_parent_head or tracked.last_synced_parent_commit,
+                last_clean_head=git.rev_parse(path, "HEAD"),
+            )
+        )
         if op.op_type == "local_sync":
-            self.db.clear_operation(repo_root)
+            self.db.clear_operation(repo_name)
             return "Sync complete."
-        op.worktree_path = None
-        op.worktree_branch = None
-        op.parent_path = None
+        op.branch = None
         op.parent_branch = None
         op.start_head = None
         op.target_parent_head = None
@@ -968,139 +1163,131 @@ class StackerService:
             return 0
         return min(applied_count, len(op.commit_list))
 
-    def _toposorted_descendants(self, repo_root: str, path: str, branch: str) -> list[TrackedBranch]:
-        ordered: list[TrackedBranch] = []
-
-        def walk(parent_path: str, parent_branch: str) -> None:
-            children = self.db.get_children(repo_root, parent_path, parent_branch)
-            for child in children:
-                ordered.append(child)
-                walk(child.worktree_path, child.branch)
-
-        walk(path, branch)
-        return ordered
+    # -------------------------------------------------------------
+    # Graph
+    # -------------------------------------------------------------
 
     def _render_graph_node(
         self,
         lines: list[str],
-        repo_root: str,
-        path: str,
+        *,
+        repo_name: str,
         branch: str,
         items: list[TrackedBranch],
-        tracked_index: dict[tuple[str, str], TrackedBranch],
-        live_worktrees: dict[tuple[str, str], git.WorktreeInfo],
+        live: dict[str, git.WorktreeInfo],
         prefix: str,
         is_last: bool,
         implicit: bool,
-        current,
     ) -> None:
-        label = selectors.selector_for(repo_root, branch)
+        label = selectors.selector_for(repo_name, branch)
         branch_label = self._style(label, fg="green", bold=not implicit)
         suffixes: list[str] = []
-        tracked = tracked_index.get((path, branch))
+        tracked = next((item for item in items if item.branch == branch), None)
         if implicit:
             suffixes.append(self._style("[untracked root]", fg="yellow"))
         elif tracked:
             synced = self._is_synced(tracked)
-            suffixes.append(self._style("[synced]" if synced else "[unsynced]", fg="cyan" if synced else "yellow"))
-            if self._has_graph_blocking_changes(tracked, live_worktrees):
+            suffixes.append(
+                self._style("[synced]" if synced else "[unsynced]", fg="cyan" if synced else "yellow")
+            )
+            if branch in live and self._has_graph_blocking_changes(live[branch].path):
                 suffixes.append(self._style("[dirty]", fg="red", bold=True))
-        if current and current.repo_root == repo_root and current.worktree_path == path and current.branch == branch:
-            branch_label = self._style(label, fg="magenta", bold=True)
-            suffixes.append(self._style("[current]", fg="magenta", bold=True))
         connector = "└── " if is_last else "├── "
         line = f"{prefix}{connector}{branch_label}"
         if suffixes:
             line = f"{line} {' '.join(suffixes)}"
         lines.append(line)
 
-        children = [
-            item
-            for item in items
-            if item.parent_worktree_path == path and item.parent_branch == branch
-        ]
-        children.sort(key=lambda item: (item.branch, item.worktree_path))
+        children = [item for item in items if item.parent_branch == branch]
+        children.sort(key=lambda item: item.branch)
         child_prefix = prefix + ("    " if is_last else "│   ")
         for index, child in enumerate(children):
             self._render_graph_node(
                 lines,
-                repo_root,
-                child.worktree_path,
-                child.branch,
-                items,
-                tracked_index,
-                live_worktrees,
-                child_prefix,
-                index == len(children) - 1,
-                False,
-                current,
+                repo_name=repo_name,
+                branch=child.branch,
+                items=items,
+                live=live,
+                prefix=child_prefix,
+                is_last=index == len(children) - 1,
+                implicit=False,
             )
 
     def _is_synced(self, tracked: TrackedBranch) -> bool:
         try:
-            parent_head = git.rev_parse(tracked.parent_worktree_path, tracked.parent_branch)
+            parent_head = git.rev_parse(
+                str(self.paths.repo(tracked.parent_repo_name)), tracked.parent_branch
+            )
         except git.GitError:
             return False
         return parent_head == tracked.managed_base_commit
 
-    def _has_graph_blocking_changes(
-        self,
-        tracked: TrackedBranch,
-        live_worktrees: dict[tuple[str, str], git.WorktreeInfo],
-    ) -> bool:
-        if (tracked.worktree_path, tracked.branch) not in live_worktrees:
-            return False
-        try:
-            return git.has_tracked_changes(tracked.worktree_path)
-        except git.GitError:
-            return False
+    def _has_graph_blocking_changes(self, path: str) -> bool:
+        with contextlib.suppress(git.GitError):
+            return git.has_tracked_changes(path)
+        return False
+
+    # -------------------------------------------------------------
+    # Internals
+    # -------------------------------------------------------------
 
     def _ensure_syncable(self, path: str) -> None:
         if git.has_tracked_changes(path):
-            raise git.GitError(f"Tracked changes present in {path}. Commit or discard them before syncing.")
+            raise git.GitError(
+                f"Tracked changes present in {path}. Commit or discard them before syncing."
+            )
         if git.cherry_pick_in_progress(path):
-            raise git.GitError(f"Cherry-pick already in progress in {path}. Resolve it before starting another sync.")
+            raise git.GitError(
+                f"Cherry-pick already in progress in {path}. Resolve it before starting "
+                "another sync."
+            )
 
-    def _target_repo_for_create(self, branch_ref: str, current_repo_root: str | None) -> str:
-        parsed = selectors.parse_selector(branch_ref)
-        if parsed.repo_query is None:
-            if current_repo_root is None:
-                raise git.GitError("Not in a git repository; use [repo:]<branch>.")
-            return current_repo_root
-        return selectors.resolve_repo_path(parsed.repo_query, current_repo_root)
+    def _toposorted_descendants(
+        self, repo_name: str, branch: str
+    ) -> list[TrackedBranch]:
+        ordered: list[TrackedBranch] = []
 
-    def _current_context_or_none(self):
-        try:
-            return git.current_context()
-        except Exception:
-            return None
+        def walk(parent_branch: str) -> None:
+            for child in self.db.get_children(repo_name, parent_branch):
+                ordered.append(child)
+                walk(child.branch)
+
+        walk(branch)
+        return ordered
 
     def _require_tracked(self, target: SelectorTarget) -> TrackedBranch:
-        tracked = self.db.get_worktree(target.repo_root, target.worktree_path, target.branch)
+        tracked = self.db.get_branch(target.repo_name, target.branch)
         if not tracked:
             raise git.GitError(
-                f"{selectors.selector_for(target.repo_root, target.branch)} is not tracked. Use 'stacker track' or 'stacker create'."
+                f"{selectors.selector_for(target.repo_name, target.branch)} is not tracked. "
+                "Use 'stacker track' or 'stacker create'."
             )
         return tracked
 
-    def _failure_message(self, op: OperationState) -> str:
-        assert op.worktree_branch
-        inspect_selector = selectors.selector_for(op.repo_root, op.worktree_branch)
-        parent_selector = selectors.selector_for(op.repo_root, op.parent_branch or "")
+    def _failure_message(self, op: OperationState, slot_path: str) -> str:
+        assert op.branch
+        inspect_selector = selectors.selector_for(op.repo_name, op.branch)
+        parent_selector = selectors.selector_for(op.repo_name, op.parent_branch or "")
+        cherry = git.cherry_pick_in_progress(slot_path)
         parts = [
             f"Sync paused on {inspect_selector} while syncing onto {parent_selector}.\n"
-            f"Cherry-pick in progress: {'yes' if git.cherry_pick_in_progress(op.worktree_path or '') else 'no'}"
+            f"Cherry-pick in progress: {'yes' if cherry else 'no'}"
         ]
         if op.error_message:
             parts.append(f"Git says: {op.error_message}")
-        parts.append(f"Inspect with: wt cd {inspect_selector}")
+        parts.append(f"Worktree at: {slot_path}")
         parts.append("Next action: stacker continue or stacker abort")
         return "\n".join(parts)
 
-    def _sync_plan(self, tracked: TrackedBranch) -> tuple[str, str, list[str]]:
-        parent_head = git.rev_parse(tracked.parent_worktree_path, tracked.parent_branch)
-        start_head = git.rev_parse(tracked.worktree_path, "HEAD")
-        commit_list = git.rev_list(tracked.worktree_path, f"{tracked.managed_base_commit}..{start_head}")
+    def _sync_plan(
+        self, tracked: TrackedBranch, slot_path: str
+    ) -> tuple[str, str, list[str]]:
+        repo_path = str(self.paths.repo(tracked.parent_repo_name))
+        parent_head = git.rev_parse(repo_path, tracked.parent_branch)
+        start_head = git.rev_parse(slot_path, "HEAD")
+        commit_list = git.rev_list(
+            slot_path, f"{tracked.managed_base_commit}..{start_head}"
+        )
         return parent_head, start_head, commit_list
 
     def _short(self, commit: str) -> str:
