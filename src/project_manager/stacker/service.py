@@ -485,12 +485,37 @@ class StackerService:
         repo_path = self.paths.repo(tracked.repo_name)
         logs: list[str] = []
         current_repo = self.pr_backend.repo_info(cwd=repo_path)
-        self._run_single_pp(tracked, logs)
-        current_pr = self._create_or_update_current_pr(
-            tracked, config, current_repo, draft=draft, logs=logs
-        )
-        self._refresh_component_pr_bodies(tracked, config, current_repo, current_pr, logs)
-        return self._finish(logs, f"PR ready: {current_pr.url}")
+        chain = self._ancestor_chain(tracked)
+        latest_pr: gh.PullRequest | None = None
+        for item in chain:
+            acquired = self._acquire(item.repo_name, item.branch)
+            try:
+                self._run_single_pp(item, logs)
+                latest_pr = self._create_or_update_current_pr(
+                    item, config, current_repo, draft=draft, logs=logs
+                )
+            finally:
+                if item.branch != tracked.branch:
+                    self._release_if_owned(acquired)
+        assert latest_pr is not None  # chain always contains `tracked` itself
+        self._refresh_component_pr_bodies(tracked, config, current_repo, latest_pr, logs)
+        return self._finish(logs, f"PR ready: {latest_pr.url}")
+
+    def _ancestor_chain(self, tracked: TrackedBranch) -> list[TrackedBranch]:
+        """Return the tracked ancestor chain, root-first, including `tracked`.
+
+        Walks `parent_repo_name`/`parent_branch` upward until we hit an
+        untracked parent (typically the trunk branch). Used by `pr` so that
+        running `pm stacker pr <leaf>` pushes and opens PRs for every
+        tracked ancestor before the leaf, in root→leaf order.
+        """
+        ancestors: list[TrackedBranch] = []
+        cursor: TrackedBranch | None = tracked
+        while cursor is not None:
+            ancestors.append(cursor)
+            cursor = self.db.get_branch(cursor.parent_repo_name, cursor.parent_branch)
+        ancestors.reverse()
+        return ancestors
 
     def continue_operation(self, repo_name: str) -> str:
         op = self.db.get_operation(repo_name)
