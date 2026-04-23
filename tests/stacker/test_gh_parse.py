@@ -10,6 +10,7 @@ from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.git import parse_github_slug
 from project_manager.stacker.models import ParentLocator, WorktreeInit
+from project_manager.stacker.pr.resolve import head_repo_for_branch
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -74,7 +75,7 @@ def test_head_repo_derives_slug_from_branch_upstream(
         slot.path, "config", "branch.feature-fork.merge", "refs/heads/feature-fork",
     )
 
-    assert service._head_repo_for_branch(tracked) == "acme/widgets-dev"
+    assert head_repo_for_branch(service.ctx, tracked) == "acme/widgets-dev"
 
 
 def test_head_repo_returns_none_when_no_upstream(
@@ -94,4 +95,4 @@ def test_head_repo_returns_none_when_no_upstream(
             parent=ParentLocator(repo_name=repo_name, branch="main"),
         )
     )
-    assert service._head_repo_for_branch(tracked) is None
+    assert head_repo_for_branch(service.ctx, tracked) is None

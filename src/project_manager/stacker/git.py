@@ -4,6 +4,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from project_manager.errors import CommandError
 from project_manager.subprocess_run import run
@@ -304,5 +305,129 @@ def guess_trunk_branch(repo_root: Path) -> str:
     if branches:
         return branches[0]
     raise GitError(f"Could not determine a trunk branch for {repo_root}.")
+
+
+class GitClient(Protocol):
+    """Injected seam over stacker.git module-level helpers.
+
+    Mirrors PRBackend: the production impl (SubprocessGitClient) delegates to
+    the module-level functions that shell out to `git`; tests can supply a
+    fake to avoid subprocess work.
+    """
+
+    def run(
+        self, path: Path, *args: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]: ...
+    def current_branch(self, path: Path) -> str: ...
+    def current_context(self, cwd: Path | None = None) -> GitContext: ...
+    def rev_parse(self, path: Path, rev: str) -> str: ...
+    def merge_base(self, repo_root: Path, left: str, right: str) -> str: ...
+    def rev_list(self, path: Path, revspec: str) -> list[str]: ...
+    def rev_count(self, path: Path, revspec: str) -> int: ...
+    def branch_exists(self, repo_root: Path, branch: str) -> bool: ...
+    def worktree_list(self, repo_root: Path) -> list[WorktreeInfo]: ...
+    def has_tracked_changes(self, path: Path) -> bool: ...
+    def cherry_pick_in_progress(self, path: Path) -> bool: ...
+    def reset_hard(self, path: Path, target: str) -> None: ...
+    def cherry_pick(self, path: Path, commit: str) -> subprocess.CompletedProcess[str]: ...
+    def cherry_pick_continue(self, path: Path) -> subprocess.CompletedProcess[str]: ...
+    def cherry_pick_skip(self, path: Path) -> subprocess.CompletedProcess[str]: ...
+    def cherry_pick_abort(self, path: Path) -> subprocess.CompletedProcess[str]: ...
+    def pp_force(self, path: Path) -> subprocess.CompletedProcess[str]: ...
+    def upstream_branch(self, path: Path) -> str | None: ...
+    def upstream_branch_name(self, path: Path) -> str | None: ...
+    def upstream_remote_name(self, path: Path) -> str | None: ...
+    def remote_url(self, path: Path, remote: str) -> str | None: ...
+    def log_subject_and_author(
+        self, path: Path, revspec: str
+    ) -> list[tuple[str, str]]: ...
+    def first_commit_title_and_body(
+        self, path: Path, revspec: str
+    ) -> tuple[str, str]: ...
+    def guess_trunk_branch(self, repo_root: Path) -> str: ...
+
+
+class SubprocessGitClient:
+    """Production GitClient impl: delegates to module-level helpers."""
+
+    def run(
+        self, path: Path, *args: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        return git(path, *args, check=check)
+
+    def current_branch(self, path: Path) -> str:
+        return current_branch(path)
+
+    def current_context(self, cwd: Path | None = None) -> GitContext:
+        return current_context(cwd)
+
+    def rev_parse(self, path: Path, rev: str) -> str:
+        return rev_parse(path, rev)
+
+    def merge_base(self, repo_root: Path, left: str, right: str) -> str:
+        return merge_base(repo_root, left, right)
+
+    def rev_list(self, path: Path, revspec: str) -> list[str]:
+        return rev_list(path, revspec)
+
+    def rev_count(self, path: Path, revspec: str) -> int:
+        return rev_count(path, revspec)
+
+    def branch_exists(self, repo_root: Path, branch: str) -> bool:
+        return branch_exists(repo_root, branch)
+
+    def worktree_list(self, repo_root: Path) -> list[WorktreeInfo]:
+        return worktree_list(repo_root)
+
+    def has_tracked_changes(self, path: Path) -> bool:
+        return has_tracked_changes(path)
+
+    def cherry_pick_in_progress(self, path: Path) -> bool:
+        return cherry_pick_in_progress(path)
+
+    def reset_hard(self, path: Path, target: str) -> None:
+        reset_hard(path, target)
+
+    def cherry_pick(
+        self, path: Path, commit: str
+    ) -> subprocess.CompletedProcess[str]:
+        return cherry_pick(path, commit)
+
+    def cherry_pick_continue(self, path: Path) -> subprocess.CompletedProcess[str]:
+        return cherry_pick_continue(path)
+
+    def cherry_pick_skip(self, path: Path) -> subprocess.CompletedProcess[str]:
+        return cherry_pick_skip(path)
+
+    def cherry_pick_abort(self, path: Path) -> subprocess.CompletedProcess[str]:
+        return cherry_pick_abort(path)
+
+    def pp_force(self, path: Path) -> subprocess.CompletedProcess[str]:
+        return pp_force(path)
+
+    def upstream_branch(self, path: Path) -> str | None:
+        return upstream_branch(path)
+
+    def upstream_branch_name(self, path: Path) -> str | None:
+        return upstream_branch_name(path)
+
+    def upstream_remote_name(self, path: Path) -> str | None:
+        return upstream_remote_name(path)
+
+    def remote_url(self, path: Path, remote: str) -> str | None:
+        return remote_url(path, remote)
+
+    def log_subject_and_author(
+        self, path: Path, revspec: str
+    ) -> list[tuple[str, str]]:
+        return log_subject_and_author(path, revspec)
+
+    def first_commit_title_and_body(
+        self, path: Path, revspec: str
+    ) -> tuple[str, str]:
+        return first_commit_title_and_body(path, revspec)
+
+    def guess_trunk_branch(self, repo_root: Path) -> str:
+        return guess_trunk_branch(repo_root)
 
 

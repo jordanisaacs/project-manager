@@ -8,8 +8,9 @@ import pytest
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
-from project_manager.stacker import cli
 from project_manager.stacker import git as stacker_git
+from project_manager.stacker.commands import _common
+from project_manager.stacker.commands.create import _resolve_create_slot
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def test_resolve_uses_current_slot_when_cwd_is_pm_slot(
     here = three_slots[0]
     monkeypatch.chdir(here.path)
 
-    worktree, cleanup = cli._resolve_create_slot(pm_env, pooldb, repo_name)
+    worktree, cleanup = _resolve_create_slot(pm_env, pooldb, repo_name)
     assert worktree.resolve() == here.path.resolve()
     # Cleanup on the current-slot branch is a no-op — we never claimed.
     cleanup()
@@ -47,7 +48,7 @@ def test_resolve_claims_fresh_slot_when_cwd_outside_pool(  # noqa: PLR0913 (fixt
     repo_name, _ = stacker_repo
     monkeypatch.chdir(tmp_path)
 
-    worktree, cleanup = cli._resolve_create_slot(pm_env, pooldb, repo_name)
+    worktree, cleanup = _resolve_create_slot(pm_env, pooldb, repo_name)
     slot_uuids = {s.uuid for s in three_slots}
     assert worktree.parent.resolve() == pm_env.pool(repo_name).resolve()
     assert worktree.name in slot_uuids
@@ -67,7 +68,7 @@ def test_resolve_repo_uses_cwd_slot_when_args_empty(
     repo_name, _ = stacker_repo
     monkeypatch.chdir(three_slots[0].path)
     args = argparse.Namespace(repo=None)
-    assert cli._resolve_repo(args, pm_env) == repo_name
+    assert _common.resolve_repo(args, pm_env) == repo_name
 
 
 def test_resolve_repo_prefers_explicit_arg(
@@ -78,7 +79,7 @@ def test_resolve_repo_prefers_explicit_arg(
 ) -> None:
     monkeypatch.chdir(three_slots[0].path)
     args = argparse.Namespace(repo="explicit")
-    assert cli._resolve_repo(args, pm_env) == "explicit"
+    assert _common.resolve_repo(args, pm_env) == "explicit"
 
 
 def test_resolve_repo_errors_when_outside_slot_and_no_arg(
@@ -87,7 +88,7 @@ def test_resolve_repo_errors_when_outside_slot_and_no_arg(
     monkeypatch.chdir(tmp_path)
     args = argparse.Namespace(repo=None)
     with pytest.raises(stacker_git.GitError, match="pass --repo"):
-        cli._resolve_repo(args, pm_env)
+        _common.resolve_repo(args, pm_env)
 
 
 def test_resolve_branch_uses_cwd_current_branch(
@@ -100,7 +101,7 @@ def test_resolve_branch_uses_cwd_current_branch(
     stacker_git.git(slot.path, "checkout", "-b", "feature-cwd")
     monkeypatch.chdir(slot.path)
     args = argparse.Namespace(branch=None)
-    assert cli._resolve_branch(args, pm_env) == "feature-cwd"
+    assert _common.resolve_branch(args, pm_env) == "feature-cwd"
 
 
 def test_resolve_branch_errors_on_detached_head(
@@ -113,7 +114,7 @@ def test_resolve_branch_errors_on_detached_head(
     monkeypatch.chdir(slot.path)  # three_slots creates them detached
     args = argparse.Namespace(branch=None)
     with pytest.raises(stacker_git.GitError, match="detached"):
-        cli._resolve_branch(args, pm_env)
+        _common.resolve_branch(args, pm_env)
 
 
 def test_resolve_claims_fresh_slot_when_cwd_is_in_different_repo(
@@ -134,5 +135,5 @@ def test_resolve_claims_fresh_slot_when_cwd_is_in_different_repo(
     # PoolExhaustedError when the other pool has no FREE slots and no
     # stacker-owned slots.
     with pytest.raises(slot_mod.PoolExhaustedError):
-        cli._resolve_create_slot(pm_env, pooldb, "other")
+        _resolve_create_slot(pm_env, pooldb, "other")
     assert repo_name != "other"

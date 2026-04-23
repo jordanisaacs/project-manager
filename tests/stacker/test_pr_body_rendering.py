@@ -19,6 +19,7 @@ from project_manager.stacker.models import (
     SelectorTarget,
     WorktreeInit,
 )
+from project_manager.stacker.ops import worktree as ops_worktree
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -102,7 +103,7 @@ def _two_branch_stack(
     )
 
     # pp uses `git pp --force` (a databricks alias not in test env) — stub.
-    monkeypatch.setattr(service, "_run_single_pp", lambda *_a, **_kw: True)
+    monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
     return repo_name, "feature-b", slot_a, slot_b
 
 

@@ -8,7 +8,9 @@ from project_manager.paths import Paths
 from project_manager.stacker import gh
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import PRMode, RepoPRConfig, TrackedBranch
-from project_manager.stacker.service import StackerService, _StackRender
+from project_manager.stacker.pr import stack_block
+from project_manager.stacker.pr.stack_block import _StackRender, render_stack_block
+from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
 
@@ -80,9 +82,9 @@ def test_pr_pr_block_omits_files_link(
     def _fail(*_args: object, **_kwargs: object) -> str:
         pytest.fail("files URL must not be computed in pr-pr mode")
 
-    monkeypatch.setattr(service, "_files_url", _fail)
-    ctx, current = _build_ctx("pr-pr", service)
-    block = service._render_stack_block(ctx, current)
+    monkeypatch.setattr(stack_block, "_files_url", _fail)
+    render_ctx, current = _build_ctx("pr-pr", service)
+    block = render_stack_block(service.ctx, render_ctx, current)
     assert "Files changed" not in block
     # Preamble is only emitted when files URL is available — pr-pr skips it.
     assert "review incremental changes" not in block
@@ -97,9 +99,9 @@ def test_repo_pr_block_includes_files_link(
     def _files(node: TrackedBranch, _ctx: _StackRender) -> str:
         return f"https://github.com/acme/widgets/pull/X/files/abc..def?node={node.branch}"
 
-    monkeypatch.setattr(service, "_files_url", _files)
-    ctx, current = _build_ctx("repo-pr", service)
-    block = service._render_stack_block(ctx, current)
+    monkeypatch.setattr(stack_block, "_files_url", _files)
+    render_ctx, current = _build_ctx("repo-pr", service)
+    block = render_stack_block(service.ctx, render_ctx, current)
     # Every node gets a "Files changed" link — previously ancestors rendered
     # without one because _compare_url demanded a live worktree checkout.
     assert (

@@ -13,6 +13,7 @@ from project_manager.stacker.models import (
     ScopeSpec,
     SelectorTarget,
 )
+from project_manager.stacker.ops import worktree as ops_worktree
 from project_manager.stacker.service import StackerService
 
 from .conftest import TrackedStack
@@ -45,7 +46,7 @@ def push_service(
     svc.db.set_config(tracked_stack.repo_name, "pr.trunk", "main")
     _configure_upstreams(tracked_stack)
     # `git pp --force` is a Databricks alias; stub out the push itself.
-    monkeypatch.setattr(svc, "_run_single_pp", lambda *_a, **_kw: True)
+    monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
     return svc
 
 
@@ -164,7 +165,7 @@ def test_push_empty_scope_when_target_has_no_lineage(
     """Pushing from an untracked target in a fresh repo is a graceful no-op."""
     repo_name, _repo_path = stacker_repo
     svc = StackerService(StackerDB(pm_env.stacker_db()), pm_env, pr_backend=backend)
-    monkeypatch.setattr(svc, "_run_single_pp", lambda *_a, **_kw: True)
+    monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
     target = SelectorTarget(repo_name=repo_name, branch="ghost")
     with pytest.raises(stacker_git.GitError, match="not tracked"):
         svc.push(target)

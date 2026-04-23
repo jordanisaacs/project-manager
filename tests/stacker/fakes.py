@@ -144,3 +144,19 @@ def _find_pr_by_number(
         if pr.number == number:
             return pr
     return None
+
+
+class FakeGitClient:
+    """Stub GitClient for tests that want to avoid real subprocess calls.
+
+    Unused today — tests use real temp git repos via the `pm_env` fixture.
+    Exists so future tests can subclass/override specific methods without a
+    new restructure. Every method raises until overridden.
+    """
+
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+        def _not_implemented(*_args: object, **_kwargs: object) -> object:
+            raise NotImplementedError(
+                f"FakeGitClient.{name} not implemented; override in a subclass."
+            )
+        return _not_implemented

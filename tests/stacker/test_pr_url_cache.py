@@ -21,6 +21,7 @@ from project_manager.stacker.models import (
     SelectorTarget,
     WorktreeInit,
 )
+from project_manager.stacker.ops import worktree as ops_worktree
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -75,7 +76,7 @@ def feature_a(
     )
     _commit_one(slot.path, "a.txt")
     _config_upstream(slot.path, "feature-a")
-    monkeypatch.setattr(service, "_run_single_pp", lambda *_a, **_k: True)
+    monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_k: True)
     return slot
 
 

@@ -6,7 +6,7 @@ import pytest
 
 from project_manager import config as pm_config
 from project_manager.paths import Paths
-from project_manager.stacker import cli
+from project_manager.stacker.commands import config as config_cmd
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,7 @@ def _ns(**kwargs: object) -> argparse.Namespace:
 
 
 def _run(args: argparse.Namespace) -> int:
-    return cli._cmd_config(args)
+    return config_cmd.run(args)
 
 
 def test_get_unset_key_exits_1() -> None:

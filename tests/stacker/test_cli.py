@@ -11,6 +11,7 @@ import argparse
 import pytest
 
 from project_manager.stacker import cli as stacker_cli
+from project_manager.stacker.commands import guard as guard_cmd
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -141,7 +142,7 @@ def test_rename_requires_new_name() -> None:
 def test_guard_no_rebase_subcommand_wired() -> None:
     args = _parse("guard", "no-rebase")
     assert args.guard_cmd == "no-rebase"
-    assert args.func is stacker_cli._cmd_guard_no_rebase
+    assert args.func is guard_cmd.run_no_rebase
 
 
 def test_config_mutually_exclusive_list_unset() -> None:

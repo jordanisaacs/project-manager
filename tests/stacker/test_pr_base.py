@@ -8,6 +8,7 @@ from project_manager.paths import Paths
 from project_manager.stacker import gh, git
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import PRMode, RepoPRConfig, TrackedBranch
+from project_manager.stacker.pr.resolve import pr_base_for_current_branch
 from project_manager.stacker.service import StackerService
 
 from .fakes import RecordingPRBackend
@@ -51,17 +52,17 @@ def _repo_info() -> gh.RepoInfo:
 def test_repo_pr_mode_always_returns_trunk(service: StackerService) -> None:
     # Even with a non-trunk parent, repo-pr short-circuits to trunk.
     tracked = _tracked("feat-b", "feat-a")
-    base = service._pr_base_for_current_branch(tracked, _config("repo-pr"), _repo_info())
+    base = pr_base_for_current_branch(service.ctx, tracked, _config("repo-pr"), _repo_info())
     assert base == "main"
 
 
 def test_pr_pr_mode_on_trunk_parent_returns_trunk(service: StackerService) -> None:
     tracked = _tracked("feat-a", "main")
-    base = service._pr_base_for_current_branch(tracked, _config("pr-pr"), _repo_info())
+    base = pr_base_for_current_branch(service.ctx, tracked, _config("pr-pr"), _repo_info())
     assert base == "main"
 
 
 def test_pr_pr_mode_with_untracked_parent_errors(service: StackerService) -> None:
     tracked = _tracked("feat-b", "feat-a")
     with pytest.raises(git.GitError, match="must already have an open PR"):
-        service._pr_base_for_current_branch(tracked, _config("pr-pr"), _repo_info())
+        pr_base_for_current_branch(service.ctx, tracked, _config("pr-pr"), _repo_info())
