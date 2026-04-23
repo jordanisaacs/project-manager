@@ -568,6 +568,12 @@ _pm_wt_list() {
   local -a args items
   (( ${#project} )) && args=(--project "$project")
   items=(${(f)"$(command pm __complete worktrees --state $state $args 2>/dev/null)"})
+  if (( ${#items} == 0 )); then
+    # `_values` errors with "not enough arguments" if no candidates follow
+    # the description; surface an inline hint instead of a hard error.
+    _message -e worktrees "no $state worktrees for this project"
+    return 1
+  fi
   _values -s , 'worktree' $items
 }
 _pm_wt_attachable() { _pm_wt_list unattached }
