@@ -59,3 +59,107 @@ def worktrees(*, project: str | None = None) -> int:
             for wt, _, _ in project_db.list_wts(conn):
                 print(wt)
     return 0
+
+
+# --- zsh completion script generator ----------------------------------------
+#
+# Cyclopts's `App.generate_completion(shell="zsh")` emits a correct nested
+# state-machine skeleton but leaves every positional slot opaque (`'1:--repo'`,
+# etc. with no action). We post-process it to bind specific slots to the
+# dynamic helpers below, and append those helpers to the bottom of the
+# script.
+#
+# Consumed by `pm __complete zsh-script > ~/.zfunc/_pm`.
+
+_HELPERS = r"""
+# --- pm dynamic completion helpers (appended by pm __complete zsh-script) ---
+
+_pm_extract_flag() {
+  # _pm_extract_flag --flag [--alias ...]
+  # Scan $words for the first matching flag; echo the value immediately
+  # after it, or nothing.
+  local flag i=2
+  while (( i < ${#words} )); do
+    for flag; do
+      [[ $words[i] == $flag ]] && { print -r -- "$words[i+1]"; return 0; }
+    done
+    (( i++ ))
+  done
+  return 1
+}
+
+_pm_projects() {
+  local -a items
+  items=(${(f)"$(command pm __complete projects 2>/dev/null)"})
+  _describe -t projects 'project' items
+}
+
+_pm_repos() {
+  local -a items
+  items=(${(f)"$(command pm __complete repos 2>/dev/null)"})
+  _describe -t repos 'repo' items
+}
+
+_pm_wt_list() {
+  # Comma-list completion for --wt. `_values -s ,` handles subtraction
+  # of already-typed values automatically.
+  local project=$(_pm_extract_flag --project -p)
+  local -a args items
+  (( ${#project} )) && args=(--project "$project")
+  items=(${(f)"$(command pm __complete worktrees $args 2>/dev/null)"})
+  _values -s , 'worktree' $items
+}
+"""
+
+
+# Substitutions applied to cyclopts's generated script. Each entry rewrites
+# an opaque slot into one that calls a dynamic helper. Deliberately
+# narrow — we only touch slots where we provide values; stacker/branch
+# completion is out of scope (see plan).
+_SUBS: tuple[tuple[str, str], ...] = (
+    # --repo (pool add/ls + stacker commands)
+    ("'--repo[--repo]:repo'", "'--repo[--repo]:repo:_pm_repos'"),
+    (
+        "'--repo[defaults to the cwd'\\''s pm slot]:repo'",
+        "'--repo[defaults to the cwd'\\''s pm slot]:repo:_pm_repos'",
+    ),
+    # --project (+ -p alias)
+    (
+        "'--project[--project]:project'",
+        "'--project[--project]:project:_pm_projects'",
+    ),
+    (
+        "'--project[project name (defaults to current project)]:project'",
+        "'--project[project name (defaults to current project)]:project:_pm_projects'",
+    ),
+    (
+        "'-p[project name (defaults to current project)]:p'",
+        "'-p[project name (defaults to current project)]:p:_pm_projects'",
+    ),
+    # `--wt` comma-list completion.
+    (
+        "'--wt[comma-separated worktree names]:wt'",
+        "'--wt[comma-separated worktree names]:wt:_pm_wt_list'",
+    ),
+    # positional slots:
+    #   pool ls/add  → '1:--repo'
+    #   project delete/status → '1:--project'
+    ("'1:--repo'", "'1:repo:_pm_repos'"),
+    ("'1:--project'", "'1:project:_pm_projects'"),
+)
+
+
+@complete_app.command(name="zsh-script", show=False)
+def zsh_script() -> int:
+    """Print the full zsh completion script (generator + dynamic hooks)."""
+    script = root.generate_completion(shell="zsh", prog_name="pm")  # noqa: S604 (not a subprocess shell arg)
+    for needle, replacement in _SUBS:
+        if needle not in script:
+            # Keep the generator self-checking: if a slot disappears in a
+            # future cyclopts release we want to know on the next install.
+            print(f"# WARN: substitution not applied: {needle}")
+            continue
+        script = script.replace(needle, replacement)
+    print(script)
+    print(_HELPERS)
+    return 0

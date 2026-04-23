@@ -1,25 +1,538 @@
 #compdef pm
-#
-# Zsh completion for `pm`.
-#
-# Dynamic value lists (project names, repo names, worktrees) are pulled
-# from the `pm __complete` hidden sub-app. Static parts (subcommand +
-# flag names) live inline here because they're cheaper than invoking
-# Python on every keypress.
-#
-# Install: add the parent directory to $fpath and reinitialise compinit.
-#   fpath=(/path/to/integrations $fpath)
-#   autoload -Uz compinit && compinit
-#
-# Scope notes: `pm stacker` is covered at subcommand-name granularity
-# only; per-command flag/positional completion is deferred.
 
-# ---------- helpers ----------
+_pm() {
+  local line state
+
+  _arguments -C \
+    '--help[Display this message and exit.]' \
+    '-h[Display this message and exit.]' \
+    '--version[Display application version.]' \
+    '1: :->cmds' \
+    '*::arg:->args'
+
+  case $state in
+    cmds)
+      local -a commands
+      commands=(
+        'pool:manage worktree pool'
+        'project:manage projects'
+        'repo:manage canonical repos under ~/.repos'
+        'stacker:branch-stack tracking against pm'\''s pool'
+        'check:Verify invariants across pool and projects.'
+      )
+      _describe -t commands 'command' commands
+      ;;
+    args)
+      case $words[1] in
+        pool)
+          _arguments -C \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]' \
+            '1: :->cmds' \
+            '*::arg:->args'
+
+          case $state in
+            cmds)
+              local -a commands
+              commands=(
+                'add:Mint a new pool slot.'
+                'gc-ops:Release stacker-ops slots that have no live operation.'
+                'ls:List pool slots with claim status.'
+              )
+              _describe -t commands 'command' commands
+              ;;
+            args)
+              case $words[1] in
+                add)
+                  _arguments \
+                    '1:repo:_pm_repos' \
+                    '--repo[--repo]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                gc-ops)
+                  _arguments \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                ls)
+                  _arguments \
+                    '1:repo:_pm_repos' \
+                    '--repo[--repo]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+              esac
+              ;;
+          esac
+          ;;
+        project)
+          _arguments -C \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]' \
+            '1: :->cmds' \
+            '*::arg:->args'
+
+          case $state in
+            cmds)
+              local -a commands
+              commands=(
+                'create:Create a project (optionally with initial worktrees).'
+                'delete:Delete a whole project.'
+                'ls:List projects.'
+                'status:Show health + db rows for a single project (defaults to current).'
+                'wt:manage worktrees within a project'
+              )
+              _describe -t commands 'command' commands
+              ;;
+            args)
+              case $words[1] in
+                create)
+                  _arguments \
+                    '1:project:_pm_projects' \
+                    '--project[--project]:project:_pm_projects' \
+                    '--wt[--wt]:wt' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                delete)
+                  _arguments \
+                    '1:project:_pm_projects' \
+                    '--project[--project]:project:_pm_projects' \
+                    '--dry-run[--dry-run]' \
+                    '--no-dry-run[--dry-run]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                ls)
+                  _arguments \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                status)
+                  _arguments \
+                    '1:project:_pm_projects' \
+                    '--project[--project]:project:_pm_projects' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                wt)
+                  _arguments -C \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]' \
+                    '1: :->cmds' \
+                    '*::arg:->args'
+
+                  case $state in
+                    cmds)
+                      local -a commands
+                      commands=(
+                        'attach:Re-attach worktrees (best-effort slot reclaim).'
+                        'create:Add worktree(s) to an existing project.'
+                        'delete:Delete worktree row(s) from a project.'
+                        'detach:Detach worktrees\: unlink forward + release pool row.'
+                      )
+                      _describe -t commands 'command' commands
+                      ;;
+                    args)
+                      case $words[1] in
+                        attach)
+                          _arguments \
+                            '1:project name (defaults to current project)' \
+                            '2:comma-separated worktree names' \
+                            '3:every worktree in the project' \
+                            '-p[project name (defaults to current project)]:p:_pm_projects' \
+                            '--project[project name (defaults to current project)]:project:_pm_projects' \
+                            '--wt[comma-separated worktree names]:wt:_pm_wt_list' \
+                            '--all[every worktree in the project]' \
+                            '--no-branch[--no-branch]' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                        create)
+                          _arguments \
+                            '1:--spec' \
+                            '2:project name (defaults to current project)' \
+                            '--spec[--spec]:spec' \
+                            '-p[project name (defaults to current project)]:p:_pm_projects' \
+                            '--project[project name (defaults to current project)]:project:_pm_projects' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                        delete)
+                          _arguments \
+                            '1:project name (defaults to current project)' \
+                            '2:comma-separated worktree names' \
+                            '3:every worktree in the project' \
+                            '-p[project name (defaults to current project)]:p:_pm_projects' \
+                            '--project[project name (defaults to current project)]:project:_pm_projects' \
+                            '--wt[comma-separated worktree names]:wt:_pm_wt_list' \
+                            '--all[every worktree in the project]' \
+                            '--dry-run[--dry-run]' \
+                            '--no-dry-run[--dry-run]' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                        detach)
+                          _arguments \
+                            '1:project name (defaults to current project)' \
+                            '2:comma-separated worktree names' \
+                            '3:every worktree in the project' \
+                            '-p[project name (defaults to current project)]:p:_pm_projects' \
+                            '--project[project name (defaults to current project)]:project:_pm_projects' \
+                            '--wt[comma-separated worktree names]:wt:_pm_wt_list' \
+                            '--all[every worktree in the project]' \
+                            '--dry-run[--dry-run]' \
+                            '--no-dry-run[--dry-run]' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                      esac
+                      ;;
+                  esac
+                  ;;
+              esac
+              ;;
+          esac
+          ;;
+        repo)
+          _arguments -C \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]' \
+            '1: :->cmds' \
+            '*::arg:->args'
+
+          case $state in
+            cmds)
+              local -a commands
+              commands=(
+                'ls:List canonical repos with branch + upstream status.'
+                'pull:Fetch + ff-only pull each canonical repo.'
+              )
+              _describe -t commands 'command' commands
+              ;;
+            args)
+              case $words[1] in
+                ls)
+                  _arguments \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                pull)
+                  _arguments \
+                    '--repo[--repo]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+              esac
+              ;;
+          esac
+          ;;
+        stacker)
+          _arguments -C \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]' \
+            '1: :->cmds' \
+            '*::arg:->args'
+
+          case $state in
+            cmds)
+              local -a commands
+              commands=(
+                'abort:Abort a paused stacker operation and reset state.'
+                'config:Get/set per-repo stacker config.'
+                'continue:Resume a paused stacker operation.'
+                'create:Create or adopt a tracked branch (optionally in a pool slot).'
+                'guard:internal guardrails for Git hooks'
+                'log:Show commits since the branch'\''s managed base.'
+                'ls:Render the stack tree.'
+                'push:Force-push + create/update PRs for a scope.'
+                'remove:Untrack a branch (optionally delete it); reparent children.'
+                'rename:Rename the current branch.'
+                'repair:Reset stored managed-base / last-synced / last-clean-head to match git.'
+                'reparent:Move current branch onto a new parent; cherry-pick descendants.'
+                'split:Move commits \[..HEAD\] onto a new child branch.'
+                'sync:Cherry-pick branches onto their parents.'
+              )
+              _describe -t commands 'command' commands
+              ;;
+            args)
+              case $words[1] in
+                abort)
+                  _arguments \
+                    '1:defaults to the cwd'\''s pm slot' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                config)
+                  _arguments \
+                    '1:--key' \
+                    '2:--value' \
+                    '--key[--key]:key' \
+                    '--value[--value]:value' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--list[list all set keys]' \
+                    '--unset[remove a key]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                continue)
+                  _arguments \
+                    '1:defaults to the cwd'\''s pm slot' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                create)
+                  _arguments \
+                    '1:--branch' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--on[--on]:on' \
+                    '--copy[--copy]:copy' \
+                    '--replace[--replace]' \
+                    '--no-checkout[--no-checkout]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                guard)
+                  _arguments -C \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]' \
+                    '1: :->cmds' \
+                    '*::arg:->args'
+
+                  case $state in
+                    cmds)
+                      local -a commands
+                      commands=(
+                        'no-rebase:Exit nonzero when cwd is a stacker-tracked branch.'
+                      )
+                      _describe -t commands 'command' commands
+                      ;;
+                    args)
+                      case $words[1] in
+                        no-rebase)
+                          _arguments \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                      esac
+                      ;;
+                  esac
+                  ;;
+                log)
+                  _arguments \
+                    '1:--branch' \
+                    '2:defaults to the cwd'\''s pm slot' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                ls)
+                  _arguments \
+                    '1:--branch' \
+                    '2:defaults to the cwd'\''s pm slot' \
+                    '3:every tracked branch in the repo (default\: current lineage)' \
+                    '4:exclude ancestors from the walk' \
+                    '5:exclude descendants from the walk' \
+                    '6:start the walk from this branch' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-a[every tracked branch in the repo (default\: current lineage)]' \
+                    '--all[every tracked branch in the repo (default\: current lineage)]' \
+                    '--skip-ancestors[exclude ancestors from the walk]' \
+                    '--skip-descendants[exclude descendants from the walk]' \
+                    '--from[start the walk from this branch]:from' \
+                    '--details[--details]:details:(none status status-counts all)' \
+                    '--json[--json]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                push)
+                  _arguments \
+                    '1:--branch' \
+                    '2:defaults to the cwd'\''s pm slot' \
+                    '3:every tracked branch in the repo (default\: current lineage)' \
+                    '4:exclude ancestors from the walk' \
+                    '5:exclude descendants from the walk' \
+                    '6:start the walk from this branch' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-a[every tracked branch in the repo (default\: current lineage)]' \
+                    '--all[every tracked branch in the repo (default\: current lineage)]' \
+                    '--skip-ancestors[exclude ancestors from the walk]' \
+                    '--skip-descendants[exclude descendants from the walk]' \
+                    '--from[start the walk from this branch]:from' \
+                    '--only[--only]' \
+                    '--draft[--draft]' \
+                    '--publish[--publish]' \
+                    '--create-pr[--create-pr]' \
+                    '--no-create-pr[--create-pr]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                remove)
+                  _arguments \
+                    '1:--branch' \
+                    '2:defaults to the cwd'\''s pm slot' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--force[--force]' \
+                    '--parent[--parent]' \
+                    '--keep-branch[--keep-branch]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                rename)
+                  _arguments \
+                    '1:--new-name' \
+                    '--new-name[--new-name]:new-name' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                repair)
+                  _arguments \
+                    '1:--base-ref' \
+                    '--base-ref[--base-ref]:base-ref' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                reparent)
+                  _arguments \
+                    '1:--new-parent' \
+                    '--new-parent[--new-parent]:new-parent' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--continue[resume a paused cherry-pick]' \
+                    '--abort[abort the paused op]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                split)
+                  _arguments \
+                    '1:--new-name' \
+                    '2:--commit' \
+                    '--new-name[--new-name]:new-name' \
+                    '--commit[--commit]:commit' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--stay[--stay]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                sync)
+                  _arguments \
+                    '1:--branch' \
+                    '2:defaults to the cwd'\''s pm slot' \
+                    '3:every tracked branch in the repo (default\: current lineage)' \
+                    '4:exclude ancestors from the walk' \
+                    '5:exclude descendants from the walk' \
+                    '6:start the walk from this branch' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-a[every tracked branch in the repo (default\: current lineage)]' \
+                    '--all[every tracked branch in the repo (default\: current lineage)]' \
+                    '--skip-ancestors[exclude ancestors from the walk]' \
+                    '--skip-descendants[exclude descendants from the walk]' \
+                    '--from[start the walk from this branch]:from' \
+                    '--continue[resume a paused cherry-pick]' \
+                    '--abort[abort the paused op]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+              esac
+              ;;
+          esac
+          ;;
+        check)
+          _arguments \
+            '--fix[--fix]' \
+            '--no-fix[--fix]' \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]'
+
+          ;;
+      esac
+      ;;
+  esac
+}
+
+
+
+# --- pm dynamic completion helpers (appended by pm __complete zsh-script) ---
 
 _pm_extract_flag() {
   # _pm_extract_flag --flag [--alias ...]
-  # Scan the current $words for any of the listed flag names; echo the
-  # value immediately after the first match, or nothing.
+  # Scan $words for the first matching flag; echo the value immediately
+  # after it, or nothing.
   local flag i=2
   while (( i < ${#words} )); do
     for flag; do
@@ -52,161 +565,3 @@ _pm_wt_list() {
   _values -s , 'worktree' $items
 }
 
-# ---------- per-group dispatchers ----------
-
-_pm_project_wt() {
-  local -a subs=(
-    'create:Add worktree(s) to an existing project'
-    'attach:Re-attach worktrees (best-effort slot reclaim)'
-    'detach:Detach worktrees: unlink forward + release pool row'
-    'delete:Delete worktree row(s) from a project'
-  )
-  if (( CURRENT == 4 )); then
-    _describe -t commands 'pm project wt' subs
-    return
-  fi
-  case $words[4] in
-    create)
-      _arguments \
-        '(-p --project)'{-p,--project}'[project name]:project:_pm_projects' \
-        '*:spec:'
-      ;;
-    attach)
-      _arguments \
-        '(-p --project)'{-p,--project}'[project name]:project:_pm_projects' \
-        '--wt[comma-separated worktree names]:worktrees:_pm_wt_list' \
-        '--all[every worktree in the project]' \
-        '--no-branch[skip saved-branch restore]'
-      ;;
-    detach)
-      _arguments \
-        '(-p --project)'{-p,--project}'[project name]:project:_pm_projects' \
-        '--wt[comma-separated worktree names]:worktrees:_pm_wt_list' \
-        '--all[every worktree in the project]' \
-        '--dry-run[print the plan without mutating state]'
-      ;;
-    delete)
-      _arguments \
-        '(-p --project)'{-p,--project}'[project name]:project:_pm_projects' \
-        '--wt[comma-separated worktree names]:worktrees:_pm_wt_list' \
-        '--all[every worktree in the project]' \
-        '--dry-run[print the plan without mutating state]'
-      ;;
-  esac
-}
-
-_pm_project() {
-  local -a subs=(
-    'create:Create a project (optionally with initial worktrees)'
-    'delete:Delete a whole project'
-    'ls:List projects'
-    'status:Show health + db rows for a single project'
-    'wt:Manage worktrees within a project'
-  )
-  if (( CURRENT == 3 )); then
-    _describe -t commands 'pm project' subs
-    return
-  fi
-  case $words[3] in
-    create)
-      _arguments \
-        '1:project:' \
-        '--wt[comma-separated worktrees: "<repo>" or "<name>:<repo>"]:'
-      ;;
-    delete)
-      _arguments \
-        '1:project:_pm_projects' \
-        '--dry-run[print the plan without mutating state]'
-      ;;
-    ls)
-      ;;
-    status)
-      _arguments '1:project:_pm_projects'
-      ;;
-    wt)
-      _pm_project_wt
-      ;;
-  esac
-}
-
-_pm_pool() {
-  local -a subs=(
-    'ls:List pool slots with claim status'
-    'add:Mint a new pool slot'
-    'gc-ops:Release stacker-ops slots that have no live operation'
-  )
-  if (( CURRENT == 3 )); then
-    _describe -t commands 'pm pool' subs
-    return
-  fi
-  case $words[3] in
-    ls|add)
-      _arguments '1:repo:_pm_repos'
-      ;;
-  esac
-}
-
-_pm_repo() {
-  local -a subs=(
-    'ls:List canonical repos with branch + upstream status'
-    'pull:Fetch + ff-only pull each canonical repo'
-  )
-  if (( CURRENT == 3 )); then
-    _describe -t commands 'pm repo' subs
-    return
-  fi
-  case $words[3] in
-    pull)
-      _arguments '--repo[comma-separated repo names]:repo:_pm_repos'
-      ;;
-  esac
-}
-
-_pm_stacker() {
-  # Subcommand-name completion only; per-command flag/positional
-  # completion is deferred (see plan).
-  local -a subs=(
-    'create:Create or adopt a tracked branch'
-    'sync:Cherry-pick branches onto their parents'
-    'push:Force-push + create/update PRs for a scope'
-    'ls:Render the stack tree'
-    'remove:Untrack a branch'
-    'reparent:Move current branch onto a new parent'
-    'split:Move commits onto a new child branch'
-    'rename:Rename the current branch'
-    'repair:Reset stored managed-base to match git'
-    'log:Show commits since the managed base'
-    'continue:Resume a paused stacker operation'
-    'abort:Abort a paused stacker operation'
-    'config:Get/set per-repo stacker config'
-    'guard:Internal guardrails for Git hooks'
-  )
-  (( CURRENT == 3 )) && _describe -t commands 'pm stacker' subs
-}
-
-# ---------- top-level ----------
-
-_pm() {
-  local -a groups=(
-    'project:manage projects'
-    'pool:manage worktree pool'
-    'repo:manage canonical repos under ~/.repos'
-    'stacker:branch-stack tracking against pm'"'"'s pool'
-    'check:verify invariants across pool and projects'
-  )
-  if (( CURRENT == 2 )); then
-    _describe -t commands 'pm' groups
-    return
-  fi
-  case $words[2] in
-    project) _pm_project ;;
-    pool)    _pm_pool ;;
-    repo)    _pm_repo ;;
-    stacker) _pm_stacker ;;
-    check)
-      _arguments '--fix[apply safe reconciliations]'
-      ;;
-  esac
-}
-
-_pm "$@"
