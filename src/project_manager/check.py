@@ -17,6 +17,7 @@ class Kind(StrEnum):
     BROKEN = "broken"                  # forward points at a missing slot
     ORPHAN_FORWARD = "orphan-forward"  # forward exists, no db row
     ORPHAN_OWNER = "orphan-owner"      # slot .owner points at a forward not claimed by db
+    OPS_OWNED = "ops-owned"            # slot .owner -> stacker_ops_marker (ephemeral ownership)
 
 
 @dataclass(frozen=True)
@@ -111,12 +112,24 @@ def _orphan_owners(
     if not paths.worktrees.is_dir():
         return
     scope_dir = paths.project(scope) if scope is not None else None
+    ops_marker = paths.stacker_ops_marker()
     for repo_dir in sorted(paths.worktrees.iterdir()):
         if not repo_dir.is_dir():
             continue
         for s in slot_mod.list_slots(paths, repo_dir.name):
             owner = s.owner_target()
             if owner is None:
+                continue
+            if _is_ops_marker(owner, ops_marker):
+                if scope_dir is not None:
+                    continue
+                yield Finding(
+                    kind=Kind.OPS_OWNED,
+                    repo=repo_dir.name,
+                    slot_path=s.path,
+                    forward_path=owner,
+                    detail="slot held by a stacker ops operation",
+                )
                 continue
             if scope_dir is not None and owner.parent != scope_dir:
                 continue
@@ -129,6 +142,13 @@ def _orphan_owners(
                 forward_path=owner,
                 detail=".owner does not back any active db-tracked attachment",
             )
+
+
+def _is_ops_marker(owner: Path, ops_marker: Path) -> bool:
+    try:
+        return owner.resolve() == ops_marker.resolve()
+    except OSError:
+        return False
 
 
 def _project_findings(

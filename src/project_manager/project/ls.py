@@ -10,6 +10,7 @@ _KIND_TO_LABEL: dict[check_mod.Kind, str] = {
     check_mod.Kind.DRIFT: "drift",
     check_mod.Kind.STALE: "stale",
     check_mod.Kind.BROKEN: "broken",
+    check_mod.Kind.OPS_OWNED: "ops-owned",
 }
 
 
