@@ -16,6 +16,7 @@ from project_manager.project.cli import project_app as _project_app  # noqa: F40
 from project_manager.repo.cli import repo_app as _repo_app  # noqa: F401
 from project_manager.stacker.commands import stacker_app as _stacker_app  # noqa: F401
 
+from . import _complete as _complete  # registers `__complete`
 from . import check as _check  # noqa: F401  — registers the `check` command
 from ._shared import fail, root
 

@@ -55,6 +55,18 @@ pm check [--fix]                          # invariant scan across pool + project
 
 Source `integrations/pm-git-guard.zsh` from `~/.zshrc` to block `git pull` / `git rebase` on stacker-tracked branches (fail-open outside pm slots, detached HEAD, or non-repos).
 
+For tab completion (zsh), add the `integrations` dir to `$fpath` before `compinit`:
+
+```zsh
+fpath=(/path/to/project-manager/integrations $fpath)
+autoload -Uz compinit && compinit
+```
+
+Completes project names, repo names, and worktree names (including
+comma-separated `--wt foo,bar,...` lists) by shelling out to the hidden
+`pm __complete` verb. `pm stacker …` is covered at subcommand-name
+granularity only.
+
 ## Testing
 
 `make check` (ruff + ty + pytest). Tests use an isolated `pm_env` tmp dir via `tests/conftest.py` — nothing touches real `~/.repos` / `~/.worktrees` / `~/.projects`.
