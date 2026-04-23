@@ -13,6 +13,7 @@ from . import (
     push,
     remove,
     rename,
+    repair,
     reparent,
     split,
     sync,
@@ -35,6 +36,7 @@ def add_subparser(subparsers: argparse._SubParsersAction) -> None:
     reparent.add(sub)
     split.add(sub)
     rename.add(sub)
+    repair.add(sub)
     log.add(sub)
     continue_cmd.add(sub)
     abort.add(sub)
