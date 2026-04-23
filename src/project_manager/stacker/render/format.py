@@ -12,8 +12,15 @@ def short(commit: str) -> str:
     return commit[:12]
 
 
-def style(text: str, *, fg: str | None = None, bold: bool = False) -> str:
-    return output.style(text, fg=fg, bold=bold)
+def style(
+    text: str,
+    *,
+    fg: str | None = None,
+    bold: bool = False,
+    dim: bool = False,
+    strikethrough: bool = False,
+) -> str:
+    return output.style(text, fg=fg, bold=bold, dim=dim, strikethrough=strikethrough)
 
 
 def record(ctx: StackerCtx, logs: list[str], message: str) -> None:

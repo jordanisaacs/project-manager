@@ -7,6 +7,8 @@ from typing import Literal
 PRMode = Literal["pr-pr", "repo-pr"]
 Scope = Literal["current", "all"]
 Details = Literal["none", "status", "status-counts", "all"]
+ColorMode = Literal["off", "icon", "title", "full"]
+MergedStyle = Literal["dimmed", "strikethrough", "normal"]
 
 
 @dataclass(frozen=True)
@@ -75,11 +77,29 @@ class TrackedBranch:
     managed_base_commit: str
     last_synced_parent_commit: str | None
     last_clean_head: str | None
-    # URL of the PR we opened for this branch, cached so we don't re-query
-    # GitHub on every run. Kept across state transitions — if the PR gets
-    # closed/merged externally, the URL stays and the stack block surfaces
-    # it with a "[merged]" label (matching universe gitstack's UX).
-    pr_url: str | None = None
+
+
+@dataclass(frozen=True)
+class PRState:
+    """Cached GitHub PR metadata for a tracked branch.
+
+    Source of truth for everything the renderer and `pr/find` used to
+    read off `TrackedBranch.pr_url`. Stage 5 fills the review fields
+    (`is_approved`, `has_open_comments`) from a bulk GraphQL call; Stage
+    2 only knows `state` / `is_draft` / `merged` from the REST view.
+    """
+
+    repo_name: str
+    branch: str
+    pr_url: str
+    state: str                       # "OPEN" | "MERGED" | "CLOSED"
+    pr_number: int | None = None
+    is_draft: bool = False
+    merged: bool = False
+    merged_at: str | None = None
+    is_approved: bool = False
+    has_open_comments: bool = False
+    fetched_at: str | None = None
 
 
 @dataclass(frozen=True)

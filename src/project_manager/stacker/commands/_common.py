@@ -7,11 +7,18 @@ needs; they know nothing about how the user invoked the command.
 """
 import sys
 
+from project_manager import output
 from project_manager.cli._shared import StackerScope
 from project_manager.paths import Paths
 from project_manager.stacker import git, locate, selectors
 from project_manager.stacker.db import StackerDB
-from project_manager.stacker.models import ParentLocator, Scope, ScopeSpec, SelectorTarget
+from project_manager.stacker.models import (
+    ColorMode,
+    ParentLocator,
+    Scope,
+    ScopeSpec,
+    SelectorTarget,
+)
 from project_manager.stacker.service import StackerService
 
 
@@ -134,3 +141,13 @@ def emit(result: str) -> int:
     """Print a service result string and return exit code 0."""
     print(result)
     return 0
+
+
+def resolve_color_mode(cli: ColorMode) -> ColorMode:
+    """Clamp the CLI color-mode to the effective mode.
+
+    `NO_COLOR` / non-TTY stdout both force `off` regardless of what the
+    user passed; otherwise whatever the user asked for wins. `--color-mode
+    off` always works, even in a TTY that could show color.
+    """
+    return cli if output.use_color() else "off"

@@ -200,7 +200,6 @@ def finalize_local_op(
                 op.target_parent_head or tracked.last_synced_parent_commit
             ),
             last_clean_head=git.rev_parse(slot_path, "HEAD"),
-            pr_url=tracked.pr_url,
         )
     )
     if op.op_type == "local_sync":

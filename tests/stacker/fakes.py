@@ -6,6 +6,7 @@ without shelling out to `gh`.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,10 @@ class RecordingPRBackend:
         )
     )
     prs_by_head: dict[tuple[str, str], gh.PullRequest] = field(default_factory=dict)
+    review_by_pr: dict[tuple[str, str, int], gh.PRReviewSummary] = field(
+        default_factory=dict,
+    )
+    review_calls: list[list[tuple[str, str, int]]] = field(default_factory=list)
     created: list[tuple[gh.CreatePRRequest, str]] = field(default_factory=list)
     edited: list[tuple[gh.EditPRRequest, str | None]] = field(default_factory=list)
     next_pr_number: int = 1
@@ -89,6 +94,12 @@ class RecordingPRBackend:
             if pr.url == url:
                 return pr
         return None
+
+    def batch_pr_review(
+        self, entries: Sequence[tuple[str, str, int]],
+    ) -> dict[tuple[str, str, int], gh.PRReviewSummary]:
+        self.review_calls.append(list(entries))
+        return {e: self.review_by_pr[e] for e in entries if e in self.review_by_pr}
 
     def search_prs(self, query: str) -> list[gh.PullRequest]:
         """Minimal `search` that honors `repo:` / `head:` / `is:open` tokens."""

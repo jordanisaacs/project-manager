@@ -63,7 +63,6 @@ def _remove_one(
                 managed_base_commit=child.managed_base_commit,
                 last_synced_parent_commit=child.last_synced_parent_commit,
                 last_clean_head=child.last_clean_head,
-                pr_url=child.pr_url,
             )
         )
     ctx.db.delete_branch(tracked.repo_name, tracked.branch)

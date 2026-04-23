@@ -1,8 +1,10 @@
-"""Tests for the `tracked_branches.pr_url` cache.
+"""Tests for the `pr_state` cache.
 
-Mirrors universe gitstack's `StackItem.pr` model: the URL of a created PR
-is persisted on the branch and re-used on subsequent runs instead of
-re-searching GitHub.
+Mirrors universe gitstack's `StackItem.pr` model: the URL (and state) of
+a created PR is persisted for the branch and re-used on subsequent runs
+instead of re-searching GitHub. Lives in the `pr_state` table rather
+than on `tracked_branches` so PR metadata stays orthogonal to stack
+state.
 """
 from __future__ import annotations
 
@@ -81,14 +83,14 @@ def feature_a(
 
 
 @pytest.mark.usefixtures("feature_a")
-def test_create_populates_pr_url_on_branch(
+def test_create_populates_pr_state_for_branch(
     service: StackerService,
 ) -> None:
     service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
-    tracked = service.db.get_branch("demo", "feature-a")
-    assert tracked is not None
-    assert tracked.pr_url is not None
-    assert tracked.pr_url.startswith("https://github.com/acme/widgets/pull/")
+    pr = service.db.get_pr_state("demo", "feature-a")
+    assert pr is not None
+    assert pr.pr_url.startswith("https://github.com/acme/widgets/pull/")
+    assert pr.state == "OPEN"
 
 
 @pytest.mark.usefixtures("feature_a")
@@ -140,13 +142,11 @@ def test_search_hit_writes_url_back_for_future_runs(
     )
     backend.prs_by_head[("acme/widgets", "feature-a")] = existing_pr
 
-    # Wipe the cached URL so the service has to search.
-    tracked = service.db.get_branch("demo", "feature-a")
-    assert tracked is not None
-    assert tracked.pr_url is None
+    # Nothing cached yet, so the service has to search.
+    assert service.db.get_pr_state("demo", "feature-a") is None
 
     service.push(SelectorTarget(repo_name="demo", branch="feature-a"), PushOptions(draft=True))
-    after = service.db.get_branch("demo", "feature-a")
+    after = service.db.get_pr_state("demo", "feature-a")
     assert after is not None
     # The existing PR should have been detected and its URL cached —
     # _create_or_update_current_pr updates PR 99 and stores its URL.

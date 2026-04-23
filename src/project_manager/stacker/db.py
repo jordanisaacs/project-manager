@@ -8,7 +8,7 @@ from pathlib import Path
 
 from project_manager import sqlite_db
 
-from .models import OperationState, TrackedBranch
+from .models import OperationState, PRState, TrackedBranch
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracked_branches (
@@ -19,8 +19,26 @@ CREATE TABLE IF NOT EXISTS tracked_branches (
     managed_base_commit       TEXT NOT NULL,
     last_synced_parent_commit TEXT,
     last_clean_head           TEXT,
-    pr_url                    TEXT,
     updated_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo_name, branch)
+);
+
+-- PR metadata lives apart from tracked_branches. Source of truth for the
+-- renderer's [URL]/[MERGED] suffix and for `pr/find` cache-first lookups.
+-- Keyed on (repo_name, branch) — the same identity as the branch — so
+-- `pr/find` can look up by branch without knowing the URL.
+CREATE TABLE IF NOT EXISTS pr_state (
+    repo_name          TEXT NOT NULL,
+    branch             TEXT NOT NULL,
+    pr_url             TEXT NOT NULL,
+    pr_number          INTEGER,
+    state              TEXT NOT NULL,
+    is_draft           INTEGER NOT NULL DEFAULT 0,
+    merged             INTEGER NOT NULL DEFAULT 0,
+    merged_at          TEXT,
+    is_approved        INTEGER NOT NULL DEFAULT 0,
+    has_open_comments  INTEGER NOT NULL DEFAULT 0,
+    fetched_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (repo_name, branch)
 );
 
@@ -58,7 +76,7 @@ class StackerDB:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         with sqlite_db.transaction(self.db_path, schema=_SCHEMA, row_factory=sqlite3.Row) as conn:
-            _ensure_tracked_branches_pr_url(conn)
+            _migrate_pr_url_to_pr_state(conn)
             yield conn
 
     def upsert_branch(self, tracked: TrackedBranch) -> None:
@@ -69,15 +87,14 @@ class StackerDB:
                     repo_name, branch,
                     parent_repo_name, parent_branch,
                     managed_base_commit, last_synced_parent_commit, last_clean_head,
-                    pr_url, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(repo_name, branch) DO UPDATE SET
                     parent_repo_name = excluded.parent_repo_name,
                     parent_branch = excluded.parent_branch,
                     managed_base_commit = excluded.managed_base_commit,
                     last_synced_parent_commit = excluded.last_synced_parent_commit,
                     last_clean_head = excluded.last_clean_head,
-                    pr_url = excluded.pr_url,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -88,7 +105,6 @@ class StackerDB:
                     tracked.managed_base_commit,
                     tracked.last_synced_parent_commit,
                     tracked.last_clean_head,
-                    tracked.pr_url,
                 ),
             )
 
@@ -219,12 +235,85 @@ class StackerDB:
             conn.execute("DELETE FROM operations WHERE repo_name = ?", (repo_name,))
 
     def delete_branch(self, repo_name: str, branch: str) -> int:
+        """Delete the tracked branch AND its pr_state row (if any).
+
+        Separate tables keep branch-state and PR-state orthogonal, but a
+        tracked-branch delete always orphans its PR cache — no caller
+        wants the cache to outlive the branch. Kept in one transaction
+        so the pair never diverges.
+        """
         with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM pr_state WHERE repo_name = ? AND branch = ?",
+                (repo_name, branch),
+            )
             cursor = conn.execute(
                 "DELETE FROM tracked_branches WHERE repo_name = ? AND branch = ?",
                 (repo_name, branch),
             )
             return cursor.rowcount
+
+    # --- pr_state ---
+
+    def get_pr_state(self, repo_name: str, branch: str) -> PRState | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pr_state WHERE repo_name = ? AND branch = ?",
+                (repo_name, branch),
+            ).fetchone()
+        return _row_to_pr_state(row) if row else None
+
+    def list_pr_states(self, repo_name: str | None = None) -> list[PRState]:
+        query = "SELECT * FROM pr_state"
+        params: tuple[str, ...] = ()
+        if repo_name:
+            query += " WHERE repo_name = ?"
+            params = (repo_name,)
+        query += " ORDER BY repo_name, branch"
+        with self.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [_row_to_pr_state(row) for row in rows]
+
+    def upsert_pr_state(self, pr: PRState) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pr_state (
+                    repo_name, branch, pr_url, pr_number, state, is_draft,
+                    merged, merged_at, is_approved, has_open_comments,
+                    fetched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(repo_name, branch) DO UPDATE SET
+                    pr_url = excluded.pr_url,
+                    pr_number = excluded.pr_number,
+                    state = excluded.state,
+                    is_draft = excluded.is_draft,
+                    merged = excluded.merged,
+                    merged_at = excluded.merged_at,
+                    is_approved = excluded.is_approved,
+                    has_open_comments = excluded.has_open_comments,
+                    fetched_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    pr.repo_name,
+                    pr.branch,
+                    pr.pr_url,
+                    pr.pr_number,
+                    pr.state,
+                    int(pr.is_draft),
+                    int(pr.merged),
+                    pr.merged_at,
+                    int(pr.is_approved),
+                    int(pr.has_open_comments),
+                ),
+            )
+
+    def delete_pr_state(self, repo_name: str, branch: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM pr_state WHERE repo_name = ? AND branch = ?",
+                (repo_name, branch),
+            )
 
 
 def _row_to_branch(row: sqlite3.Row) -> TrackedBranch:
@@ -236,20 +325,49 @@ def _row_to_branch(row: sqlite3.Row) -> TrackedBranch:
         managed_base_commit=row["managed_base_commit"],
         last_synced_parent_commit=row["last_synced_parent_commit"],
         last_clean_head=row["last_clean_head"],
-        pr_url=row["pr_url"] if "pr_url" in row.keys() else None,  # noqa: SIM118 (sqlite3.Row has no `in`)
     )
 
 
-def _ensure_tracked_branches_pr_url(conn: sqlite3.Connection) -> None:
-    """Add the pr_url column to old DBs that predate it.
+def _row_to_pr_state(row: sqlite3.Row) -> PRState:
+    return PRState(
+        repo_name=row["repo_name"],
+        branch=row["branch"],
+        pr_url=row["pr_url"],
+        pr_number=row["pr_number"],
+        state=row["state"],
+        is_draft=bool(row["is_draft"]),
+        merged=bool(row["merged"]),
+        merged_at=row["merged_at"],
+        is_approved=bool(row["is_approved"]),
+        has_open_comments=bool(row["has_open_comments"]),
+        fetched_at=row["fetched_at"],
+    )
 
-    `CREATE TABLE IF NOT EXISTS` skips when the table already exists, even
-    if the schema diverges — so for a pre-existing DB we need an explicit
-    ALTER. Gated on `PRAGMA table_info` so it's a no-op after the first run.
+
+def _migrate_pr_url_to_pr_state(conn: sqlite3.Connection) -> None:
+    """Move legacy `tracked_branches.pr_url` rows into the pr_state table.
+
+    Pre-split DBs stored the URL on the branch row. On first boot after
+    the schema change, copy any non-null URLs into pr_state (state
+    defaults to 'OPEN' — the next push/sync/ls refresh populates the
+    real state) and then drop the column.
+
+    SQLite ≥ 3.35 supports ALTER TABLE … DROP COLUMN; pm-stacker requires
+    a Python build that bundles it, so no rebuild fallback is needed.
+    Gated on `PRAGMA table_info` so it's a no-op after the first run.
     """
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(tracked_branches)")}
     if "pr_url" not in cols:
-        conn.execute("ALTER TABLE tracked_branches ADD COLUMN pr_url TEXT")
+        return
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO pr_state (repo_name, branch, pr_url, state)
+        SELECT repo_name, branch, pr_url, 'OPEN'
+        FROM tracked_branches
+        WHERE pr_url IS NOT NULL
+        """,
+    )
+    conn.execute("ALTER TABLE tracked_branches DROP COLUMN pr_url")
 
 
 def _row_to_operation(row: sqlite3.Row) -> OperationState:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from project_manager.stacker import git
@@ -35,6 +36,10 @@ def rename(ctx: StackerCtx, target: SelectorTarget, new_name: str) -> str:
         ctx, tracked.repo_name, tracked.branch
     )
     children = ctx.db.get_children(tracked.repo_name, target.branch)
+    # Capture the PR-state cache under the old name before deleting the
+    # branch (which also wipes its pr_state row). Re-upsert under the new
+    # name so renames don't drop the URL cache.
+    pr = ctx.db.get_pr_state(tracked.repo_name, target.branch)
     git.git(current_path, "branch", "-m", target.branch, new_name)
     ctx.db.delete_branch(tracked.repo_name, target.branch)
     ctx.db.upsert_branch(
@@ -46,9 +51,10 @@ def rename(ctx: StackerCtx, target: SelectorTarget, new_name: str) -> str:
             managed_base_commit=tracked.managed_base_commit,
             last_synced_parent_commit=tracked.last_synced_parent_commit,
             last_clean_head=tracked.last_clean_head,
-            pr_url=tracked.pr_url,
         )
     )
+    if pr is not None:
+        ctx.db.upsert_pr_state(replace(pr, branch=new_name))
     for child in children:
         ctx.db.upsert_branch(
             TrackedBranch(
@@ -59,7 +65,6 @@ def rename(ctx: StackerCtx, target: SelectorTarget, new_name: str) -> str:
                 managed_base_commit=child.managed_base_commit,
                 last_synced_parent_commit=child.last_synced_parent_commit,
                 last_clean_head=child.last_clean_head,
-                pr_url=child.pr_url,
             )
         )
     return f"Renamed {target.branch} -> {new_name}."

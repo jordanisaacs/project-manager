@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -33,6 +34,10 @@ class PRBackend(Protocol):
 
     def search_prs(self, query: str) -> list[gh.PullRequest]: ...
 
+    def batch_pr_review(
+        self, entries: Sequence[tuple[str, str, int]],
+    ) -> dict[tuple[str, str, int], gh.PRReviewSummary]: ...
+
 
 class GhCliBackend:
     """Production backend — delegates to `stacker.gh` module-level functions."""
@@ -62,3 +67,8 @@ class GhCliBackend:
 
     def search_prs(self, query: str) -> list[gh.PullRequest]:
         return gh.search_prs(query)
+
+    def batch_pr_review(
+        self, entries: Sequence[tuple[str, str, int]],
+    ) -> dict[tuple[str, str, int], gh.PRReviewSummary]:
+        return gh.batch_pr_review(entries)

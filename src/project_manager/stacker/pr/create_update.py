@@ -12,7 +12,7 @@ from .find import (
     find_open_pr,
     pr_base_body,
     pr_map_for_component,
-    record_pr_url,
+    record_pr,
 )
 from .lineage import lineage
 from .resolve import (
@@ -87,11 +87,12 @@ def create_or_update_current_pr(
                     head_repo=head_repo,
                 )
             )
-    # Cache the URL on the branch so future runs skip search entirely.
-    record_pr_url(ctx, tracked, pr_url)
     refreshed = ctx.pr_backend.view_pr(pr_url)
     if not refreshed:
         raise git.GitError(f"Could not fetch PR {pr_url} after create/update.")
+    # Cache the full PR (url + state + draft + merged) so later runs can
+    # read the merge status without another round-trip.
+    record_pr(ctx, tracked, refreshed)
     return refreshed
 
 

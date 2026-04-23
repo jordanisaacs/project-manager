@@ -23,10 +23,8 @@ from .git import GitClient, SubprocessGitClient
 from .models import (
     DEFAULT_PUSH_OPTIONS,
     DEFAULT_SCOPE,
-    Details,
     ParentLocator,
     PushOptions,
-    Scope,
     ScopeSpec,
     SelectorTarget,
     TrackedBranch,
@@ -216,22 +214,9 @@ class StackerService:
     def ls_text(
         self,
         repo_name: str | None = None,
-        *,
-        target_branch: str | None = None,
-        scope: Scope = "all",
-        details: Details = "status-counts",
-        json_output: bool = False,
+        options: LsOptions | None = None,
     ) -> str:
-        return render_ls.ls_text(
-            self._ctx,
-            repo_name,
-            LsOptions(
-                target_branch=target_branch,
-                scope=scope,
-                details=details,
-                json_output=json_output,
-            ),
-        )
+        return render_ls.ls_text(self._ctx, repo_name, options or LsOptions())
 
     # --- config ---
 

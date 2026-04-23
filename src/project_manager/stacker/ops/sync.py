@@ -131,7 +131,6 @@ def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:
             managed_base_commit=actual_base,
             last_synced_parent_commit=actual_base,
             last_clean_head=current_head,
-            pr_url=tracked.pr_url,
         )
     )
     return (

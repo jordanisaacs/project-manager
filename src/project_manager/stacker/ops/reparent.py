@@ -52,7 +52,6 @@ def reparent(
             managed_base_commit=tracked.managed_base_commit,
             last_synced_parent_commit=tracked.last_synced_parent_commit,
             last_clean_head=tracked.last_clean_head,
-            pr_url=tracked.pr_url,
         )
     )
     return sync_ops.sync(

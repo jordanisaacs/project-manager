@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from project_manager.stacker import git as stacker_git
-from project_manager.stacker.models import OperationState, SelectorTarget, TrackedBranch
+from project_manager.stacker.models import OperationState, PRState, SelectorTarget
 from project_manager.stacker.service import StackerService
 
 from .conftest import TrackedStack
@@ -74,28 +74,26 @@ def test_rename_refuses_with_active_op(
         service.rename(target, "b2")
 
 
-def test_rename_preserves_pr_url_cache(
+def test_rename_preserves_pr_state_cache(
     tracked_stack: TrackedStack,
     service: StackerService,
 ) -> None:
-    """The pr_url cache travels with the branch across rename."""
-    b = service.db.get_branch(tracked_stack.repo_name, "b")
-    assert b is not None
-    service.db.upsert_branch(
-        TrackedBranch(
-            repo_name=b.repo_name,
-            branch=b.branch,
-            parent_repo_name=b.parent_repo_name,
-            parent_branch=b.parent_branch,
-            managed_base_commit=b.managed_base_commit,
-            last_synced_parent_commit=b.last_synced_parent_commit,
-            last_clean_head=b.last_clean_head,
+    """The pr_state cache travels with the branch across rename."""
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked_stack.repo_name,
+            branch="b",
             pr_url="https://github.com/acme/widgets/pull/42",
-        )
+            state="OPEN",
+            pr_number=42,
+        ),
     )
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
     service.rename(target, "b-renamed")
 
-    renamed = service.db.get_branch(tracked_stack.repo_name, "b-renamed")
-    assert renamed is not None
-    assert renamed.pr_url == "https://github.com/acme/widgets/pull/42"
+    # The old pr_state row was deleted when `b` was removed; the rename
+    # path re-inserted it under the new branch name.
+    assert service.db.get_pr_state(tracked_stack.repo_name, "b") is None
+    renamed_pr = service.db.get_pr_state(tracked_stack.repo_name, "b-renamed")
+    assert renamed_pr is not None
+    assert renamed_pr.pr_url == "https://github.com/acme/widgets/pull/42"

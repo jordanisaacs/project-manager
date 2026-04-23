@@ -4,9 +4,15 @@ import json
 
 import pytest
 
+from project_manager.paths import Paths
+from project_manager.stacker import gh
+from project_manager.stacker.db import StackerDB
+from project_manager.stacker.models import PRState
+from project_manager.stacker.render.ls import LsOptions, RenderOptions
 from project_manager.stacker.service import StackerService
 
-from .conftest import TrackedStack
+from .conftest import TrackedStack, commit_file
+from .fakes import RecordingPRBackend
 
 
 def test_ls_default_shows_all_tracked_branches(
@@ -24,8 +30,7 @@ def test_ls_current_scope_narrows_to_lineage(
 ) -> None:
     out = service.ls_text(
         tracked_stack.repo_name,
-        target_branch="b",
-        scope="current",
+        LsOptions(target_branch="b", scope="current"),
     )
     for name in ("a", "b", "c", "d"):
         assert name in out
@@ -35,53 +40,109 @@ def test_ls_details_none_strips_suffixes(
     tracked_stack: TrackedStack,
     service: StackerService,
 ) -> None:
-    """`--details none` emits the tree with no `[synced]` / `[N commits]` markers."""
-    out = service.ls_text(tracked_stack.repo_name, details="none")
-    assert "[synced]" not in out
-    assert "[unsynced]" not in out
-    assert "commits]" not in out
-
-
-def test_ls_details_status_includes_sync_markers(
-    tracked_stack: TrackedStack,
-    service: StackerService,
-) -> None:
-    out = service.ls_text(tracked_stack.repo_name, details="status")
-    assert "[synced]" in out
+    """`--details none` emits bare names + the always-on LOCAL/REMOTE/URL/MERGED
+    token, but no commit group, no dirty flag, and no `✗` sync marker.
+    """
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(details="none"))
+    assert "(!)" not in out
+    assert "↑" not in out
+    assert "[dirty]" not in out
+    assert "✗" not in out
 
 
 def test_ls_details_status_counts_includes_commit_counts(
     tracked_stack: TrackedStack,
     service: StackerService,
 ) -> None:
-    out = service.ls_text(tracked_stack.repo_name, details="status-counts")
-    assert "commits]" in out
+    out = service.ls_text(
+        tracked_stack.repo_name, LsOptions(details="status-counts"),
+    )
+    # Each branch has 1 commit since its managed_base; no upstream, so the
+    # whole count is `unpushed` → `↑` arrow shows.
+    assert "(1↑)" in out
 
 
-def test_ls_json_output_is_parseable(
+def test_ls_suffix_is_local_when_no_upstream_or_pr(
     tracked_stack: TrackedStack,
     service: StackerService,
 ) -> None:
-    raw = service.ls_text(tracked_stack.repo_name, json_output=True)
-    entries = json.loads(raw)
-    names = {e["branch"] for e in entries}
+    out = service.ls_text(tracked_stack.repo_name)
+    # The fixture never pushes branches, so every row ends in `[LOCAL]`.
+    assert "[LOCAL]" in out
+    assert "[REMOTE]" not in out
+
+
+def _walk_branches(node: dict) -> list[dict]:
+    out = [node]
+    for child in node.get("children", []):
+        out.extend(_walk_branches(child))
+    return out
+
+
+def _all_branches(payload: dict) -> list[dict]:
+    out: list[dict] = []
+    for root in payload["branches"]:
+        out.extend(_walk_branches(root))
+    return out
+
+
+def test_ls_json_is_a_tree(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    raw = service.ls_text(tracked_stack.repo_name, LsOptions(json_output=True))
+    payload = json.loads(raw)
+    assert payload["current_branch"] is None
+    # Single root `a` in the fixture (main is implicit, not tracked).
+    assert len(payload["branches"]) == 1
+    root = payload["branches"][0]
+    assert root["branch"] == "a"
+    assert root["is_root"] is True
+    names = {b["branch"] for b in _all_branches(payload)}
     assert names == {"a", "b", "c", "d"}
-    # status-counts default → managed_base is included on each entry.
-    for entry in entries:
-        assert "managed_base" in entry
+    # Default details=status-counts → commit_count populated per node.
+    for b in _all_branches(payload):
+        assert b["commit_count"] == 1
 
 
-def test_ls_json_details_all_includes_pr_fields(
+def test_ls_json_current_branch_bubbles_from_options(
     tracked_stack: TrackedStack,
     service: StackerService,
 ) -> None:
     raw = service.ls_text(
-        tracked_stack.repo_name, details="all", json_output=True,
+        tracked_stack.repo_name,
+        LsOptions(json_output=True, current=(tracked_stack.repo_name, "b")),
     )
-    entries = json.loads(raw)
-    for entry in entries:
-        assert "pr_url" in entry
-        assert "last_clean_head" in entry
+    payload = json.loads(raw)
+    assert payload["current_branch"] == "b"
+
+
+def test_ls_json_details_none_omits_status_fields(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    raw = service.ls_text(
+        tracked_stack.repo_name, LsOptions(details="none", json_output=True),
+    )
+    payload = json.loads(raw)
+    for b in _all_branches(payload):
+        assert b["status"] is None
+        assert b["needs_sync"] is None
+        assert b["commit_count"] is None
+
+
+def test_ls_json_details_all_includes_debug_fields(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    raw = service.ls_text(
+        tracked_stack.repo_name, LsOptions(details="all", json_output=True),
+    )
+    payload = json.loads(raw)
+    for b in _all_branches(payload):
+        assert "managed_base" in b
+        assert "last_synced_parent_commit" in b
+        assert "last_clean_head" in b
 
 
 @pytest.mark.usefixtures("stacker_repo")
@@ -89,3 +150,188 @@ def test_ls_empty_repo_has_no_tracked_branches(
     service: StackerService,
 ) -> None:
     assert service.ls_text("demo") == "No tracked branches."
+
+
+def test_ls_unsynced_branch_renders_bang_and_cross_connector(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """Advancing `a` past `b.managed_base_commit` makes `b` need a sync.
+
+    The renderer should show `(!)`/`(!N↑)` in the commit group AND swap the
+    connector leading into `b` for `├─✗` / `└─✗`.
+    """
+    commit_file(
+        tracked_stack.slots["a"].path, "a_extra.txt", "a2\n", "a: second commit",
+    )
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(details="status"))
+    assert "!" in out
+    assert "✗" in out
+
+
+def test_ls_icons_off_suppresses_cross_connector(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    commit_file(
+        tracked_stack.slots["a"].path, "a_extra.txt", "a2\n", "a: second commit",
+    )
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(details="status", render=RenderOptions(icons=False)),
+    )
+    # `!` in the commit group still shows (it's semantic, not a connector).
+    assert "(!" in out
+    # Tree connector never renders ✗ when icons are disabled.
+    assert "✗" not in out
+
+
+def test_ls_current_marker_renders_when_current_provided(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "b")),
+    )
+    # `>` prefix on the current row, `(current)` suffix, only on branch `b`.
+    assert "> " in out
+    assert "(current)" in out
+    # Non-current rows still get the 2-space gutter.
+    assert "  demo" in out
+
+
+def test_ls_local_only_icon_shown_by_default(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(details="status"))
+    assert "·" in out  # every branch in the fixture is local-only
+
+
+def test_ls_icons_off_hides_status_symbols(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(details="status", render=RenderOptions(icons=False)),
+    )
+    for sym in ("·", "○", "●", "■"):
+        assert sym not in out
+
+
+def test_ls_merged_branch_uses_merged_connector_and_suffix(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked_stack.repo_name,
+            branch="c",
+            pr_url="https://github.com/acme/widgets/pull/7",
+            state="MERGED",
+            merged=True,
+        ),
+    )
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(details="status"))
+    assert "[MERGED]" in out
+    assert "■┄┆" in out
+
+
+def test_ls_hide_merged_drops_merged_rows(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked_stack.repo_name,
+            branch="c",
+            pr_url="https://github.com/acme/widgets/pull/7",
+            state="MERGED",
+            merged=True,
+        ),
+    )
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(render=RenderOptions(hide_merged=True)),
+    )
+    # `c` should be filtered; its children (`d`) stay — they re-root at
+    # the now-implicit `c` slot.
+    assert "c" not in out or "[MERGED]" not in out
+    assert "demo:d" in out
+
+
+def test_ls_pr_url_suffix_and_open_icon_when_pr_state_present(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked_stack.repo_name,
+            branch="b",
+            pr_url="https://github.com/acme/widgets/pull/42",
+            state="OPEN",
+        ),
+    )
+    out = service.ls_text(tracked_stack.repo_name, LsOptions(details="status"))
+    assert "https://github.com/acme/widgets/pull/42" in out
+    # Open PR with no review data → `●`. `·` still present for the
+    # other local-only branches, but `●` should appear at least once.
+    assert "●" in out
+
+
+def test_ls_online_refresh_writes_review_fields_to_pr_state(
+    tracked_stack: TrackedStack,
+    pm_env: Paths,
+) -> None:
+    """--online refreshes pr_state via one batch GraphQL call per repo.
+
+    Seed `b` with a cached URL, stub the backend to return approved +
+    comments, and verify the upgraded icon plus the DB write-back.
+    """
+    backend = RecordingPRBackend()
+    svc = StackerService(StackerDB(pm_env.stacker_db()), pm_env, pr_backend=backend)
+    svc.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked_stack.repo_name,
+            branch="b",
+            pr_url="https://github.com/acme/widgets/pull/42",
+            state="OPEN",
+        ),
+    )
+    backend.review_by_pr[("acme", "widgets", 42)] = gh.PRReviewSummary(
+        state="OPEN",
+        is_draft=False,
+        is_approved=True,
+        has_open_comments=True,
+    )
+    out = svc.ls_text(tracked_stack.repo_name, LsOptions(details="status"))
+    # Approved + comments combo → ◼ icon (gitstack's `pr_approved_comments`).
+    assert "◼" in out
+    assert backend.review_calls == [[("acme", "widgets", 42)]]
+    refreshed = svc.db.get_pr_state(tracked_stack.repo_name, "b")
+    assert refreshed is not None
+    assert refreshed.is_approved is True
+    assert refreshed.has_open_comments is True
+
+
+def test_ls_online_false_makes_zero_github_calls(
+    tracked_stack: TrackedStack,
+    pm_env: Paths,
+) -> None:
+    backend = RecordingPRBackend()
+    svc = StackerService(StackerDB(pm_env.stacker_db()), pm_env, pr_backend=backend)
+    svc.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked_stack.repo_name,
+            branch="b",
+            pr_url="https://github.com/acme/widgets/pull/42",
+            state="OPEN",
+        ),
+    )
+    svc.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(render=RenderOptions(online=False)),
+    )
+    assert backend.review_calls == []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -223,6 +224,80 @@ def _rest_pr(item: dict) -> PullRequest:
         base_ref_name=base.get("ref", ""),
         state=state,
         is_draft=bool(item.get("draft", False)),
+    )
+
+
+@dataclass(frozen=True)
+class PRReviewSummary:
+    """Live-review state for a single PR.
+
+    Populated by one GraphQL call per (owner, repo) set; consumed by the
+    renderer to upgrade the offline `● / ○` icons to the full
+    `▼ ⚑ ✓ ◼` set gitstack ships.
+    """
+
+    state: str               # OPEN | MERGED | CLOSED
+    is_draft: bool
+    is_approved: bool
+    has_open_comments: bool
+
+
+def batch_pr_review(
+    entries: Sequence[tuple[str, str, int]],
+) -> dict[tuple[str, str, int], PRReviewSummary]:
+    """Bulk-fetch review state for the PRs in `entries` (owner, repo, number).
+
+    One GraphQL call per unique (owner, repo) group — GitHub's API only
+    lets us query aliased fields inside one `repository(owner, name)`
+    selection. Inside each group we project per-PR sub-selections so the
+    whole set comes back in a single request.
+
+    Review semantics (mirroring gitstack):
+    - `is_approved`: any `latestReviews` node with `state == APPROVED`.
+    - `has_open_comments`: any node with `state == CHANGES_REQUESTED`.
+    - `is_draft`: PR-level `isDraft`.
+    - `state`: `MERGED` when `merged: true`, else pass-through.
+    """
+    out: dict[tuple[str, str, int], PRReviewSummary] = {}
+    by_repo: dict[tuple[str, str], list[int]] = {}
+    for owner, repo, number in entries:
+        by_repo.setdefault((owner, repo), []).append(number)
+    for (owner, repo), numbers in by_repo.items():
+        if not numbers:
+            continue
+        alias_body = "\n".join(
+            f"pr_{n}: pullRequest(number: {n}) {{ state isDraft merged "
+            f"latestReviews(last: 50) {{ nodes {{ state }} }} }}"
+            for n in numbers
+        )
+        query = (
+            f'query {{ repository(owner: "{owner}", name: "{repo}") {{ '
+            f'{alias_body} }} }}'
+        )
+        proc = run(
+            ["gh", "api", "graphql", "-f", f"query={query}"], check=False,
+        )
+        if proc.returncode != 0:
+            continue
+        payload = json.loads(proc.stdout or "{}")
+        repo_node = (payload.get("data") or {}).get("repository") or {}
+        for number in numbers:
+            node = repo_node.get(f"pr_{number}")
+            if not node:
+                continue
+            out[(owner, repo, number)] = _graphql_review(node)
+    return out
+
+
+def _graphql_review(node: dict) -> PRReviewSummary:
+    reviews = ((node.get("latestReviews") or {}).get("nodes")) or []
+    states = [(r.get("state") or "").upper() for r in reviews if r]
+    state_raw = str(node.get("state") or "").upper()
+    return PRReviewSummary(
+        state="MERGED" if node.get("merged") else state_raw,
+        is_draft=bool(node.get("isDraft", False)),
+        is_approved="APPROVED" in states,
+        has_open_comments="CHANGES_REQUESTED" in states,
     )
 
 

@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING
 
 from project_manager.stacker import gh, git, locate
-from project_manager.stacker.models import RepoPRConfig, TrackedBranch
+from project_manager.stacker.models import PRState, RepoPRConfig, TrackedBranch
 
 from .resolve import target_repo_slug
 
@@ -54,15 +54,17 @@ def find_pr(
 ) -> gh.PullRequest | None:
     """Return the PR for `tracked` in any state (open/closed/merged).
 
-    Cache-first: if `tracked.pr_url` is set we trust it and hit the
-    REST single-PR endpoint — no dependency on GitHub's search index.
-    Falls back to a GraphQL-style search
+    Cache-first: if `pr_state` has a row for `tracked` we trust the URL
+    and hit the REST single-PR endpoint — no dependency on GitHub's
+    search index. Falls back to a GraphQL-style search
     (`repo:X head:Y is:pr is:open`) only when the cache is empty;
     writes the URL back on a hit so the next run is cache-only.
     """
-    if tracked.pr_url:
-        cached = ctx.pr_backend.view_pr(tracked.pr_url)
+    cached_state = ctx.db.get_pr_state(tracked.repo_name, tracked.branch)
+    if cached_state is not None:
+        cached = ctx.pr_backend.view_pr(cached_state.pr_url)
         if cached is not None:
+            record_pr(ctx, tracked, cached)
             return cached
     target_repo = target_repo_slug(config)
     path = locate.locate_worktree(ctx.paths, tracked.repo_name, tracked.branch)
@@ -79,25 +81,43 @@ def find_pr(
     if not prs:
         return None
     found = prs[0]
-    # First-time discovery (e.g. PR opened by another tool): persist
-    # the URL so subsequent runs skip the search entirely.
-    if not tracked.pr_url:
-        record_pr_url(ctx, tracked, found.url)
+    # First-time discovery (e.g. PR opened by another tool): persist the
+    # full state so subsequent runs skip the search entirely.
+    if cached_state is None:
+        record_pr(ctx, tracked, found)
     return found
 
 
 def record_pr_url(ctx: StackerCtx, tracked: TrackedBranch, url: str) -> None:
-    ctx.db.upsert_branch(
-        TrackedBranch(
+    """Persist only a PR URL (when the full state isn't available yet).
+
+    Preferred callers use `record_pr` with a full `PullRequest`; this
+    thinner entry point exists for flows that have nothing but the URL.
+    State defaults to `OPEN`; the next refresh overwrites it.
+    """
+    ctx.db.upsert_pr_state(
+        PRState(
             repo_name=tracked.repo_name,
             branch=tracked.branch,
-            parent_repo_name=tracked.parent_repo_name,
-            parent_branch=tracked.parent_branch,
-            managed_base_commit=tracked.managed_base_commit,
-            last_synced_parent_commit=tracked.last_synced_parent_commit,
-            last_clean_head=tracked.last_clean_head,
             pr_url=url,
-        )
+            state="OPEN",
+        ),
+    )
+
+
+def record_pr(ctx: StackerCtx, tracked: TrackedBranch, pr: gh.PullRequest) -> None:
+    """Persist a full `PullRequest` into the pr_state cache."""
+    is_merged = pr.state.upper() == "MERGED"
+    ctx.db.upsert_pr_state(
+        PRState(
+            repo_name=tracked.repo_name,
+            branch=tracked.branch,
+            pr_url=pr.url,
+            pr_number=pr.number,
+            state=pr.state.upper(),
+            is_draft=pr.is_draft,
+            merged=is_merged,
+        ),
     )
 
 
