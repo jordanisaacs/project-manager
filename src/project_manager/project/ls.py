@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from project_manager import check as check_mod
 from project_manager.paths import Paths
 from project_manager.project import discovery
+from project_manager.render import Column, Section
 
 _KIND_TO_LABEL: dict[check_mod.Kind, str] = {
     check_mod.Kind.ACTIVE: "attached",
@@ -13,6 +14,15 @@ _KIND_TO_LABEL: dict[check_mod.Kind, str] = {
     check_mod.Kind.OPS_OWNED: "ops-owned",
 }
 
+_STATUS_STYLE: dict[str, str] = {
+    "attached": "green",
+    "detached": "dim",
+    "drift": "yellow",
+    "stale": "red",
+    "broken": "red",
+    "ops-owned": "cyan",
+}
+
 
 @dataclass(frozen=True)
 class ProjectRow:
@@ -21,6 +31,26 @@ class ProjectRow:
     repo: str
     slot_uuid: str
     status: str  # "attached" | "detached" | "drift" | "stale" | "broken"
+
+
+COLUMNS: list[Column] = [
+    Column("Worktree", "wt"),
+    Column("Repo", "repo", style="blue"),
+    Column("Slot", "slot_uuid", style="dim"),
+    Column(
+        "Status",
+        "status",
+        style=lambda r: _STATUS_STYLE.get(r.status, ""),
+    ),
+]
+
+
+def sections(rows: list["ProjectRow"]) -> list[Section]:
+    """Group project rows by project name for hierarchical display."""
+    by_project: dict[str, list[ProjectRow]] = {}
+    for row in rows:
+        by_project.setdefault(row.project, []).append(row)
+    return [Section(title=p, rows=rs) for p, rs in sorted(by_project.items())]
 
 
 def ls(paths: Paths) -> list[ProjectRow]:

@@ -28,13 +28,33 @@ def test_set_then_get(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().out.strip() == "master"
 
 
-def test_list_prints_sorted_key_equals_value(capsys: pytest.CaptureFixture[str]) -> None:
+def test_list_prints_sorted_keys_and_values(capsys: pytest.CaptureFixture[str]) -> None:
     _run(key="pr.trunk", value="master")
     _run(key="pr.mode", value="repo-pr")
     capsys.readouterr()
     assert _run(list_=True) == 0
-    out = capsys.readouterr().out.splitlines()
-    assert out == ["pr.mode=repo-pr", "pr.trunk=master"]
+    out = capsys.readouterr().out
+    # pr.mode comes before pr.trunk alphabetically; both keys and their
+    # values appear in the rendered table.
+    mode_idx = out.find("pr.mode")
+    trunk_idx = out.find("pr.trunk")
+    assert 0 <= mode_idx < trunk_idx
+    assert "repo-pr" in out
+    assert "master" in out
+
+
+def test_list_json(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    _run(key="pr.trunk", value="master")
+    _run(key="pr.mode", value="repo-pr")
+    capsys.readouterr()
+    assert _run(list_=True, json=True) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == [
+        {"key": "pr.mode",  "value": "repo-pr"},
+        {"key": "pr.trunk", "value": "master"},
+    ]
 
 
 def test_unset_missing_key_exits_1() -> None:

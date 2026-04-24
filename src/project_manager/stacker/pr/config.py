@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from project_manager.render import Column
 from project_manager.stacker import config_schema, git
 from project_manager.stacker.models import RepoPRConfig
 
@@ -9,6 +11,18 @@ from .resolve import push_remote_slug
 
 if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
+
+
+@dataclass(frozen=True)
+class ConfigRow:
+    key: str
+    value: str
+
+
+CONFIG_COLUMNS: list[Column] = [
+    Column("Key", "key", style="cyan"),
+    Column("Value", "value"),
+]
 
 
 def pr_config(ctx: StackerCtx, repo_name: str) -> RepoPRConfig:

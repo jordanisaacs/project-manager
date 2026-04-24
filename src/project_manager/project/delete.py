@@ -103,6 +103,19 @@ class DeletePlan:
     def has_blocker(self) -> bool:
         return bool(self.extras) or self.detach_plan.has_blocker
 
+    def __pm_json__(self) -> dict:
+        return {
+            "project": self.project,
+            "whole": self.whole,
+            "has_blocker": self.has_blocker,
+            "extras": [str(e) for e in self.extras],
+            "detach": self.detach_plan.__pm_json__(),
+            "drop_rows": list(self.drop_rows),
+            "remove_readme": self.remove_readme,
+            "drop_db": self.drop_db,
+            "rmdir": self.rmdir,
+        }
+
 
 def plan_delete(
     paths: Paths, project: str, wts: list[str] | None,

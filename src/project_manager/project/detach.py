@@ -7,6 +7,7 @@ from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.project import branch as branch_mod
 from project_manager.project import db
+from project_manager.render import Column
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,14 @@ class DetachedWt:
     repo: str
     uuid: str
     path: Path
+
+
+DETACHED_COLUMNS: list[Column] = [
+    Column("Worktree", "wt"),
+    Column("Repo", "repo", style="blue"),
+    Column("UUID", "uuid", style="dim"),
+    Column("Path", "path"),
+]
 
 
 def detach(paths: Paths, project: str, wts: list[str] | None) -> list[DetachedWt]:
@@ -90,6 +99,51 @@ class DetachPlan:
     @property
     def has_blocker(self) -> bool:
         return any(a.blocker is not None for a in self.actions)
+
+    def __pm_json__(self) -> dict:
+        return {
+            "project": self.project,
+            "has_blocker": self.has_blocker,
+            "actions": [
+                {
+                    "wt": a.wt,
+                    "repo": a.repo,
+                    "kind": a.kind,
+                    "slot_uuid": a.slot_uuid,
+                    "blocker": a.blocker,
+                }
+                for a in self.actions
+            ],
+        }
+
+
+def _detach_status(action: DetachAction) -> str:
+    if action.blocker is not None:
+        return "blocked"
+    return action.kind  # "detach" | "noop"
+
+
+def _detach_status_style(action: DetachAction) -> str:
+    if action.blocker is not None:
+        return "red"
+    if action.kind == "noop":
+        return "dim"
+    return "yellow"
+
+
+def _detach_note(action: DetachAction) -> str:
+    if action.blocker is not None:
+        return action.blocker
+    if action.kind == "noop":
+        return "already detached"
+    return f"release slot {action.slot_uuid}" if action.slot_uuid else ""
+
+
+DETACH_ACTION_COLUMNS: list[Column] = [
+    Column("Status", _detach_status, style=_detach_status_style),
+    Column("Worktree", "wt"),
+    Column("Note", _detach_note),
+]
 
 
 def plan_detach(

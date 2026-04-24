@@ -1,12 +1,20 @@
 """`pm repo pull`."""
-from project_manager import config
+from typing import Annotated
+
+from cyclopts import Parameter
+
+from project_manager import config, render
 from project_manager.repo import pull as pull_mod
 
 from . import repo_app
 
 
 @repo_app.command
-def pull(*, repo: str | None = None) -> int:
+def pull(
+    *,
+    repo: str | None = None,
+    json: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
     """Fetch + ff-only pull each canonical repo.
 
     --repo accepts a comma-separated list; defaults to every repo.
@@ -14,9 +22,5 @@ def pull(*, repo: str | None = None) -> int:
     paths = config.load()
     repos = [r.strip() for r in repo.split(",") if r.strip()] if repo else None
     results = pull_mod.pull(paths, repos)
-    any_fail = False
-    for r in results:
-        print(f"{r.repo}\t{'ok' if r.ok else 'fail'}\t{r.message}")
-        if not r.ok:
-            any_fail = True
-    return 1 if any_fail else 0
+    render.emit_rows(results, pull_mod.COLUMNS, as_json=json)
+    return 1 if any(not r.ok for r in results) else 0

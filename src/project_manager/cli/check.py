@@ -1,24 +1,28 @@
 """`pm check` — top-level invariant checker."""
 import sys
+from typing import Annotated
+
+from cyclopts import Parameter
 
 from project_manager import check as check_mod
-from project_manager import config
+from project_manager import config, render
 
 from ._shared import root
 
 
 @root.command
-def check(*, fix: bool = False) -> int:
+def check(
+    *,
+    fix: bool = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
     """Verify invariants across pool and projects.
 
     Exits 1 when any non-healthy finding remains (and --fix was not passed).
     """
     paths = config.load()
     findings = check_mod.check(paths)
-    for f in findings:
-        slot = f.slot_path if f.slot_path is not None else "-"
-        forward = f.forward_path if f.forward_path is not None else "-"
-        print(f"{f.kind.value}\t{forward}\t{slot}\t{f.detail}")
+    render.emit_rows(findings, check_mod.COLUMNS, as_json=json)
     if fix:
         applied = check_mod.fix(paths, findings)
         print(f"# applied {applied} fix(es)", file=sys.stderr)

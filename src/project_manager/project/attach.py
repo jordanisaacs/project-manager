@@ -11,6 +11,7 @@ from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import branch as branch_mod
 from project_manager.project import db
 from project_manager.project.branch import RestoreResult
+from project_manager.render import Column
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,14 @@ class AttachedWt:
     repo: str
     uuid: str
     path: Path
+
+
+ATTACHED_COLUMNS: list[Column] = [
+    Column("Worktree", "wt"),
+    Column("Repo", "repo", style="blue"),
+    Column("UUID", "uuid", style="dim"),
+    Column("Path", "path"),
+]
 
 
 @dataclass(frozen=True)

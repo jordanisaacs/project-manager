@@ -296,11 +296,17 @@ def _name_label(
 
 
 def _apply_merged_style(text: str, style: MergedStyle) -> str:
-    """Wrap the non-connector portion of a merged row in its dim/strike style."""
+    """Wrap the non-connector portion of a merged row in its dim/strike style.
+
+    `text` here is a concatenation of already-styled fragments (contains
+    markup), so we build the outer tag directly rather than going through
+    `fmt.style` — that would escape the inner markup and emit the tag
+    characters literally.
+    """
     if style == "dimmed":
-        return fmt.style(text, dim=True)
+        return f"[dim]{text}[/]"
     if style == "strikethrough":
-        return fmt.style(text, strikethrough=True)
+        return f"[strike]{text}[/]"
     return text
 
 

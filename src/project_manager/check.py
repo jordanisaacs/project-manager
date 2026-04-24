@@ -7,6 +7,7 @@ from pathlib import Path
 from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.project import db, discovery
+from project_manager.render import Column
 
 
 class Kind(StrEnum):
@@ -28,6 +29,41 @@ class Finding:
     slot_path: Path | None
     forward_path: Path | None
     detail: str
+
+    def __pm_json__(self) -> dict:
+        return {
+            "kind": self.kind.value,
+            "wt": self.wt,
+            "repo": self.repo,
+            "slot_path": str(self.slot_path) if self.slot_path else None,
+            "forward_path": str(self.forward_path) if self.forward_path else None,
+            "detail": self.detail,
+        }
+
+
+_KIND_STYLE: dict[Kind, str] = {
+    Kind.ACTIVE: "green",
+    Kind.DETACHED: "dim",
+    Kind.DRIFT: "yellow",
+    Kind.STALE: "red",
+    Kind.BROKEN: "red",
+    Kind.ORPHAN_FORWARD: "red",
+    Kind.ORPHAN_OWNER: "red",
+    Kind.OPS_OWNED: "cyan",
+}
+
+
+# `pm check` output is flat; CLI calls `render.emit_rows(findings, COLUMNS)`.
+COLUMNS: list[Column] = [
+    Column(
+        "Kind",
+        lambda r: r.kind.value,
+        style=lambda r: _KIND_STYLE.get(r.kind, ""),
+    ),
+    Column("Forward", lambda r: str(r.forward_path or "-")),
+    Column("Slot", lambda r: str(r.slot_path or "-"), style="dim"),
+    Column("Detail", "detail"),
+]
 
 
 def _row_findings(

@@ -5,15 +5,12 @@ to `project_manager.cli._shared` during the cyclopts migration. The
 things remaining here all resolve/construct values the `StackerService`
 needs; they know nothing about how the user invoked the command.
 """
-import sys
-
-from project_manager import output
+from project_manager import render
 from project_manager.cli._shared import StackerScope
 from project_manager.paths import Paths
 from project_manager.stacker import git, locate, selectors
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import (
-    ColorMode,
     ParentLocator,
     Scope,
     ScopeSpec,
@@ -28,7 +25,7 @@ def service(paths: Paths) -> StackerService:
 
 
 def stderr_progress(msg: str) -> None:
-    print(f"pm: {msg}", file=sys.stderr)
+    render.console(stderr=True).print(f"pm: {msg}", markup=False, highlight=False)
 
 
 def resolve_repo(repo: str | None, paths: Paths) -> str:
@@ -138,16 +135,6 @@ def scope_spec(s: StackerScope, *, only: bool = False) -> ScopeSpec:
 
 
 def emit(result: str) -> int:
-    """Print a service result string and return exit code 0."""
-    print(result)
+    """Print a service result string (rich markup resolved) and return 0."""
+    render.emit_markup(result)
     return 0
-
-
-def resolve_color_mode(cli: ColorMode) -> ColorMode:
-    """Clamp the CLI color-mode to the effective mode.
-
-    `NO_COLOR` / non-TTY stdout both force `off` regardless of what the
-    user passed; otherwise whatever the user asked for wins. `--color-mode
-    off` always works, even in a TTY that could show color.
-    """
-    return cli if output.use_color() else "off"

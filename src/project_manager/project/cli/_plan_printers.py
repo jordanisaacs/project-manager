@@ -1,34 +1,46 @@
 """Shared dry-run plan printers for project/wt delete and detach."""
 import sys
 
+from project_manager import render
 from project_manager.paths import Paths
 from project_manager.project import delete as delete_mod
 from project_manager.project import detach as detach_mod
 
 
-def print_detach_plan(plan: detach_mod.DetachPlan) -> None:
+def emit_detach_plan(plan: detach_mod.DetachPlan, *, as_json: bool) -> None:
+    if as_json:
+        render.emit_json(plan.__pm_json__())
+        return
+    render.emit_rows(plan.actions, detach_mod.DETACH_ACTION_COLUMNS)
+    # Blockers also go to stderr so `pm … --dry-run 2>err.log` surfaces them
+    # separately from the plan table.
     for action in plan.actions:
         if action.blocker is not None:
-            print(
-                f"dry-run: would detach {action.wt}\tBLOCKED: {action.blocker}",
-                file=sys.stderr,
-            )
-            continue
-        if action.kind == "noop":
-            print(f"dry-run: {action.wt} already detached")
-            continue
-        print(f"dry-run: would detach {action.wt}\trelease slot {action.slot_uuid}")
+            print(f"pm: BLOCKED: {action.wt}: {action.blocker}", file=sys.stderr)
 
 
-def print_delete_plan(plan: delete_mod.DeletePlan, paths: Paths) -> None:
+def emit_delete_plan(
+    plan: delete_mod.DeletePlan, paths: Paths, *, as_json: bool,
+) -> None:
+    if as_json:
+        render.emit_json(plan.__pm_json__())
+        return
     for extra in plan.extras:
-        print(f"dry-run: BLOCKED: non-pm entry {extra}", file=sys.stderr)
-    print_detach_plan(plan.detach_plan)
-    for wt in plan.drop_rows:
-        print(f"dry-run: would drop db row {wt}")
+        print(f"pm: BLOCKED: non-pm entry {extra}", file=sys.stderr)
+    if plan.detach_plan.actions:
+        emit_detach_plan(plan.detach_plan, as_json=False)
+    if plan.drop_rows:
+        print()
+        render.console().print(
+            f"Would drop {len(plan.drop_rows)} db row(s): "
+            + ", ".join(plan.drop_rows),
+        )
+    extras: list[str] = []
     if plan.remove_readme:
-        print(f"dry-run: would remove {paths.project(plan.project) / 'README.md'}")
+        extras.append(f"remove {paths.project(plan.project) / 'README.md'}")
     if plan.drop_db:
-        print(f"dry-run: would drop {paths.project_db(plan.project)}")
+        extras.append(f"drop {paths.project_db(plan.project)}")
     if plan.rmdir:
-        print(f"dry-run: would rmdir {paths.project(plan.project)}")
+        extras.append(f"rmdir {paths.project(plan.project)}")
+    for e in extras:
+        print(f"Would {e}")

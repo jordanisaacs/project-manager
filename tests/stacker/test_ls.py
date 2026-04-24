@@ -198,8 +198,8 @@ def test_ls_current_marker_renders_when_current_provided(
     # `>` prefix on the current row, `(current)` suffix, only on branch `b`.
     assert "> " in out
     assert "(current)" in out
-    # Non-current rows still get the 2-space gutter.
-    assert "  demo" in out
+    # Non-current rows still get the 2-space gutter (repo header uses it too).
+    assert "  [bold blue]demo[/]" in out
 
 
 def test_ls_no_banner_when_current_branch_is_tracked(
@@ -298,19 +298,35 @@ def test_ls_legend_ignored_in_json_mode(
 
 # --- color tests -----------------------------------------------------------
 
-_GREEN = "\x1b[32m"
-_GREEN_BOLD = "\x1b[1;32m"
-_BOLD = "\x1b[1m"
+# `ls_text` now emits rich markup; the CLI resolves it via Console.print.
+# Tests assert on markup patterns rather than raw ANSI bytes — rich handles
+# TTY/NO_COLOR gating at print time.
 
 
-@pytest.fixture
-def force_color(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pytest's stdout isn't a TTY, so `output.use_color` normally returns
-    False. Flip `CLICOLOR_FORCE` on and ensure `NO_COLOR` is unset so the
-    real ANSI escape codes show up in the captured text.
-    """
-    monkeypatch.setenv("CLICOLOR_FORCE", "1")
-    monkeypatch.delenv("NO_COLOR", raising=False)
+def _strip_markup(s: str) -> str:
+    """Render markup to plain text (no ANSI) for content-only assertions."""
+    import io
+
+    from rich.console import Console
+    buf = io.StringIO()
+    Console(file=buf, force_terminal=False, no_color=True, width=120,
+            highlight=False, markup=False).print(
+        s, markup=True, highlight=False,
+    )
+    return buf.getvalue()
+
+
+def _render_ansi(s: str) -> str:
+    """Render markup through a forced-TTY Console for ANSI assertions."""
+    import io
+
+    from rich.console import Console
+    buf = io.StringIO()
+    Console(file=buf, force_terminal=True, color_system="truecolor",
+            width=120, highlight=False, markup=False).print(
+        s, markup=True, highlight=False,
+    )
+    return buf.getvalue()
 
 
 def _seed_approved(
@@ -345,13 +361,11 @@ def _seed_approved(
 def test_ls_icon_mode_does_not_color_non_current_branch_names(
     tracked_stack: TrackedStack,
     service: StackerService,
-    force_color: None,
 ) -> None:
     """Regression: under the default `icon` color mode only the status
     symbol should carry a per-row color. Previously every tracked branch
     name came out green+bold from a stale fallback.
     """
-    _ = force_color
     out = service.ls_text(
         tracked_stack.repo_name,
         LsOptions(
@@ -360,20 +374,16 @@ def test_ls_icon_mode_does_not_color_non_current_branch_names(
         ),
     )
     # Current row: green+bold (the cwd marker still stands out).
-    assert f"{_GREEN_BOLD}demo:b\x1b[0m" in out
+    assert "[bold green]demo:b[/]" in out
     # Non-current rows: no green styling on the name.
-    assert f"{_GREEN}demo:a" not in out
-    assert f"{_GREEN_BOLD}demo:a" not in out
-    assert f"{_GREEN}demo:c" not in out
-    assert f"{_GREEN_BOLD}demo:c" not in out
+    assert "[bold green]demo:a" not in out
+    assert "[bold green]demo:c" not in out
 
 
 def test_ls_icon_mode_colors_symbol_not_name_for_approved(
     tracked_stack: TrackedStack,
     pm_env: Paths,
-    force_color: None,
 ) -> None:
-    _ = force_color
     svc = StackerService(
         StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
     )
@@ -383,18 +393,15 @@ def test_ls_icon_mode_colors_symbol_not_name_for_approved(
         LsOptions(render=RenderOptions(online=True, color_mode="icon")),
     )
     # Approved glyph is green.
-    assert f"{_GREEN}✓\x1b[0m" in out
+    assert "[green]✓[/]" in out
     # Branch name not green under `icon` mode.
-    assert f"{_GREEN}demo:b" not in out
-    assert f"{_GREEN_BOLD}demo:b" not in out
+    assert "[bold green]demo:b" not in out
 
 
 def test_ls_title_mode_colors_both_symbol_and_approved_branch_name(
     tracked_stack: TrackedStack,
     pm_env: Paths,
-    force_color: None,
 ) -> None:
-    _ = force_color
     svc = StackerService(
         StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
     )
@@ -403,20 +410,18 @@ def test_ls_title_mode_colors_both_symbol_and_approved_branch_name(
         tracked_stack.repo_name,
         LsOptions(render=RenderOptions(online=True, color_mode="title")),
     )
-    assert f"{_GREEN}✓\x1b[0m" in out
-    assert f"{_GREEN_BOLD}demo:b\x1b[0m" in out
+    assert "[green]✓[/]" in out
+    assert "[bold green]demo:b[/]" in out
 
 
 def test_ls_color_mode_off_drops_current_branch_fg(
     tracked_stack: TrackedStack,
     service: StackerService,
-    force_color: None,
 ) -> None:
     """`--color-mode off` drops per-status / current fg on names and icons,
     but `fmt.style`-based chrome (repo header, suffix tokens, etc.) keeps
-    its colors — only `NO_COLOR=1` silences those.
+    its colors.
     """
-    _ = force_color
     out = service.ls_text(
         tracked_stack.repo_name,
         LsOptions(
@@ -425,24 +430,44 @@ def test_ls_color_mode_off_drops_current_branch_fg(
         ),
     )
     # Current row is bold but not green.
-    assert f"{_BOLD}demo:b\x1b[0m" in out
-    assert f"{_GREEN_BOLD}demo:b" not in out
+    assert "[bold]demo:b[/]" in out
+    assert "[bold green]demo:b" not in out
     # Repo header keeps its blue styling (unaffected by color_mode).
-    assert "\x1b[1;34mdemo\x1b[0m" in out
+    assert "[bold blue]demo[/]" in out
 
 
-def test_ls_no_color_env_strips_every_ansi_escape(
+def test_ls_renders_without_ansi_when_printed_to_non_terminal(
     tracked_stack: TrackedStack,
     service: StackerService,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NO_COLOR", "1")
-    monkeypatch.setenv("CLICOLOR_FORCE", "1")  # NO_COLOR wins over this.
+    """The `ls_text` output carries rich markup; when printed via a non-TTY
+    Console (the default when stdout is piped) the ANSI escape codes drop
+    out. NO_COLOR is honored by rich's Console natively.
+    """
     out = service.ls_text(
         tracked_stack.repo_name,
         LsOptions(current=(tracked_stack.repo_name, "b")),
     )
-    assert "\x1b[" not in out
+    rendered = _strip_markup(out)
+    assert "\x1b[" not in rendered
+    # Content survives: branch names and tree chars.
+    assert "demo:b" in rendered
+
+
+def test_ls_renders_ansi_when_printed_to_terminal(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """Forced-TTY render resolves markup to ANSI — end-to-end sanity that
+    the same markup string covers both paths.
+    """
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "b")),
+    )
+    rendered = _render_ansi(out)
+    assert "\x1b[" in rendered  # ANSI present
+    assert "\x1b[1;32m" in rendered or "\x1b[32;1m" in rendered  # green+bold somewhere
 
 
 # --- end color tests -------------------------------------------------------

@@ -1,5 +1,9 @@
 """`pm project wt create`."""
-from project_manager import config
+from typing import Annotated
+
+from cyclopts import Parameter
+
+from project_manager import config, render
 from project_manager.cli._shared import ProjectFlag
 from project_manager.project import create as create_mod
 from project_manager.project import current
@@ -9,7 +13,12 @@ from . import wt_app
 
 
 @wt_app.command
-def create(spec: str, flag: ProjectFlag = ProjectFlag()) -> int:
+def create(
+    spec: str,
+    flag: ProjectFlag = ProjectFlag(),
+    *,
+    json: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
     """Add worktree(s) to an existing project.
 
     <spec> is the same format as `pm project create --wt`:
@@ -19,6 +28,5 @@ def create(spec: str, flag: ProjectFlag = ProjectFlag()) -> int:
     project = current.resolve_project(paths, flag.project)
     items = parse_wt_spec(spec)
     claimed = create_mod.create(paths, project, items)
-    for wt_name, slot in claimed:
-        print(f"{wt_name}\t{slot.path}")
+    render.emit_rows(claimed, create_mod.CREATED_COLUMNS, as_json=json)
     return 0

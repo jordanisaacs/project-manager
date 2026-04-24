@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "cyclopts>=4.10,<5",
+    "rich>=14,<15",
 ]
 
 [project.scripts]

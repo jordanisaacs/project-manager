@@ -1,11 +1,12 @@
 """`pm stacker config` — get/set per-repo stacker config (git-config style)."""
-import sys
 from typing import Annotated
 
 from cyclopts import Parameter
 
 from project_manager import config as config_mod
+from project_manager import render
 from project_manager.cli._shared import RepoFlag
+from project_manager.stacker.pr.config import CONFIG_COLUMNS, ConfigRow
 
 from . import _common, stacker_app
 
@@ -24,6 +25,7 @@ def config(
         bool,
         Parameter(negative="", help="remove a key"),
     ] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Get/set per-repo stacker config.
 
@@ -38,8 +40,8 @@ def config(
     if list_:
         if key is not None or value is not None:
             raise ValueError("--list takes no key/value arguments.")
-        for k, v in svc.list_config(repo_name):
-            print(f"{k}={v}")
+        rows = [ConfigRow(key=k, value=v) for k, v in svc.list_config(repo_name)]
+        render.emit_rows(rows, CONFIG_COLUMNS, as_json=json)
         return 0
     if unset:
         if key is None or value is not None:
@@ -51,8 +53,9 @@ def config(
         current = svc.get_config(repo_name, key)
         if current is None:
             return 1
-        print(current)
+        render.console().print(current, markup=False, highlight=False)
         return 0
+    err = render.console(stderr=True)
     for note in svc.set_config(repo_name, key, value):
-        print(note, file=sys.stderr)
+        err.print(note, markup=False, highlight=False)
     return 0

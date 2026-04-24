@@ -1,14 +1,23 @@
 """`pm pool add`."""
-from project_manager import config
+from typing import Annotated
+
+from cyclopts import Parameter
+
+from project_manager import config, render
 from project_manager.pool import add as add_mod
+from project_manager.pool.slot import SLOT_COLUMNS
 
 from . import pool_app
 
 
 @pool_app.command
-def add(repo: str) -> int:
+def add(
+    repo: str,
+    *,
+    json: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
     """Mint a new pool slot."""
     paths = config.load()
     slot = add_mod.add(paths, repo)
-    print(f"{slot.repo}\t{slot.uuid}\t{slot.path}")
+    render.emit_rows([slot], SLOT_COLUMNS, as_json=json)
     return 0

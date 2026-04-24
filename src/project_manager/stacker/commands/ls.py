@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from cyclopts import Parameter
 
-from project_manager import config
+from project_manager import config, render
 from project_manager.cli._shared import StackerScope
 from project_manager.paths import Paths
 from project_manager.stacker import git, locate
@@ -62,26 +62,24 @@ def ls(
         icons=icons,
         hide_merged=not merged,
         merged_style=merged_style,
-        color_mode=_common.resolve_color_mode(color_mode),
+        color_mode=color_mode,
     )
     if current:
         target = _common.target(scope.repo, branch, paths)
-        return _common.emit(
-            svc.ls_text(
-                target.repo_name,
-                LsOptions(
-                    target_branch=target.branch,
-                    scope="current",
-                    details=details,
-                    json_output=json,
-                    current=current_pos,
-                    legend=legend,
-                    render=render_opts,
-                ),
-            )
+        result = svc.ls_text(
+            target.repo_name,
+            LsOptions(
+                target_branch=target.branch,
+                scope="current",
+                details=details,
+                json_output=json,
+                current=current_pos,
+                legend=legend,
+                render=render_opts,
+            ),
         )
-    return _common.emit(
-        svc.ls_text(
+    else:
+        result = svc.ls_text(
             _common.resolve_repo_optional(scope.repo, paths),
             LsOptions(
                 scope="all",
@@ -92,4 +90,8 @@ def ls(
                 render=render_opts,
             ),
         )
-    )
+    if json:
+        render.emit_json_string(result)
+    else:
+        render.emit_markup(result)
+    return 0

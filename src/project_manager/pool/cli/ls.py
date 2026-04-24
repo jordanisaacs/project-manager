@@ -1,14 +1,26 @@
 """`pm pool ls`."""
-from project_manager import config
+from typing import Annotated
+
+from cyclopts import Parameter
+
+from project_manager import config, render
 from project_manager.pool import ls as ls_mod
 
 from . import pool_app
 
 
 @pool_app.command
-def ls(repo: str | None = None) -> int:
-    """List pool slots with claim status."""
+def ls(
+    repo: str | None = None,
+    *,
+    json: Annotated[bool, Parameter(negative="")] = False,
+) -> int:
+    """List pool slots with claim status, grouped by repo."""
     paths = config.load()
-    for row in ls_mod.ls(paths, repo):
-        print(f"{row.repo}\t{row.uuid}\t{row.status}")
+    rows = ls_mod.ls(paths, repo)
+    render.emit_sections(
+        ls_mod.sections(rows), ls_mod.COLUMNS,
+        group=render.GroupColumn("Repo"),
+        as_json=json, shape=render.JsonShape("repo", "slots"),
+    )
     return 0

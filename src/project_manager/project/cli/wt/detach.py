@@ -1,9 +1,13 @@
 """`pm project wt detach`."""
-from project_manager import config
+from typing import Annotated
+
+from cyclopts import Parameter
+
+from project_manager import config, render
 from project_manager.cli._shared import ProjectFlag, WtSelection, selected_wts
 from project_manager.project import current
 from project_manager.project import detach as detach_mod
-from project_manager.project.cli._plan_printers import print_detach_plan
+from project_manager.project.cli._plan_printers import emit_detach_plan
 
 from . import wt_app
 
@@ -14,6 +18,7 @@ def detach(
     sel: WtSelection = WtSelection(),
     *,
     dry_run: bool = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Detach worktrees: unlink forward + release pool row.
 
@@ -24,9 +29,8 @@ def detach(
     selected = selected_wts(sel)
     if dry_run:
         plan = detach_mod.plan_detach(paths, project, selected)
-        print_detach_plan(plan)
+        emit_detach_plan(plan, as_json=json)
         return 1 if plan.has_blocker else 0
     released = detach_mod.detach(paths, project, selected)
-    for d in released:
-        print(f"{d.wt}\t{d.path}")
+    render.emit_rows(released, detach_mod.DETACHED_COLUMNS, as_json=json)
     return 0

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from project_manager.paths import Paths
+from project_manager.render import Column
 
 if TYPE_CHECKING:
     from project_manager.pool.db import PoolDB
@@ -23,6 +24,13 @@ class Slot:
     repo: str
     uuid: str
     path: Path
+
+
+SLOT_COLUMNS: list[Column] = [
+    Column("Repo", "repo", style="blue"),
+    Column("UUID", "uuid", style="dim"),
+    Column("Path", "path"),
+]
 
 
 def list_slots(paths: Paths, repo: str) -> list[Slot]:

@@ -1,9 +1,13 @@
 """`pm project wt delete`."""
+from typing import Annotated
+
+from cyclopts import Parameter
+
 from project_manager import config
 from project_manager.cli._shared import ProjectFlag, WtSelection, selected_wts
 from project_manager.project import current
 from project_manager.project import delete as delete_mod
-from project_manager.project.cli._plan_printers import print_delete_plan
+from project_manager.project.cli._plan_printers import emit_delete_plan
 
 from . import wt_app
 
@@ -14,6 +18,7 @@ def delete(
     sel: WtSelection = WtSelection(),
     *,
     dry_run: bool = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Delete worktree row(s) from a project.
 
@@ -24,7 +29,7 @@ def delete(
     selected = selected_wts(sel)
     if dry_run:
         plan = delete_mod.plan_delete(paths, project, selected)
-        print_delete_plan(plan, paths)
+        emit_delete_plan(plan, paths, as_json=json)
         return 1 if plan.has_blocker else 0
     delete_mod.delete(paths, project, selected)
     return 0

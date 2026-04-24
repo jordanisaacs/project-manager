@@ -3,6 +3,7 @@ from pathlib import Path
 
 from project_manager.errors import CommandError
 from project_manager.paths import Paths
+from project_manager.render import Column
 from project_manager.repo import discovery, git
 from project_manager.subprocess_run import run
 
@@ -12,6 +13,17 @@ class PullResult:
     repo: str
     ok: bool
     message: str
+
+
+COLUMNS: list[Column] = [
+    Column("Repo", "repo", style="blue"),
+    Column(
+        "Result",
+        lambda r: "ok" if r.ok else "fail",
+        style=lambda r: "green" if r.ok else "red",
+    ),
+    Column("Message", "message"),
+]
 
 
 def _precheck_skip(repo_dir: Path) -> str | None:

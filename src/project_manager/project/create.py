@@ -1,6 +1,7 @@
 import contextlib
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
@@ -8,6 +9,7 @@ from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import db
+from project_manager.render import Column
 
 _README_TEMPLATE = """\
 # {project}
@@ -26,6 +28,22 @@ checkout living under the pool root.
 Do not `git init` here, do not commit this directory, and do not move the
 symlinks by hand — use `pm project wt attach|detach|delete`.
 """
+
+
+@dataclass(frozen=True)
+class CreatedWt:
+    wt: str
+    repo: str
+    uuid: str
+    path: Path
+
+
+CREATED_COLUMNS: list[Column] = [
+    Column("Worktree", "wt"),
+    Column("Repo", "repo", style="blue"),
+    Column("UUID", "uuid", style="dim"),
+    Column("Path", "path"),
+]
 
 
 @dataclass(frozen=True)
@@ -79,7 +97,7 @@ def _claim_one(
 
 def create(
     paths: Paths, project: str, wts: list[tuple[str, str]],
-) -> list[tuple[str, Slot]]:
+) -> list[CreatedWt]:
     """Create a project (or add worktrees to an existing one).
 
     `wts` is a list of `(wt_name, repo)` pairs. For each: claim a pool slot
@@ -90,8 +108,6 @@ def create(
     context manager; filesystem side-effects (symlinks) and pool-db rows
     are unwound by the outer except block. When the project dir or db was
     created by this call and the call fails, both are torn down too.
-
-    Returns [(wt, slot), ...] on success.
     """
     _validate_wts(wts)
 
@@ -101,19 +117,21 @@ def create(
     db_existed = db_path.exists()
 
     pooldb = PoolDB(paths.pool_db())
-    claimed: list[tuple[str, Slot]] = []
+    claimed: list[CreatedWt] = []
     try:
         with db.transaction(db_path) as conn:
             ctx = _CreateCtx(paths=paths, pooldb=pooldb, conn=conn)
             for wt, repo in wts:
                 s = _claim_one(ctx, project, wt, repo)
-                claimed.append((wt, s))
+                claimed.append(
+                    CreatedWt(wt=wt, repo=s.repo, uuid=s.uuid, path=s.path)
+                )
     except BaseException:
-        for wt, s in reversed(claimed):
-            forward = paths.forward(project, wt)
+        for c in reversed(claimed):
+            forward = paths.forward(project, c.wt)
             with contextlib.suppress(FileNotFoundError):
                 forward.unlink()
-            pooldb.release(s.repo, s.uuid)
+            pooldb.release(c.repo, c.uuid)
         if not db_existed:
             with contextlib.suppress(FileNotFoundError):
                 db_path.unlink()
