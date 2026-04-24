@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from project_manager.paths import Paths
+from project_manager.pool.db import PoolDB
 from project_manager.stacker import gh
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import PRState
@@ -235,6 +236,54 @@ def test_ls_no_banner_when_cwd_outside_a_slot(
     out = service.ls_text(tracked_stack.repo_name, LsOptions(current=None))
     assert "not tracked by pm" not in out
     assert "(on tracked branch" not in out
+
+
+def test_ls_shows_project_tag_on_every_row_in_project_slots(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """Every branch that lives in a project-owned pm slot gets a
+    `[<project>]` token on its row — not just the current one — so the
+    reader can navigate to any branch's slot.
+    """
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "b")),
+    )
+    # The fixture claims all four slots for project "tracked-stack".
+    branch_lines = [
+        line for line in out.splitlines()
+        if any(f"demo:{name}" in line for name in ("a", "b", "c", "d"))
+    ]
+    assert len(branch_lines) == 4
+    for line in branch_lines:
+        assert "[tracked-stack]" in line, line
+    # On the current row the tag sits immediately before `(current)`.
+    current_line = next(line for line in branch_lines if "(current)" in line)
+    assert current_line.index("[tracked-stack]") < current_line.index("(current)")
+
+
+def test_ls_omits_project_tag_when_slot_not_project_owned(
+    pm_env: Paths,
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """A branch whose slot is unclaimed (or STACKER-owned) loses the
+    `[<project>]` tag; other branches in project slots keep theirs.
+    """
+    # Release slot for branch "b" from the pool db — the live worktree
+    # still exists, but the pool db no longer reports a project owner.
+    pooldb = PoolDB(pm_env.pool_db())
+    pooldb.release(tracked_stack.repo_name, tracked_stack.slots["b"].uuid)
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(current=(tracked_stack.repo_name, "b")),
+    )
+    b_line = next(line for line in out.splitlines() if "demo:b" in line)
+    assert "[tracked-stack]" not in b_line
+    # Siblings still in project slots keep the tag.
+    a_line = next(line for line in out.splitlines() if "demo:a" in line)
+    assert "[tracked-stack]" in a_line
 
 
 def test_ls_legend_appended_in_text_mode(

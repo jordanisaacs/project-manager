@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from project_manager.pool.db import OwnerKind, PoolDB
 from project_manager.stacker import gh, git
 from project_manager.stacker.models import (
     ColorMode,
@@ -21,6 +22,9 @@ from . import format as fmt
 from . import graph
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from project_manager.paths import Paths
     from project_manager.stacker.ctx import StackerCtx
 
 
@@ -98,6 +102,51 @@ def ls_text(
     if options.legend:
         return body + "\n\n" + graph.render_legend(options.render)
     return body
+
+
+# Pool worktrees are laid out as `<paths.worktrees>/<repo>/<uuid>/...`.
+_WORKTREE_MIN_PARTS = 2
+
+
+def _resolve_branch_projects(
+    paths: Paths, live: dict[str, git.WorktreeInfo],
+) -> dict[str, str]:
+    """Map each live branch to the pm project whose slot has it checked out.
+
+    Walks the repo's live worktrees, matches paths under `paths.worktrees`,
+    and looks up the slot owner in the pool db. Branches checked out in
+    non-pm worktrees, in STACKER-owned slots, or in unclaimed slots are
+    omitted.
+    """
+    if not live:
+        return {}
+    try:
+        pool_root = paths.worktrees.resolve()
+    except FileNotFoundError:
+        return {}
+    pooldb = PoolDB(paths.pool_db())
+    out: dict[str, str] = {}
+    for branch, info in live.items():
+        project = _project_for_path(pooldb, pool_root, info.path)
+        if project is not None:
+            out[branch] = project
+    return out
+
+
+def _project_for_path(
+    pooldb: PoolDB, pool_root: Path, wt_path: Path,
+) -> str | None:
+    try:
+        rel = wt_path.resolve().relative_to(pool_root)
+    except (FileNotFoundError, ValueError):
+        return None
+    parts = rel.parts
+    if len(parts) < _WORKTREE_MIN_PARTS:
+        return None
+    owner = pooldb.get_owner(parts[0], parts[1])
+    if owner is None or owner.kind != OwnerKind.PROJECT:
+        return None
+    return owner.id
 
 
 def _empty_text(
@@ -240,6 +289,7 @@ def _ls_tree(
                 seen_roots.add(item.parent_branch)
         current_branch = current[1] if current and current[0] == repo else None
         pr_states = {pr.branch: pr for pr in ctx.db.list_pr_states(repo)}
+        branch_projects = _resolve_branch_projects(ctx.paths, live)
         gctx = graph.GraphCtx(
             repo_name=repo,
             items=items,
@@ -248,6 +298,7 @@ def _ls_tree(
             render_opts=render_opts,
             pr_states=pr_states,
             current_branch=current_branch,
+            branch_projects=branch_projects,
         )
         for parent_branch, implicit in sorted(roots):
             graph.render_graph_node(

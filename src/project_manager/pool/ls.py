@@ -3,13 +3,17 @@ from dataclasses import dataclass
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OwnerKind, PoolDB
+from project_manager.project import branch as branch_mod
 from project_manager.render import Column, Section
+
+_DETACHED_HEAD = "(detached)"
 
 
 @dataclass(frozen=True)
 class PoolRow:
     repo: str
     uuid: str
+    branch: str
     status: str  # "FREE", a project name, or "OPS" for stacker-ops slots
 
 
@@ -17,8 +21,13 @@ def _status_style(row: PoolRow) -> str:
     return {"FREE": "green", "OPS": "yellow"}.get(row.status, "")
 
 
+def _branch_style(row: PoolRow) -> str:
+    return "italic" if row.branch == _DETACHED_HEAD else ""
+
+
 COLUMNS: list[Column] = [
     Column("UUID", "uuid", style="dim"),
+    Column("Branch", "branch", style=_branch_style),
     Column("Status", "status", style=_status_style),
 ]
 
@@ -53,5 +62,8 @@ def ls(paths: Paths, repo: str | None) -> list[PoolRow]:
                 status = "OPS"
             else:
                 status = owner.id
-            rows.append(PoolRow(repo=r, uuid=s.uuid, status=status))
+            branch = branch_mod.read_current_branch(s.path) or _DETACHED_HEAD
+            rows.append(
+                PoolRow(repo=r, uuid=s.uuid, branch=branch, status=status),
+            )
     return rows

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -89,6 +89,11 @@ class GraphCtx:
     pr_states: dict[str, PRState]
     # Branch checked out in the cwd's pm slot for this repo, or None.
     current_branch: str | None = None
+    # Per-branch project tag. Populated for any branch checked out in a
+    # project-owned pm slot, so the `[<project>]` token can surface on
+    # every row (not just current) and help the reader navigate to the
+    # worktree that hosts the branch.
+    branch_projects: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -146,8 +151,10 @@ def render_graph_node(
     gutter = _row_gutter(is_current=status.is_current if status else False)
     icon = _status_symbol(tracked, pr, status, gctx)
     name_text = _name_label(tracked, pr, status, pos, gctx)
-    tail = _row_tail(tracked, pr, status, pos, gctx.details) if tracked is not None else (
-        _implicit_root_tail(pos)
+    tail = (
+        _row_tail(tracked, pr, status, pos, gctx)
+        if tracked is not None
+        else _implicit_root_tail(pos)
     )
     body = f"{icon}{name_text}{tail}"
     if merged:
@@ -315,11 +322,12 @@ def _row_tail(
     pr: PRState | None,
     status: NodeStatus | None,
     pos: GraphPos,
-    details: Details,
+    gctx: GraphCtx,
 ) -> str:
     """Everything after the branch label: commit group, dirty, suffix, current."""
     parts: list[str] = []
     merged = status is not None and status.merged
+    details = gctx.details
     # Merged branches skip the commit group and dirty marker: they're
     # post-lifecycle, and showing "3 commits unpushed" on a merged row
     # is misleading. Matches gitstack's merged-row rendering.
@@ -330,6 +338,9 @@ def _row_tail(
         if status and status.dirty and details != "none":
             parts.append(fmt.style("[dirty]", fg="red", bold=True))
     parts.append(_suffix_token(tracked, pr, status))
+    project = gctx.branch_projects.get(tracked.branch)
+    if project is not None:
+        parts.append(fmt.style(f"[{project}]", fg="blue", bold=True))
     if status and status.is_current:
         parts.append("(current)")
     _ = pos  # reserved for future color-mode-full line wrapping

@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from project_manager import check as check_mod
 from project_manager.paths import Paths
-from project_manager.project import discovery
+from project_manager.project import branch as branch_mod
+from project_manager.project import db, discovery
 from project_manager.render import Column, Section
 
 _KIND_TO_LABEL: dict[check_mod.Kind, str] = {
@@ -23,20 +24,31 @@ _STATUS_STYLE: dict[str, str] = {
     "ops-owned": "cyan",
 }
 
+_DETACHED_HEAD = "(detached)"
+_NO_BRANCH = "-"
+
 
 @dataclass(frozen=True)
 class ProjectRow:
     project: str
     wt: str
     repo: str
-    slot_uuid: str
+    branch: str
     status: str  # "attached" | "detached" | "drift" | "stale" | "broken"
+
+
+def _branch_style(row: "ProjectRow") -> str:
+    if row.branch == _DETACHED_HEAD:
+        return "italic"
+    if row.status == "detached":
+        return "dim"
+    return ""
 
 
 COLUMNS: list[Column] = [
     Column("Worktree", "wt"),
     Column("Repo", "repo", style="blue"),
-    Column("Slot", "slot_uuid", style="dim"),
+    Column("Branch", "branch", style=_branch_style),
     Column(
         "Status",
         "status",
@@ -51,6 +63,27 @@ def sections(rows: list["ProjectRow"]) -> list[Section]:
     for row in rows:
         by_project.setdefault(row.project, []).append(row)
     return [Section(title=p, rows=rs) for p, rs in sorted(by_project.items())]
+
+
+def _branch_for(paths: Paths, project: str, finding: check_mod.Finding) -> str:
+    """Resolve the branch string for a project-ls row.
+
+    Attached/drift rows read the live slot's HEAD. Detached rows fall
+    back to the saved branch stored in the project db (populated on
+    detach for re-attach restore).
+    """
+    if finding.kind in (check_mod.Kind.ACTIVE, check_mod.Kind.DRIFT):
+        if finding.slot_path is not None:
+            current = branch_mod.read_current_branch(finding.slot_path)
+            if current is not None:
+                return current
+        return _DETACHED_HEAD
+    if finding.kind == check_mod.Kind.DETACHED and finding.wt is not None:
+        db_path = discovery.require_project_db(paths, project)
+        with db.readonly(db_path) as conn:
+            saved = db.get_branch(conn, finding.wt)
+        return saved or _NO_BRANCH
+    return _NO_BRANCH
 
 
 def ls(paths: Paths) -> list[ProjectRow]:
@@ -71,7 +104,7 @@ def ls(paths: Paths) -> list[ProjectRow]:
                     project=project,
                     wt=f.wt,
                     repo=f.repo,
-                    slot_uuid=f.slot_path.name,
+                    branch=_branch_for(paths, project, f),
                     status=label,
                 ),
             )

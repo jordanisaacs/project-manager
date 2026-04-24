@@ -463,11 +463,17 @@ def test_ls_reports_mixed_states(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    attached_foo_branch = head_ref(_forward(pm_env, "demo", "foo").resolve())
+    saved_bar_branch = head_ref(_forward(pm_env, "demo", "bar").resolve())
     detach_mod.detach(pm_env, "demo", wts=["bar"])
     rows = ls_mod.ls(pm_env)
     by_wt = {r.wt: r for r in rows}
     assert by_wt["foo"].status == "attached"
     assert by_wt["bar"].status == "detached"
+    # Attached row reflects whatever the slot's HEAD is right now;
+    # detached row falls back to the saved branch from the project db.
+    assert by_wt["foo"].branch == (attached_foo_branch or "(detached)")
+    assert by_wt["bar"].branch == (saved_bar_branch or "-")
 
 
 def test_ls_drift(pm_env: Paths) -> None:
@@ -480,6 +486,8 @@ def test_ls_drift(pm_env: Paths) -> None:
     _forward(pm_env, "demo", "foo").symlink_to(other_slot.path)
     rows = ls_mod.ls(pm_env)
     assert rows[0].status == "drift"
+    # Drift still reads the live slot's HEAD for the Branch column.
+    assert rows[0].branch == (head_ref(other_slot.path) or "(detached)")
 
 
 # --- branch module unit-ish tests ---

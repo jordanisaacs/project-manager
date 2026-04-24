@@ -65,11 +65,17 @@ def test_pool_ls_free_and_claimed(pm_env: Paths) -> None:
     rows_before = ls_mod.ls(pm_env, "foo")
     assert len(rows_before) == 2
     assert all(r.status == "FREE" for r in rows_before)
+    # Fresh pool slots are checked out in detached HEAD state.
+    assert all(r.branch == "(detached)" for r in rows_before)
 
     create_mod.create(pm_env, "demo", [("foo", "foo")])
     rows_after = ls_mod.ls(pm_env, "foo")
     statuses = sorted(r.status for r in rows_after)
     assert statuses == ["FREE", "demo"]
+    claimed = next(r for r in rows_after if r.status == "demo")
+    # Slot stays on whatever HEAD the pool started with (detached for a
+    # fresh pool slot); attach doesn't force a branch checkout.
+    assert claimed.branch == "(detached)"
 
 
 def test_pool_ls_all_repos(pm_env: Paths) -> None:
