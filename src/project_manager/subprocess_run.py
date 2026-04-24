@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import threading
@@ -96,6 +97,49 @@ def run(
     result.log_events = events
 
     if check and returncode != 0:
+        raise CommandError(format_command_failure(cmd, result))
+    return result
+
+
+async def run_async(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Async sibling of `run` for fanning subprocess work through an event loop.
+
+    Captures stdout/stderr and does not stream — callers that want live
+    log pumping should use the sync `run(..., stream=True)` path. Intended
+    for read-only git operations spawned in parallel via `asyncio.TaskGroup`
+    (see `repo.ls`), where one thread per child would be wasteful.
+    """
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+    cwd_str = str(cwd) if cwd is not None else None
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=cwd_str,
+        env=full_env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_bytes, stderr_bytes = await proc.communicate()
+    stdout = stdout_bytes.decode() if stdout_bytes else ""
+    stderr = stderr_bytes.decode() if stderr_bytes else ""
+
+    result = TaggedCompletedProcess(
+        args=cmd,
+        returncode=proc.returncode or 0,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    result.log_events = []
+
+    if check and result.returncode != 0:
         raise CommandError(format_command_failure(cmd, result))
     return result
 

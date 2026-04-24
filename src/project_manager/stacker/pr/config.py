@@ -103,3 +103,20 @@ def configured_trunk(paths: Paths, repo_name: str) -> str | None:
     if not db_path.exists():
         return None
     return StackerDB(db_path).get_config(repo_name, config_schema.PR_TRUNK)
+
+
+def configured_trunks(paths: Paths) -> dict[str, str]:
+    """Read pr.trunk for every repo in a single SQLite query.
+
+    `pm repo ls` calls this once per invocation so it doesn't reopen the
+    stacker DB N times. Returns an empty dict when the DB is absent.
+    """
+    db_path = paths.stacker_db()
+    if not db_path.exists():
+        return {}
+    with StackerDB(db_path).connect() as conn:
+        rows = conn.execute(
+            "SELECT repo_name, value FROM config WHERE key = ?",
+            (config_schema.PR_TRUNK,),
+        ).fetchall()
+    return {row["repo_name"]: row["value"] for row in rows}
