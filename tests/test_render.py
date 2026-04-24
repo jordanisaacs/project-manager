@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 import pytest
 from rich.console import Console
+from rich.style import Style
+from rich.text import Text
 
 from project_manager import render
 from project_manager.render import Column, JsonShape, Section
@@ -202,6 +206,72 @@ def test_emit_sections_json_uses_jsonshape_keys(
         {"repo": "runtime",  "slots": [{"name": "a", "count": 1}]},
         {"repo": "universe", "slots": [{"name": "b", "count": 2}]},
     ]
+
+
+def test_build_sections_table_is_unstyled_by_default() -> None:
+    """`build_sections_table` is the pure Table-builder behind
+    `emit_sections`; with no `selected_flat_idx` every row has
+    `style=None`, matching what the non-interactive listing has always
+    shown."""
+    secs = [
+        Section(title="first", rows=[_Row("a", 1), _Row("b", 2)]),
+        Section(title="second", rows=[_Row("c", 3)]),
+    ]
+    materialized = [(s.title, list(s.rows)) for s in secs]
+    table = render.build_sections_table(
+        materialized, _COLUMNS, group=render.GroupColumn("G"),
+    )
+    # Row count: 2 + 1 data rows. Header is a separate attribute, not a row.
+    assert len(table.rows) == 3
+    assert table.collapse_padding is False
+    assert all(r.style is None for r in table.rows)
+
+
+def test_build_sections_table_marks_selected_row_reverse() -> None:
+    """With `selected_flat_idx` set, only that row gets the cursor-bar
+    styling and the table collapses adjacent cell padding."""
+    secs = [
+        Section(title="first", rows=[_Row("a", 1), _Row("b", 2)]),
+        Section(title="second", rows=[_Row("c", 3)]),
+    ]
+    materialized = [(s.title, list(s.rows)) for s in secs]
+    table = render.build_sections_table(
+        materialized, _COLUMNS,
+        group=render.GroupColumn("G"), selected_flat_idx=2,
+    )
+    styles = [r.style for r in table.rows]
+    # Flat order: ("first","a"), ("first","b"), ("second","c") — index 2
+    # is the "c" row in the second section.
+    assert table.collapse_padding is True
+    assert styles == [None, None, render._SELECTED_ROW_STYLE]
+    cells = [table.columns[i]._cells[2] for i in range(3)]
+    assert all(isinstance(c, Text) for c in cells)
+    assert cast("Text", cells[0]).style == Style.parse("bold black")
+    assert cast("Text", cells[1]).style == Style.parse("black")
+    assert cast("Text", cells[2]).style == Style.parse("green black")
+
+
+def test_selected_row_uses_background_bar_not_reverse_video() -> None:
+    secs = [Section(title="first", rows=[_Row("a", 1)])]
+    materialized = [(s.title, list(s.rows)) for s in secs]
+    table = render.build_sections_table(
+        materialized, _COLUMNS,
+        group=render.GroupColumn("G"), selected_flat_idx=0,
+    )
+    console = Console(
+        file=io.StringIO(),
+        force_terminal=True,
+        color_system="standard",
+        highlight=False,
+        markup=False,
+        soft_wrap=True,
+        width=80,
+        record=True,
+    )
+    console.print(table)
+    out = console.export_text(styles=True)
+    assert re.search(r"\x1b\[[0-9;]*\b7m", out) is None
+    assert "107m" in out
 
 
 def test_emit_sections_default_jsonshape(

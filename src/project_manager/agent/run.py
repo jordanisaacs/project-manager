@@ -35,6 +35,23 @@ class AgentName(StrEnum):
     CURSOR = "cursor"
 
 
+# Per-agent resume invocation form. Claude and Cursor take `--resume <id>`
+# as a flag; Codex takes `resume <id>` as a subcommand. Documented in
+# `agent/ls.py` next to the Session-id column — kept executable here so
+# `pm agent ls --resume` can materialize the right forwarded argv without
+# duplicating the vendor-syntax knowledge in the picker call site.
+_RESUME_PREFIX: dict[AgentName, tuple[str, ...]] = {
+    AgentName.CLAUDE: ("--resume",),
+    AgentName.CODEX: ("resume",),
+    AgentName.CURSOR: ("--resume",),
+}
+
+
+def resume_args(agent: AgentName, session_id: str) -> tuple[str, ...]:
+    """Build the forwarded args that resume `session_id` for `agent`."""
+    return (*_RESUME_PREFIX[agent], session_id)
+
+
 def build_command(
     agent: AgentName,
     project_dir: Path,

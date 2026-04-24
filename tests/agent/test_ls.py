@@ -206,3 +206,168 @@ def test_ls_runs_sources_concurrently(
     # Serial would be ~3*delay = 0.6s. Parallel should be ~delay = 0.2s.
     # Pick a threshold comfortably below 2*delay to avoid flakes.
     assert elapsed < 2 * delay
+
+
+# --- pm agent ls --resume CLI ---
+
+
+def _prepare_resume_env(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Create a pm project, fake $HOME, chdir inside it. Returns project_dir."""
+    from project_manager.project import create as create_mod
+    git_pool(pm_env, "foo", n=1)
+    create_mod.create(pm_env, "demo", _just(["foo"]))
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    project_dir = pm_env.project("demo")
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setenv("PWD", str(project_dir))
+    return project_dir
+
+
+class _TTYWrapper:
+    """Forward every attribute to the wrapped stream, but report
+    `isatty() == True`. Used to force the CLI's TTY guardrails to pass
+    while keeping capsys-style stderr capture working."""
+
+    def __init__(self, wrapped: object) -> None:
+        self._wrapped = wrapped
+
+    def isatty(self) -> bool:
+        return True
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._wrapped, name)
+
+
+def _force_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys as _sys
+    monkeypatch.setattr(_sys, "stdin", _TTYWrapper(_sys.stdin))
+    monkeypatch.setattr(_sys, "stderr", _TTYWrapper(_sys.stderr))
+
+
+def test_resume_combined_with_json_fails_fast(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_resume_env(pm_env, tmp_path, monkeypatch)
+    from project_manager import cli as cli_mod
+    rc = cli_mod.main(["agent", "ls", "--resume", "--json"])
+    assert rc == 2
+    assert "--resume cannot be combined with --json" in capsys.readouterr().err
+
+
+def test_resume_requires_tty(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_resume_env(pm_env, tmp_path, monkeypatch)
+
+    class NonTTY:
+        def isatty(self) -> bool:
+            return False
+    monkeypatch.setattr("sys.stdin", NonTTY())
+    from project_manager import cli as cli_mod
+    rc = cli_mod.main(["agent", "ls", "--resume"])
+    assert rc == 2
+    assert (
+        "--resume requires an interactive terminal"
+        in capsys.readouterr().err
+    )
+
+
+def test_resume_empty_prints_note_and_exits_zero(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No real sessions → placeholder-only rows; `_resume` short-circuits
+    with a stderr note and never enters the picker."""
+    _prepare_resume_env(pm_env, tmp_path, monkeypatch)
+    _force_tty(monkeypatch)
+
+    # Ensure `tui.pick` isn't reached — loud failure if it is.
+    from project_manager import tui
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("picker should not run when no sessions exist")
+    monkeypatch.setattr(tui, "pick", boom)
+
+    from project_manager import cli as cli_mod
+    rc = cli_mod.main(["agent", "ls", "--resume"])
+    assert rc == 0
+    assert "no sessions to resume" in capsys.readouterr().err
+
+
+def test_resume_cancel_path_exits_zero_without_exec(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picker returns None (user hit Esc) → CLI returns 0, never calls
+    `run_mod.run`, so no execvp happens."""
+    _prepare_resume_env(pm_env, tmp_path, monkeypatch)
+    _force_tty(monkeypatch)
+    # Seed one real session so the empty-short-circuit doesn't fire.
+    _make_codex_row(
+        tmp_path / "home", thread_id="c-1",
+        cwd=str(pm_env.project("demo")),
+        title="t", updated_at=1000,
+    )
+    from project_manager import tui
+    from project_manager.agent import run as run_mod
+    monkeypatch.setattr(tui, "pick", lambda *_a, **_kw: None)
+
+    def no_run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("run should not be called on cancel")
+    monkeypatch.setattr(run_mod, "run", no_run)
+
+    from project_manager import cli as cli_mod
+    rc = cli_mod.main(["agent", "ls", "--resume"])
+    assert rc == 0
+
+
+def test_resume_happy_path_execs_with_agent_resume_args(
+    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On ENTER, CLI dispatches to `run_mod.run(agent, project, forwarded)`
+    where `forwarded` is exactly what `resume_args` produces for that
+    agent — wiring the chosen row's `(agent, session_id, project)` into
+    the per-agent resume form."""
+    _prepare_resume_env(pm_env, tmp_path, monkeypatch)
+    _force_tty(monkeypatch)
+    _make_codex_row(
+        tmp_path / "home", thread_id="thread-xyz",
+        cwd=str(pm_env.project("demo")),
+        title="resume me", updated_at=1000,
+    )
+
+    # Stub the picker to return the one codex row we seeded. Reach into
+    # the already-built rows from inside the picker hook.
+    from project_manager import tui
+    from project_manager.agent import run as run_mod
+
+    captured: dict[str, object] = {}
+
+    def fake_pick(sections, *_args, **_kwargs):
+        # One row per section per agent — return the codex one.
+        for sec in sections:
+            for row in sec.rows:
+                if row.agent == "codex":
+                    return row
+        raise AssertionError("no codex row in picker input")
+
+    def fake_run(agent, project, forwarded):
+        captured["agent"] = agent
+        captured["project"] = project
+        captured["forwarded"] = forwarded
+        raise SystemExit(0)  # mimic execvp replacing the process
+
+    monkeypatch.setattr(tui, "pick", fake_pick)
+    monkeypatch.setattr(run_mod, "run", fake_run)
+
+    from project_manager import cli as cli_mod
+    with pytest.raises(SystemExit):
+        cli_mod.main(["agent", "ls", "--resume"])
+
+    assert captured["agent"] is run_mod.AgentName.CODEX
+    assert captured["project"] == "demo"
+    assert captured["forwarded"] == ("resume", "thread-xyz")

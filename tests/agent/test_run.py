@@ -23,6 +23,22 @@ def test_agent_name_members_are_exhaustive() -> None:
     assert {a.value for a in AgentName} == {"claude", "codex", "cursor"}
 
 
+# --- resume_args ---
+
+
+def test_resume_args_claude() -> None:
+    assert run_mod.resume_args(AgentName.CLAUDE, "abc") == ("--resume", "abc")
+
+
+def test_resume_args_codex_uses_subcommand_form() -> None:
+    # Codex takes `resume <id>` as a subcommand (no `--resume` flag).
+    assert run_mod.resume_args(AgentName.CODEX, "xyz") == ("resume", "xyz")
+
+
+def test_resume_args_cursor() -> None:
+    assert run_mod.resume_args(AgentName.CURSOR, "uvw") == ("--resume", "uvw")
+
+
 # --- build_command ---
 
 

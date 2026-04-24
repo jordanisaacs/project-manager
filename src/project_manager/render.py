@@ -22,6 +22,7 @@ from typing import Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
 
 from rich import box
 from rich.console import Console
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
@@ -34,6 +35,8 @@ from project_manager import config as _config
 # wrap these helpers.
 
 T = TypeVar("T")
+_SELECTED_ROW_STYLE = Style(bgcolor="bright_white")
+_SELECTED_TEXT_STYLE = Style(color="black")
 
 
 @dataclass(frozen=True)
@@ -181,21 +184,53 @@ def emit_sections(
         return
     if not materialized:
         return
+    t = build_sections_table(materialized, columns, group=group)
+    _emit_table_capture(console(), t, indent="")
+
+
+def build_sections_table(
+    materialized: list[tuple[str, list[T]]],
+    columns: list[Column[T]],
+    *,
+    group: GroupColumn = GroupColumn(),
+    selected_flat_idx: int | None = None,
+) -> Table:
+    """Build the `Table` that `emit_sections` would print, without printing.
+
+    Factored so the interactive picker (`tui.pick`) can feed a freshly
+    built Table into `rich.live.Live` on every keystroke. `emit_sections`
+    composes this, so there is one renderer for the grouped table.
+
+    Takes sections pre-materialized as `(title, rows)` tuples (the form
+    `emit_sections` already builds internally) so this function stays
+    cheap to call in a per-keystroke loop — no re-iteration of the
+    caller's sections.
+
+    `selected_flat_idx` is a 0-based index over the flattened row stream
+    (section-order, row-order within section). The matched row is drawn
+    as a cursor bar: one shared row background, with selected text
+    recolored on top of it. While a selection is active we also collapse
+    adjacent cell padding so the highlight fills the inter-column gaps
+    instead of looking like separate highlighted cells. `None` (the
+    default) draws no highlight, matching `emit_sections`' original
+    output byte-for-byte.
+    """
     flat_rows = [r for _, rs in materialized for r in rs]
     other_widths = _compute_widths(flat_rows, columns)
     group_width = max(
         len(group.title),
         *(len(title) for title, _ in materialized),
-    )
-    c = console()
+    ) if materialized else len(group.title)
     t = Table(
         box=box.HORIZONTALS, show_edge=False, pad_edge=False, padding=(0, 2),
+        collapse_padding=selected_flat_idx is not None,
         show_header=True, header_style="dim",
     )
     t.add_column(group.title, min_width=group_width)
     for i, col in enumerate(columns):
         t.add_column(col.title, min_width=other_widths[i])
     last_section_idx = len(materialized) - 1
+    flat_idx = 0
     for section_idx, (title, rows) in enumerate(materialized):
         last_row_idx = len(rows) - 1
         for i, r in enumerate(rows):
@@ -205,12 +240,32 @@ def emit_sections(
             is_group_boundary = (
                 i == last_row_idx and section_idx < last_section_idx
             )
+            is_selected = flat_idx == selected_flat_idx
             t.add_row(
-                Text(title if i == 0 else "", style=group.style),
-                *(col.render_text(r) for col in columns),
+                Text(
+                    title if i == 0 else "",
+                    style=_selected_style(group.style) if is_selected
+                    else group.style,
+                ),
+                *(
+                    Text(
+                        col.render_cell(r),
+                        style=_selected_style(col.render_style(r))
+                        if is_selected else (col.render_style(r) or ""),
+                    )
+                    for col in columns
+                ),
                 end_section=is_group_boundary,
+                style=_SELECTED_ROW_STYLE if is_selected else None,
             )
-    _emit_table_capture(c, t, indent="")
+            flat_idx += 1
+    return t
+
+
+def _selected_style(base: str | None) -> Style:
+    """Map a cell's normal style to the selected-row foreground style."""
+    parsed = Style.parse(base) if base else Style()
+    return parsed + _SELECTED_TEXT_STYLE
 
 
 def emit_json(payload: object) -> None:
