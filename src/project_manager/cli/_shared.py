@@ -12,6 +12,9 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 
+from project_manager.paths import Paths
+from project_manager.project import current, discovery
+
 root = App(
     name="pm",
     help="Project manager: pool of git worktrees bound to named projects via symlinks.",
@@ -73,6 +76,43 @@ class RepoFlag:
     repo: Annotated[
         str | None, Parameter(help="defaults to the cwd's pm slot"),
     ] = None
+
+
+@Parameter(name="*")
+@dataclass(frozen=True)
+class ProjectOrAllScope:
+    """`-p/--project <name>` or `--all`; mutually exclusive.
+
+    With neither set, the resolver defers to `detect_current_project`
+    and falls back to every project when the cwd is not inside one —
+    so commands work both from inside a project (single-project view)
+    and from anywhere else (all-projects view).
+    """
+
+    project: Annotated[
+        str | None,
+        Parameter(name=("-p", "--project"), help="limit to one project"),
+    ] = None
+    all: Annotated[
+        bool,
+        Parameter(name="--all", negative="", help="every project"),
+    ] = False
+
+
+def resolve_project_scope(paths: Paths, scope: ProjectOrAllScope) -> list[str]:
+    """Turn a `ProjectOrAllScope` into a concrete list of project names."""
+    if scope.project is not None and scope.all:
+        raise ValueError("pass either --project or --all, not both")
+    if scope.project is not None:
+        # Validate existence so a typo fails fast instead of returning [].
+        discovery.require_project_db(paths, scope.project)
+        return [scope.project]
+    if scope.all:
+        return [name for name, _ in discovery.list_project_dbs(paths)]
+    detected = current.detect_current_project(paths)
+    if detected is not None:
+        return [detected]
+    return [name for name, _ in discovery.list_project_dbs(paths)]
 
 
 @Parameter(name="*")

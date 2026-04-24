@@ -162,6 +162,8 @@ def emit_sections(
             for title, rows in materialized
         ])
         return
+    if not materialized:
+        return
     flat_rows = [r for _, rs in materialized for r in rs]
     other_widths = _compute_widths(flat_rows, columns)
     group_width = max(

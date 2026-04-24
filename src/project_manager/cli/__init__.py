@@ -7,6 +7,7 @@ the standard `pm: <msg>` stderr line and exit code 2.
 """
 import sys
 
+from project_manager.agent.cli import agent_app as _agent_app  # noqa: F401
 from project_manager.errors import CommandError, ProjectError
 from project_manager.pool.cli import pool_app as _pool_app  # noqa: F401
 from project_manager.pool.slot import PoolExhaustedError
