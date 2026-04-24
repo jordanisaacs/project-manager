@@ -15,9 +15,10 @@ dict`; otherwise the default serializer walks dataclass fields and coerces
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, fields, is_dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar, cast, runtime_checkable
+from typing import Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
 
 from rich import box
 from rich.console import Console
@@ -209,6 +210,69 @@ def emit_json_string(s: str) -> None:
 def emit_markup(s: str) -> None:
     """Print a rich-markup string (markup resolved; auto-stripped on pipe)."""
     console().print(s, markup=True, highlight=False)
+
+
+@dataclass(frozen=True)
+class SubprocessLogLine:
+    """One line of subprocess output, tagged with when and where it came from.
+
+    Built by `subprocess_run.run` for every line read from a child's stdout
+    or stderr; fed back here for formatting. Fields are the raw ingredients
+    of the prefix, not a pre-formatted string, so every rendering path
+    (live emit, captured error message, future log file) shares one
+    formatter.
+    """
+
+    timestamp: datetime
+    pid: int
+    cmd: str
+    stream: Literal["out", "err"]
+    text: str
+
+
+def emit_subprocess_line(line: SubprocessLogLine) -> None:
+    """Print one tagged subprocess line to stderr, live.
+
+    Used for `stream=True` subprocesses so the user watches output as the
+    child emits it, with per-line attribution for parallel/concurrent runs.
+    Always stderr — subprocess output must never pollute our stdout, which
+    can be carrying JSON.
+    """
+    console(stderr=True).print(_subprocess_line_text(line), highlight=False)
+
+
+def format_subprocess_lines(lines: Iterable[SubprocessLogLine]) -> str:
+    """Render a sequence of tagged lines into a single string.
+
+    Used by `format_command_failure` to build the `CommandError` message.
+    Rendered through a stderr `Console` so ANSI styling appears only when
+    stderr is a TTY.
+    """
+    c = console(stderr=True)
+    with c.capture() as cap:
+        for line in lines:
+            c.print(_subprocess_line_text(line), highlight=False)
+    return cap.get().rstrip("\n")
+
+
+def _subprocess_line_text(line: SubprocessLogLine) -> Text:
+    """Build the styled `rich.text.Text` for one tagged subprocess line.
+
+    Styling: prefix is dim/bold so the eye skips past it; `[out]` is green
+    and `[err]` is yellow so a wall of output still shows errors at a
+    glance. No markup parsing — subprocess output can contain `[...]`
+    safely.
+    """
+    ts = line.timestamp.strftime("%H:%M:%S") + f".{line.timestamp.microsecond // 1000:03d}"
+    stream_style = "green" if line.stream == "out" else "yellow"
+    t = Text()
+    t.append(f"[{ts} ", style="dim")
+    t.append(f"pid={line.pid} ", style="dim")
+    t.append(line.cmd, style="italic dim")
+    t.append("] ", style="dim")
+    t.append(f"[{line.stream}] ", style=stream_style)
+    t.append(line.text)
+    return t
 
 
 def _render_table(
