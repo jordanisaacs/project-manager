@@ -64,6 +64,50 @@ def test_display_rejects_unknown_timezone(
         config.display()
 
 
+def test_agents_defaults_to_empty_commands(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("PM_CONFIG", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert config.agents().commands == {}
+
+
+def test_agents_reads_commands_table(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[agents.commands]\n'
+        'claude = "isaac"\n'
+        'codex = "isaac codex --"\n'
+        'cursor = "agent"\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    cmds = config.agents().commands
+    assert cmds == {
+        "claude": "isaac",
+        "codex": "isaac codex --",
+        "cursor": "agent",
+    }
+
+
+def test_agents_rejects_non_string_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[agents.commands]\nclaude = 42\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    with pytest.raises(ValueError, match=r"\[agents\.commands\]\.claude"):
+        config.agents()
+
+
 def test_xdg_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("PM_CONFIG", raising=False)
     xdg = tmp_path / "xdg"

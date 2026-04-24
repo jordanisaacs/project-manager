@@ -8,3 +8,4 @@ agent_app = root.command(
 )
 
 from . import ls as _ls  # noqa: F401,E402
+from . import run as _run  # noqa: F401,E402

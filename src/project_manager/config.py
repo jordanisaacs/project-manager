@@ -26,6 +26,21 @@ class Display:
     timezone: tzinfo | None = None
 
 
+@dataclass(frozen=True)
+class Agents:
+    """Agent-launch preferences loaded from `[agents]` in config.
+
+    `commands` maps an agent name (matching `AgentName.value` in
+    `project_manager.agent.run`) to a shell-like command string —
+    parsed by `shlex.split` at exec time, with forwarded user args
+    appended. Empty dict means no agents are configured; any
+    `pm agent <name>` invocation will raise with a pointer to the
+    config file.
+    """
+
+    commands: dict[str, str]
+
+
 def _expand(value: str) -> Path:
     return Path(os.path.expandvars(value)).expanduser()
 
@@ -92,3 +107,40 @@ def display() -> Display:
             f"unknown timezone '{tz_name}' in [display].timezone — "
             f"expected an IANA name like 'America/Los_Angeles'",
         ) from e
+
+
+def agents() -> Agents:
+    """Load the `[agents.commands]` table.
+
+    Same file-reading pattern as `display()` — no caching, so tests
+    that set `PM_CONFIG` via monkeypatch observe their own config
+    even when a previous test read a different one.
+
+    Schema:
+        [agents.commands]
+        claude = "isaac"
+        codex  = "isaac codex --"
+        cursor = "agent"
+    """
+    config_path = _resolve_config_path()
+    if config_path is None:
+        return Agents(commands={})
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    commands_raw = data.get("agents", {}).get("commands", {})
+    if not isinstance(commands_raw, dict):
+        # ValueError (not TypeError) because the source is a user-edited
+        # config file, not an internal API call — ValueError is what
+        # cli/__init__.py:main catches and renders as `pm: <msg>`.
+        raise ValueError(  # noqa: TRY004
+            '[agents.commands] must be a table of name = "command"',
+        )
+    commands: dict[str, str] = {}
+    for key, value in commands_raw.items():
+        if not isinstance(value, str):
+            raise ValueError(  # noqa: TRY004
+                f"[agents.commands].{key} must be a string, "
+                f"got {type(value).__name__}",
+            )
+        commands[str(key)] = value
+    return Agents(commands=commands)
