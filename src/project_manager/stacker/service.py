@@ -237,3 +237,11 @@ class StackerService:
 
     def list_config(self, repo_name: str) -> list[tuple[str, str]]:
         return pr_list_config(self._ctx, repo_name)
+
+    # --- pr cache ---
+
+    def delete_pr_state(self, repo_name: str, branch: str) -> bool:
+        return self._ctx.db.delete_pr_state(repo_name, branch)
+
+    def delete_all_pr_state(self, repo_name: str) -> int:
+        return self._ctx.db.delete_all_pr_state(repo_name)

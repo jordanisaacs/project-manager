@@ -22,3 +22,4 @@ from . import repair as _repair  # noqa: F401,E402
 from . import reparent as _reparent  # noqa: F401,E402
 from . import split as _split  # noqa: F401,E402
 from . import sync as _sync  # noqa: F401,E402
+from . import unlink_pr as _unlink_pr  # noqa: F401,E402

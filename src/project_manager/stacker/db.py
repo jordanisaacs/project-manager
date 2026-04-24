@@ -308,12 +308,21 @@ class StackerDB:
                 ),
             )
 
-    def delete_pr_state(self, repo_name: str, branch: str) -> None:
+    def delete_pr_state(self, repo_name: str, branch: str) -> bool:
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 "DELETE FROM pr_state WHERE repo_name = ? AND branch = ?",
                 (repo_name, branch),
             )
+            return cursor.rowcount > 0
+
+    def delete_all_pr_state(self, repo_name: str) -> int:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM pr_state WHERE repo_name = ?",
+                (repo_name,),
+            )
+            return cursor.rowcount
 
 
 def _row_to_branch(row: sqlite3.Row) -> TrackedBranch:
