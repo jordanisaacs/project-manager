@@ -66,7 +66,9 @@ def run(
         for line in pipe:
             raw_buf.append(line)
             event = SubprocessLogLine(
-                timestamp=datetime.now(tz=UTC).astimezone(),
+                # Keep source timestamps in UTC; render converts to
+                # the user-configured display zone at format time.
+                timestamp=datetime.now(tz=UTC),
                 pid=pid,
                 cmd=cmd_name,
                 stream=stream_label,

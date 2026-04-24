@@ -15,7 +15,7 @@ dict`; otherwise the default serializer walks dataclass fields and coerces
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime
+from datetime import datetime, tzinfo
 from enum import Enum
 from pathlib import Path
 from typing import Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
@@ -24,6 +24,14 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+
+from project_manager import config as _config
+
+# Time formatting lives here so every command rendering a timestamp
+# hits the same code path — one place to own timezone conversion, one
+# format per kind of thing being shown. The `_config` alias keeps the
+# `config` name free for local `config` parameters in callers that
+# wrap these helpers.
 
 T = TypeVar("T")
 
@@ -257,6 +265,43 @@ def format_subprocess_lines(lines: Iterable[SubprocessLogLine]) -> str:
     return cap.get().rstrip("\n")
 
 
+_DATETIME_FMT = "%Y-%m-%d %H:%M"
+_LOG_TIME_FMT = "%H:%M:%S"
+
+
+def format_datetime(dt: datetime) -> str:
+    """`YYYY-MM-DD HH:MM` in the configured display timezone.
+
+    The shared path for "when did this happen?" columns in listing
+    commands (session lists, etc.). Minute precision is the right
+    granularity for human-scan tables — seconds add noise; the exact
+    instant is preserved in JSON output via `isoformat()`.
+    """
+    return dt.astimezone(_display_tz()).strftime(_DATETIME_FMT)
+
+
+def format_log_time(dt: datetime) -> str:
+    """`HH:MM:SS.mmm` in the configured display timezone.
+
+    Used for per-line subprocess log prefixes where sub-second ordering
+    matters (interleaved stdout/stderr from parallel children). Only
+    the time of day is shown — the date is implicit in "this run".
+    """
+    base = dt.astimezone(_display_tz()).strftime(_LOG_TIME_FMT)
+    return f"{base}.{dt.microsecond // 1000:03d}"
+
+
+def _display_tz() -> tzinfo | None:
+    """Fetch the user-configured display tz, or None for system local.
+
+    `config.display()` re-reads the TOML each call — negligible given
+    how few timestamps a listing command prints, and useful because
+    tests set their own PM_CONFIG via monkeypatch (a cached return
+    would leak across test cases).
+    """
+    return _config.display().timezone
+
+
 def _subprocess_line_text(line: SubprocessLogLine) -> Text:
     """Build the styled `rich.text.Text` for one tagged subprocess line.
 
@@ -265,7 +310,7 @@ def _subprocess_line_text(line: SubprocessLogLine) -> Text:
     glance. No markup parsing — subprocess output can contain `[...]`
     safely.
     """
-    ts = line.timestamp.strftime("%H:%M:%S") + f".{line.timestamp.microsecond // 1000:03d}"
+    ts = format_log_time(line.timestamp)
     stream_style = "green" if line.stream == "out" else "yellow"
     t = Text()
     t.append(f"[{ts} ", style="dim")

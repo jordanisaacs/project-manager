@@ -1,3 +1,4 @@
+import zoneinfo
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,44 @@ def test_pm_config_overrides(pm_env) -> None:
     assert pm_env.worktrees.is_dir()
     assert pm_env.projects.is_dir()
     assert pm_env.stacker_root.is_dir()
+
+
+def test_display_defaults_to_none_timezone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("PM_CONFIG", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # No config file at all → system-local behavior.
+    assert config.display().timezone is None
+
+
+def test_display_reads_configured_timezone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[display]\ntimezone = "America/Los_Angeles"\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    display = config.display()
+    assert display.timezone == zoneinfo.ZoneInfo("America/Los_Angeles")
+
+
+def test_display_rejects_unknown_timezone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[display]\ntimezone = "Mars/Olympus"\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    with pytest.raises(ValueError, match="unknown timezone"):
+        config.display()
 
 
 def test_xdg_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

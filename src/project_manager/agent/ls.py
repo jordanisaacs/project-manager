@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 
+from project_manager import render
 from project_manager.agent import scope
 from project_manager.agent.sources import REGISTRY, SessionEntry
 from project_manager.paths import Paths
@@ -83,8 +84,11 @@ COLUMNS: list[Column[AgentRow]] = [
     Column("Title", lambda r: _truncate(r.title, _TITLE_DISPLAY)),
     Column(
         "Last Active",
+        # Goes through `render.format_datetime` so every listing
+        # command that shows a timestamp applies the same display-tz
+        # rule (configured via `[display].timezone`).
         lambda r: (
-            r.last_active.astimezone().strftime("%Y-%m-%d %H:%M")
+            render.format_datetime(r.last_active)
             if r.last_active is not None else ""
         ),
     ),

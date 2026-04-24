@@ -295,3 +295,55 @@ def test_column_callable_value_and_callable_style(
 def test_default_to_dict_raises_on_non_dataclass_non_dict() -> None:
     with pytest.raises(TypeError, match="cannot serialize"):
         render._default_to_dict(42)
+
+
+# --- time formatting helpers ---
+
+
+def _write_tz_config(tmp_path: Path, tz_name: str) -> Path:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        f'[display]\ntimezone = "{tz_name}"\n',
+    )
+    return cfg
+
+
+def test_format_datetime_applies_configured_timezone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Every listing command rendering a time goes through
+    `render.format_datetime` so `[display].timezone` is honored in one
+    place — not re-implemented per handler.
+    """
+    from datetime import UTC, datetime
+    monkeypatch.setenv("PM_CONFIG", str(_write_tz_config(tmp_path, "America/Los_Angeles")))
+    # 2026-04-24 07:00 UTC -> 2026-04-24 00:00 PDT (-7h DST offset).
+    dt = datetime(2026, 4, 24, 7, 0, tzinfo=UTC)
+    assert render.format_datetime(dt) == "2026-04-24 00:00"
+
+
+def test_format_log_time_applies_configured_timezone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+    monkeypatch.setenv("PM_CONFIG", str(_write_tz_config(tmp_path, "America/Los_Angeles")))
+    dt = datetime(2026, 4, 24, 7, 0, 45, 123456, tzinfo=UTC)
+    # Same wall clock math + ms precision preserved for interleaved
+    # subprocess-line ordering.
+    assert render.format_log_time(dt) == "00:00:45.123"
+
+
+def test_format_datetime_falls_back_to_system_tz_when_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from datetime import UTC, datetime
+    monkeypatch.delenv("PM_CONFIG", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    # Only asserting it doesn't crash and produces a plausible string
+    # — system tz varies between CI runners, so exact match is brittle.
+    dt = datetime(2026, 4, 24, 7, 0, tzinfo=UTC)
+    out = render.format_datetime(dt)
+    assert len(out) == len("2026-04-24 07:00")
