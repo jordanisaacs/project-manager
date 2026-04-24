@@ -31,6 +31,9 @@ from .models import (
     WorktreeInit,
 )
 from .ops import (
+    absorb as absorb_ops,
+)
+from .ops import (
     continue_abort,
     guard,
     init,
@@ -178,6 +181,9 @@ class StackerService:
         self, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE
     ) -> str:
         return sync_ops.sync(self._ctx, target, spec)
+
+    def absorb(self, target: SelectorTarget) -> str:
+        return absorb_ops.absorb(self._ctx, target)
 
     def repair(self, target: SelectorTarget, base_ref: str) -> str:
         return sync_ops.repair(self._ctx, target, base_ref)

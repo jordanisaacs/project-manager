@@ -18,6 +18,15 @@ if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
 
 
+# Final message emitted when a single-branch op walks off the end of its
+# commit list cleanly. downstream_sync has its own completion path because it
+# advances a queue rather than terminating on one branch.
+_SINGLE_OP_DONE: dict[str, str] = {
+    "local_sync": "Sync complete.",
+    "local_absorb": "Absorb complete.",
+}
+
+
 @dataclass(frozen=True)
 class DriveHandle:
     """Worktree + pool slot currently bound to an in-flight op.
@@ -37,9 +46,10 @@ def sync_plan(
     repo_path = ctx.paths.repo(tracked.parent_repo_name)
     parent_head = git.rev_parse(repo_path, tracked.parent_branch)
     start_head = git.rev_parse(slot_path, "HEAD")
-    commit_list = git.rev_list(
-        slot_path, f"{tracked.managed_base_commit}..{start_head}"
-    )
+    # Drop commits whose patch is already on the parent (mirrors `git rebase`'s
+    # default). Keeps absorb→sync flows conflict-free and makes the parent the
+    # source of truth whenever both sides carry the same logical change.
+    commit_list = git.rev_list_picking(slot_path, parent_head, start_head)
     return parent_head, start_head, commit_list
 
 
@@ -108,9 +118,10 @@ def run_until_pause_or_finish(
             assert op
             handle = None
             continue
-        if op.op_type == "local_sync":
+        single_op_done = _SINGLE_OP_DONE.get(op.op_type)
+        if single_op_done is not None:
             ctx.db.clear_operation(repo_name)
-            return fmt.finish(ctx, logs, "Sync complete.")
+            return fmt.finish(ctx, logs, single_op_done)
         if op.op_type == "downstream_sync":
             if op.current_index >= len(op.queue):
                 ctx.db.clear_operation(repo_name)
@@ -186,6 +197,8 @@ def finalize_local_op(
     ctx: StackerCtx, op: OperationState, slot_path: Path
 ) -> str | None:
     assert op.branch
+    if op.op_type == "local_absorb":
+        return _finalize_absorb(ctx, op, slot_path)
     tracked = require_tracked(
         ctx, SelectorTarget(repo_name=op.repo_name, branch=op.branch)
     )
@@ -218,6 +231,38 @@ def finalize_local_op(
     return None
 
 
+def _finalize_absorb(
+    ctx: StackerCtx, op: OperationState, slot_path: Path
+) -> str:
+    """Absorb variant: parent advanced by child's commits; child untouched.
+
+    Intentionally does NOT call `require_tracked` or `upsert_branch` with the
+    sync-shaped payload — `op.branch` here is the *parent*, and its row (if
+    tracked) must keep its own `managed_base_commit` / `parent_branch`
+    pointing at its own lineage. We only advance the parent's
+    `last_clean_head`; if the parent is trunk (no row), the git-ref update in
+    the slot is the entire state change.
+    """
+    assert op.branch
+    parent_new_head = git.rev_parse(slot_path, "HEAD")
+    parent_row = ctx.db.get_branch(op.repo_name, op.branch)
+    if parent_row is not None:
+        ctx.db.upsert_branch(
+            TrackedBranch(
+                repo_name=parent_row.repo_name,
+                branch=parent_row.branch,
+                parent_repo_name=parent_row.parent_repo_name,
+                parent_branch=parent_row.parent_branch,
+                managed_base_commit=parent_row.managed_base_commit,
+                last_synced_parent_commit=parent_row.last_synced_parent_commit,
+                last_clean_head=parent_new_head,
+            )
+        )
+    ctx.db.clear_operation(op.repo_name)
+    parent_label = selectors.selector_for(op.repo_name, op.branch)
+    return f"Absorb complete. {parent_label} at {fmt.short(parent_new_head)}."
+
+
 def recompute_progress(path: Path, op: OperationState) -> int:
     if not op.target_parent_head:
         return op.next_commit_index
@@ -233,12 +278,23 @@ def recompute_progress(path: Path, op: OperationState) -> int:
 def failure_message(op: OperationState, slot_path: Path) -> str:
     assert op.branch
     inspect_selector = selectors.selector_for(op.repo_name, op.branch)
-    parent_selector = selectors.selector_for(op.repo_name, op.parent_branch or "")
+    other_selector = selectors.selector_for(op.repo_name, op.parent_branch or "")
+    # For sync, op.branch is the child being rebased and op.parent_branch is
+    # where we're syncing onto. For absorb the mapping flips: op.branch is the
+    # parent being updated, op.parent_branch is the source child. Headline
+    # wording follows that.
+    if op.op_type == "local_absorb":
+        headline = (
+            f"Absorb paused on {inspect_selector} while absorbing from "
+            f"{other_selector}."
+        )
+    else:
+        headline = (
+            f"Sync paused on {inspect_selector} while syncing onto "
+            f"{other_selector}."
+        )
     cherry = git.cherry_pick_in_progress(slot_path)
-    parts = [
-        f"Sync paused on {inspect_selector} while syncing onto {parent_selector}.\n"
-        f"Cherry-pick in progress: {'yes' if cherry else 'no'}"
-    ]
+    parts = [f"{headline}\nCherry-pick in progress: {'yes' if cherry else 'no'}"]
     if op.error_message:
         parts.append(f"Git says: {op.error_message}")
     parts.append(f"Worktree at: {slot_path}")

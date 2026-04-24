@@ -151,6 +151,22 @@ def rev_count(path: Path, revspec: str) -> int:
     return int(out or "0")
 
 
+def rev_list_picking(path: Path, left: str, right: str) -> list[str]:
+    """Right-side commits not already patch-id-equivalent to anything on left.
+
+    Uses git's native upstream-equivalent filter: `A...B` walks the symmetric
+    difference back to the merge base, `--cherry-pick` excludes commits whose
+    patch-id appears on the other side, and `--right-only` keeps only B's
+    side. Mirrors what `git rebase` does by default to drop already-applied
+    commits. `--reverse` matches `rev_list` so cherry-picks run oldest-first.
+    """
+    out = git(
+        path, "rev-list", "--reverse", "--cherry-pick", "--right-only",
+        "--no-merges", f"{left}...{right}",
+    ).stdout.strip()
+    return [line for line in out.splitlines() if line]
+
+
 def log_subject_and_author(path: Path, revspec: str) -> list[tuple[str, str]]:
     out = git(path, "log", "--reverse", "--format=%s%x09%an", revspec).stdout.strip()
     entries: list[tuple[str, str]] = []
@@ -211,7 +227,15 @@ def has_tracked_changes(path: Path) -> bool:
 
 def cherry_pick_in_progress(path: Path) -> bool:
     cherry_pick_head = git(path, "rev-parse", "--git-path", "CHERRY_PICK_HEAD").stdout.strip()
-    return Path(cherry_pick_head).exists()
+    # `--git-path` returns a path relative to the repo working tree when
+    # called on the primary worktree (e.g. `.git/CHERRY_PICK_HEAD`) but an
+    # absolute path for linked worktrees. Resolve against `path` so the
+    # existence check works in both shapes — a latent bug before absorb
+    # introduced primary-worktree cherry-picks.
+    resolved = Path(cherry_pick_head)
+    if not resolved.is_absolute():
+        resolved = path / resolved
+    return resolved.exists()
 
 
 def has_untracked_files(path: Path) -> bool:

@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from project_manager.paths import Paths
 from project_manager.render import Column
 from project_manager.stacker import config_schema, git
+from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import RepoPRConfig
 
 from .resolve import push_remote_slug
@@ -86,3 +88,18 @@ def unset_config(ctx: StackerCtx, repo_name: str, key: str) -> bool:
 
 def list_config(ctx: StackerCtx, repo_name: str) -> list[tuple[str, str]]:
     return ctx.db.list_config(repo_name)
+
+
+def configured_trunk(paths: Paths, repo_name: str) -> str | None:
+    """Return stacker's configured pr.trunk for a repo, or None.
+
+    Public read-only accessor for callers outside the stacker subsystem
+    (e.g. `pm repo ls`) that want to know the merge target without having
+    to construct a full StackerCtx. Returns None when the stacker DB
+    doesn't exist yet or the key is unset — the caller decides how to
+    fall back.
+    """
+    db_path = paths.stacker_db()
+    if not db_path.exists():
+        return None
+    return StackerDB(db_path).get_config(repo_name, config_schema.PR_TRUNK)

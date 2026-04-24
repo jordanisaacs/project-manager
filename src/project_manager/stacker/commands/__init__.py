@@ -8,6 +8,7 @@ stacker_app = root.command(
 )
 
 from . import abort as _abort  # noqa: F401,E402
+from . import absorb as _absorb  # noqa: F401,E402
 from . import config as _config  # noqa: F401,E402
 from . import continue_ as _continue  # noqa: F401,E402
 from . import create as _create  # noqa: F401,E402

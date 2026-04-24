@@ -60,6 +60,7 @@ def test_repo_ls_clean_on_branch(pm_env: Paths) -> None:
     assert row.branch == "main"
     assert row.dirty is False
     assert row.has_upstream is False
+    assert row.fetch_needed is None
 
 
 def test_repo_ls_detached(pm_env: Paths) -> None:
@@ -107,6 +108,91 @@ def test_repo_ls_ahead_behind(pm_env: Paths, tmp_path: Path) -> None:
     rows = ls_mod.ls(pm_env)
     assert rows[0].ahead == 1
     assert rows[0].behind == 1
+
+
+def test_repo_ls_fetch_needed_when_remote_moves(
+    pm_env: Paths, tmp_path: Path,
+) -> None:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _init_repo(upstream, branch="main")
+    local = pm_env.repo("foo")
+    _clone_with_upstream(upstream, local)
+
+    # Fresh clone: local tracking ref matches remote tip.
+    rows = ls_mod.ls(pm_env)
+    assert rows[0].fetch_needed is False
+
+    # Upstream moves but we do NOT fetch → remote tip has diverged from @{u}.
+    _commit_file(upstream, "remote.txt")
+    rows = ls_mod.ls(pm_env)
+    assert rows[0].fetch_needed is True
+
+    # After a fetch, @{u} catches up → synced again.
+    subprocess.run(["git", "-C", str(local), "fetch", "-q"], check=True)
+    rows = ls_mod.ls(pm_env)
+    assert rows[0].fetch_needed is False
+
+
+def test_repo_ls_expected_branch_from_origin_head(
+    pm_env: Paths, tmp_path: Path,
+) -> None:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _init_repo(upstream, branch="neon-main")
+    local = pm_env.repo("hadron")
+    _clone_with_upstream(upstream, local, branch="neon-main")
+
+    # Origin HEAD points at neon-main; on the trunk → no flag.
+    rows = ls_mod.ls(pm_env, check_remote=False)
+    assert rows[0].expected_branch == "neon-main"
+    assert rows[0].branch == "neon-main"
+
+    # Switch to a feature branch → expected stays neon-main, current differs.
+    subprocess.run(
+        ["git", "-C", str(local), "checkout", "-q", "-b", "stack/foo"],
+        check=True,
+    )
+    rows = ls_mod.ls(pm_env, check_remote=False)
+    assert rows[0].branch == "stack/foo"
+    assert rows[0].expected_branch == "neon-main"
+
+
+def test_repo_ls_expected_branch_from_stacker_config(
+    pm_env: Paths, tmp_path: Path,
+) -> None:
+    from project_manager.stacker import config_schema
+    from project_manager.stacker.db import StackerDB
+
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _init_repo(upstream, branch="main")
+    local = pm_env.repo("foo")
+    _clone_with_upstream(upstream, local)
+
+    # Stacker config should win over origin/HEAD (here origin/HEAD is main).
+    db_path = pm_env.stacker_db()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    StackerDB(db_path).set_config("foo", config_schema.PR_TRUNK, "release")
+
+    rows = ls_mod.ls(pm_env, check_remote=False)
+    assert rows[0].expected_branch == "release"
+
+
+def test_repo_ls_offline_skips_remote_check(
+    pm_env: Paths, tmp_path: Path,
+) -> None:
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _init_repo(upstream, branch="main")
+    local = pm_env.repo("foo")
+    _clone_with_upstream(upstream, local)
+    _commit_file(upstream, "remote.txt")
+
+    # With the remote check disabled, fetch_needed stays unknown even though
+    # the upstream has moved.
+    rows = ls_mod.ls(pm_env, check_remote=False)
+    assert rows[0].fetch_needed is None
 
 
 def test_repo_pull_fast_forwards(pm_env: Paths, tmp_path: Path) -> None:

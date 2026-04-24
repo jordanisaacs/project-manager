@@ -54,3 +54,67 @@ def ahead_behind(repo: Path) -> tuple[int, int] | None:
         return None
     behind, ahead = int(parts[0]), int(parts[1])
     return ahead, behind
+
+
+def rev_parse(repo: Path, ref: str) -> str | None:
+    """Resolve a ref to its SHA, or None if the ref does not resolve."""
+    result = run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", ref],
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def branch_exists(repo: Path, branch: str) -> bool:
+    """True if a local branch with this name exists."""
+    result = run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "-q",
+         f"refs/heads/{branch}"],
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def origin_head_branch(repo: Path) -> str | None:
+    """Branch name that `refs/remotes/origin/HEAD` points at, or None.
+
+    Returns just the branch (e.g. `neon-main`), not the prefixed ref
+    (`origin/neon-main`). Unset `origin/HEAD` is common on clones that were
+    made before the symbolic ref existed — caller should treat None as
+    "don't know" and fall back to other heuristics.
+    """
+    result = run(
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "-q",
+         "refs/remotes/origin/HEAD"],
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    ref = result.stdout.strip()
+    prefix = "origin/"
+    if ref.startswith(prefix):
+        return ref[len(prefix):] or None
+    return ref or None
+
+
+def remote_head_sha(repo: Path, branch: str) -> str | None:
+    """Ask the remote for the current tip of `branch` without fetching.
+
+    Uses `git ls-remote` so the local object database is not mutated. Returns
+    None if the remote rejects the query (offline, auth failure, deleted
+    branch) — callers treat that as "unknown" rather than "up-to-date".
+    """
+    result = run(
+        ["git", "-C", str(repo), "ls-remote", "--heads", "origin",
+         f"refs/heads/{branch}"],
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    line = result.stdout.strip().splitlines()[:1]
+    if not line:
+        return None
+    sha = line[0].split(None, 1)[0].strip()
+    return sha or None
