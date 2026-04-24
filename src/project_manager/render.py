@@ -45,13 +45,16 @@ class Column(Generic[T]):
     an attribute name on the row, or a callable deriving the display
     string. `style` is either a static rich style string, a callable
     `(row) -> style`, or None for unstyled. `empty` substitutes for
-    None/empty cell values.
+    None/empty cell values. `markup=True` parses rich markup inside the
+    cell content — for pre-styled multi-line content (e.g. a captured
+    stacker tree) where per-row `style` isn't enough.
     """
 
     title: str
     value: str | Callable[[T], object]
     style: str | Callable[[T], str | None] | None = None
     empty: str = "-"
+    markup: bool = False
 
     def render_cell(self, row: T) -> str:
         raw = (
@@ -66,6 +69,12 @@ class Column(Generic[T]):
         if self.style is None or isinstance(self.style, str):
             return self.style
         return self.style(row)
+
+    def render_text(self, row: T) -> Text:
+        raw = self.render_cell(row)
+        if self.markup:
+            return Text.from_markup(raw)
+        return Text(raw, style=self.render_style(row) or "")
 
 
 @runtime_checkable
@@ -198,10 +207,7 @@ def emit_sections(
             )
             t.add_row(
                 Text(title if i == 0 else "", style=group.style),
-                *(
-                    Text(col.render_cell(r), style=col.render_style(r) or "")
-                    for col in columns
-                ),
+                *(col.render_text(r) for col in columns),
                 end_section=is_group_boundary,
             )
     _emit_table_capture(c, t, indent="")
@@ -334,10 +340,7 @@ def _render_table(
     for col in columns:
         t.add_column(col.title)
     for r in rows:
-        t.add_row(*(
-            Text(col.render_cell(r), style=col.render_style(r) or "")
-            for col in columns
-        ))
+        t.add_row(*(col.render_text(r) for col in columns))
     _emit_table_capture(c, t, indent="")
 
 

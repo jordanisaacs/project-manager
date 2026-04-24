@@ -5,7 +5,10 @@ from cyclopts import Parameter
 
 from project_manager import config, render
 from project_manager.cli._shared import StackerScope
+from project_manager.errors import ProjectError
 from project_manager.paths import Paths
+from project_manager.project import current as project_current
+from project_manager.project import discovery
 from project_manager.stacker import git, locate
 from project_manager.stacker.render.ls import LsOptions, RenderOptions
 
@@ -33,6 +36,36 @@ def _resolve_current(paths: Paths) -> tuple[str, str] | None:
     return slot.repo_name, branch
 
 
+def _project_wt_labels(paths: Paths) -> dict[tuple[str, str], str]:
+    """`{(repo, branch): wt_name}` for every live worktree in the cwd's project.
+
+    Returns {} when cwd isn't inside a pm project OR the project db is
+    missing. Lets the tree renderer replace the generic `(current)`
+    marker with `(<wt-name>)` for every worktree the project owns —
+    not just the single cwd slot — so running `pm stacker ls` from
+    `~/.projects/<name>/` still labels sibling worktrees.
+    """
+    project = project_current.detect_current_project(paths)
+    if project is None:
+        return {}
+    try:
+        wt_rows = discovery.read_wts(paths, project)
+    except ProjectError:
+        return {}
+    out: dict[tuple[str, str], str] = {}
+    for wt, repo, slot_uuid in wt_rows:
+        slot_path = paths.slot(repo, slot_uuid)
+        if not slot_path.is_dir():
+            continue
+        try:
+            branch = git.current_branch(slot_path)
+        except git.GitError:
+            continue
+        if branch:
+            out[(repo, branch)] = wt
+    return out
+
+
 @stacker_app.command
 def ls(
     branch: str | None = None,
@@ -58,6 +91,7 @@ def ls(
     paths = config.load()
     svc = _common.service(paths)
     current_pos = _resolve_current(paths)
+    wt_labels = _project_wt_labels(paths)
     render_opts = RenderOptions(
         icons=icons,
         hide_merged=not merged,
@@ -76,6 +110,7 @@ def ls(
                 current=current_pos,
                 legend=legend,
                 render=render_opts,
+                wt_labels=wt_labels,
             ),
         )
     else:
@@ -88,6 +123,7 @@ def ls(
                 current=current_pos,
                 legend=legend,
                 render=render_opts,
+                wt_labels=wt_labels,
             ),
         )
     if json:

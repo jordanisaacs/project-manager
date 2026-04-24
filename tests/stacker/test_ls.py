@@ -203,6 +203,60 @@ def test_ls_current_marker_renders_when_current_provided(
     assert "  [bold blue]demo[/]" in out
 
 
+def test_ls_wt_labels_override_current_marker(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """With a wt_label for the cwd branch, (<wt>) replaces (current)."""
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(
+            current=(tracked_stack.repo_name, "b"),
+            wt_labels={(tracked_stack.repo_name, "b"): "my-wt"},
+        ),
+    )
+    assert "(my-wt)" in out
+    assert "(current)" not in out
+
+
+def test_ls_wt_labels_mark_non_cwd_branches(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """wt_labels label sibling worktrees too (no cwd → no (current))."""
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(
+            wt_labels={
+                (tracked_stack.repo_name, "b"): "wt-b",
+                (tracked_stack.repo_name, "c"): "wt-c",
+            },
+        ),
+    )
+    assert "(wt-b)" in out
+    assert "(wt-c)" in out
+    # Without `current`, the fallback marker never fires.
+    assert "(current)" not in out
+
+
+def test_ls_wt_labels_do_not_cross_repos(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """A label keyed on another repo must not bleed into this repo's tree."""
+    out = service.ls_text(
+        tracked_stack.repo_name,
+        LsOptions(
+            current=(tracked_stack.repo_name, "b"),
+            wt_labels={("other-repo", "b"): "other-wt"},
+        ),
+    )
+    # Same branch name `b`, different repo — label must not apply here.
+    assert "(other-wt)" not in out
+    # Fallback is the generic `(current)` marker.
+    assert "(current)" in out
+
+
 def test_ls_no_banner_when_current_branch_is_tracked(
     tracked_stack: TrackedStack,
     service: StackerService,

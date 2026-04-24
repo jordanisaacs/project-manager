@@ -94,6 +94,15 @@ class GraphCtx:
     # every row (not just current) and help the reader navigate to the
     # worktree that hosts the branch.
     branch_projects: dict[str, str] = field(default_factory=dict)
+    # Per-branch worktree label keyed on `(repo_name, branch)`. When
+    # set, the node emits `(<label>)` in place of the generic
+    # `(current)` marker — lets `pm project status` and `pm stacker
+    # ls` (run from a project dir) tag every row with its originating
+    # pm worktree name. Keyed on `(repo, branch)` instead of bare
+    # branch name so same-named branches across different repos
+    # (e.g. `main` in two pool repos) don't collide. An absent entry
+    # falls through to the `(current)` fallback for the cwd's branch.
+    wt_labels: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -243,6 +252,20 @@ def _review_icon(pr: PRState) -> IconKind:
     return "pr_open"
 
 
+def pr_icon(pr: PRState) -> tuple[str, str | None]:
+    """Return `(symbol, color)` for a cached PR, using the tree-renderer palette.
+
+    Thinner version of `classify` + `_review_icon` for call sites that
+    only have a `PRState` (no `TrackedBranch` / `NodeStatus`) — e.g.
+    `pm project status`'s flat worktree table.
+    """
+    if pr.merged:
+        kind: IconKind = "merged"
+    else:
+        kind = _review_icon(pr)
+    return _SYMBOL[kind], _ICON_COLOR[kind]
+
+
 def _status_symbol(
     tracked: TrackedBranch | None,
     pr: PRState | None,
@@ -341,7 +364,10 @@ def _row_tail(
     project = gctx.branch_projects.get(tracked.branch)
     if project is not None:
         parts.append(fmt.style(f"[{project}]", fg="blue", bold=True))
-    if status and status.is_current:
+    wt_label = gctx.wt_labels.get((tracked.repo_name, tracked.branch))
+    if wt_label is not None:
+        parts.append(f"({wt_label})")
+    elif status and status.is_current:
         parts.append("(current)")
     _ = pos  # reserved for future color-mode-full line wrapping
     return " " + " ".join(parts) if parts else ""

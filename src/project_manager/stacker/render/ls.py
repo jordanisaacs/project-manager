@@ -60,6 +60,14 @@ class LsOptions:
     # Ignored in JSON mode — JSON consumers don't need glyph docs.
     legend: bool = False
     render: RenderOptions = field(default_factory=RenderOptions)
+    # Optional per-branch label that replaces the generic `(current)`
+    # marker with `(<label>)`. Keyed on `(repo_name, branch)` so the
+    # same-branch-name-in-different-repos case can't misfire. Populated
+    # by `pm project status` and by `pm stacker ls` when cwd resolves
+    # to a pm project — a project may have multiple worktrees (one per
+    # branch), and the generic `(current)` marker only fits the single
+    # cwd branch.
+    wt_labels: dict[tuple[str, str], str] | None = None
 
 
 _DEFAULT_LS_OPTIONS = LsOptions()
@@ -95,9 +103,7 @@ def ls_text(
     body = (
         _empty_text(ctx, repo_name, options.current)
         if not branches
-        else _ls_tree(
-            ctx, branches, options.details, options.current, options.render,
-        )
+        else _ls_tree(ctx, branches, options)
     )
     if options.legend:
         return body + "\n\n" + graph.render_legend(options.render)
@@ -242,10 +248,12 @@ def _ls_branch_set(
 def _ls_tree(
     ctx: StackerCtx,
     branches: list[TrackedBranch],
-    details: Details,
-    current: tuple[str, str] | None,
-    render_opts: RenderOptions,
+    options: LsOptions,
 ) -> str:
+    details = options.details
+    current = options.current
+    render_opts = options.render
+    wt_labels = options.wt_labels
     by_repo: dict[str, list[TrackedBranch]] = {}
     for item in branches:
         by_repo.setdefault(item.repo_name, []).append(item)
@@ -299,6 +307,7 @@ def _ls_tree(
             pr_states=pr_states,
             current_branch=current_branch,
             branch_projects=branch_projects,
+            wt_labels=wt_labels or {},
         )
         for parent_branch, implicit in sorted(roots):
             graph.render_graph_node(
