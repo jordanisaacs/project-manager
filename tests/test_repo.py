@@ -298,3 +298,183 @@ def test_repo_pull_no_upstream_skipped(pm_env: Paths) -> None:
     results = pull_mod.pull(pm_env, ["foo"])
     assert results[0].ok is False
     assert "no upstream" in results[0].message
+
+
+def _setup_parent_with_submodule(
+    tmp_path: Path, local: Path
+) -> tuple[Path, Path]:
+    """Create sub-upstream, parent-upstream (with sub as submodule), and clone to `local`.
+
+    Returns (parent_upstream, sub_upstream). Upstream dirs are namespaced by
+    `local.name` so multiple calls in one test can coexist under the same tmp_path.
+    """
+    ns = local.name
+    sub_upstream = tmp_path / f"sub-upstream-{ns}"
+    sub_upstream.mkdir()
+    _init_repo(sub_upstream, branch="main")
+
+    parent_upstream = tmp_path / f"parent-upstream-{ns}"
+    parent_upstream.mkdir()
+    _init_repo(parent_upstream, branch="main")
+    subprocess.run(
+        ["git", "-C", str(parent_upstream), "-c", "protocol.file.allow=always",
+         "submodule", "add", "-q", str(sub_upstream), "vendor/sub"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(parent_upstream), "-c", "core.hooksPath=/dev/null",
+         "commit", "-q", "-m", "add submodule"],
+        check=True,
+    )
+
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "clone", "-q",
+         "--recurse-submodules", str(parent_upstream), str(local)],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local), "config", "user.name", "test"], check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local), "config", "commit.gpgsign", "false"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local), "config", "protocol.file.allow", "always"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(local), "checkout", "-q", "main"], check=True)
+    return parent_upstream, sub_upstream
+
+
+def _bump_submodule_pointer(parent_upstream: Path, sub_upstream: Path) -> None:
+    """Advance sub_upstream by one commit and point parent_upstream's gitlink at it."""
+    _commit_file(sub_upstream, "sub-new.txt")
+    subprocess.run(
+        ["git", "-C", str(parent_upstream / "vendor/sub"),
+         "-c", "protocol.file.allow=always", "fetch", "-q", "origin", "main"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(parent_upstream / "vendor/sub"),
+         "checkout", "-q", "FETCH_HEAD"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(parent_upstream), "add", "vendor/sub"], check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(parent_upstream), "-c", "core.hooksPath=/dev/null",
+         "commit", "-q", "-m", "bump submodule"],
+        check=True,
+    )
+
+
+def test_repo_pull_ignores_out_of_date_submodules(
+    pm_env: Paths, tmp_path: Path
+) -> None:
+    """Stale submodule working trees must not block a parent fast-forward.
+
+    When the parent repo's gitlink for a submodule advances (e.g. because
+    the user previously pulled without submodule sync), the submodule
+    working tree points at the old commit. `git status --porcelain` would
+    report that as `M <path>`, falsely classifying the parent as dirty.
+    """
+    local = pm_env.repo("foo")
+    parent_upstream, sub_upstream = _setup_parent_with_submodule(tmp_path, local)
+
+    # Simulate a repo that was previously pulled without submodule sync: bump
+    # the gitlink in parent_upstream and fast-forward local manually, leaving
+    # the local submodule working tree stale.
+    _bump_submodule_pointer(parent_upstream, sub_upstream)
+    subprocess.run(
+        ["git", "-C", str(local), "fetch", "-q", "origin"], check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local), "merge", "-q", "--ff-only", "@{u}"], check=True,
+    )
+    porcelain = subprocess.run(
+        ["git", "-C", str(local), "status", "--porcelain"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "vendor/sub" in porcelain, "precondition: local starts with stale submodule"
+
+    # Advance parent upstream again so there is something new to pull.
+    _commit_file(parent_upstream, "parent-new.txt")
+
+    results = pull_mod.pull(pm_env, ["foo"])
+    assert results[0].ok is True, results[0].message
+    assert results[0].message == "fast-forwarded"
+    assert (local / "parent-new.txt").is_file()
+
+
+def test_repo_pull_updates_submodules_on_fast_forward(
+    pm_env: Paths, tmp_path: Path
+) -> None:
+    local = pm_env.repo("foo")
+    parent_upstream, sub_upstream = _setup_parent_with_submodule(tmp_path, local)
+    _bump_submodule_pointer(parent_upstream, sub_upstream)
+
+    results = pull_mod.pull(pm_env, ["foo"])
+    assert results[0].ok is True, results[0].message
+    assert results[0].message == "fast-forwarded"
+    assert (local / "vendor/sub" / "sub-new.txt").is_file()
+
+
+def test_repo_pull_syncs_submodules_when_parent_up_to_date(
+    pm_env: Paths, tmp_path: Path
+) -> None:
+    """If the parent has nothing new but submodules are stale, pull still syncs them."""
+    local = pm_env.repo("foo")
+    parent_upstream, sub_upstream = _setup_parent_with_submodule(tmp_path, local)
+
+    # Produce a stale-submodule state without bringing in any new parent commits.
+    _bump_submodule_pointer(parent_upstream, sub_upstream)
+    subprocess.run(
+        ["git", "-C", str(local), "fetch", "-q", "origin"], check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(local), "merge", "-q", "--ff-only", "@{u}"], check=True,
+    )
+    assert not (local / "vendor/sub" / "sub-new.txt").is_file(), "precondition"
+
+    results = pull_mod.pull(pm_env, ["foo"])
+    assert results[0].ok is True, results[0].message
+    assert results[0].message == "up-to-date"
+    assert (local / "vendor/sub" / "sub-new.txt").is_file()
+
+
+def test_repo_ls_reports_submodule_state(
+    pm_env: Paths, tmp_path: Path
+) -> None:
+    # Plain repo → no submodules.
+    plain = pm_env.repo("plain")
+    plain.mkdir()
+    _init_repo(plain, branch="main")
+
+    # Repo with an in-sync submodule.
+    synced_local = pm_env.repo("synced")
+    _setup_parent_with_submodule(tmp_path, synced_local)
+
+    # Repo whose submodule working tree is out of sync with the gitlink.
+    stale_local = pm_env.repo("stale")
+    stale_parent, stale_sub = _setup_parent_with_submodule(tmp_path, stale_local)
+    _bump_submodule_pointer(stale_parent, stale_sub)
+    subprocess.run(
+        ["git", "-C", str(stale_local), "fetch", "-q", "origin"], check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(stale_local), "merge", "-q", "--ff-only", "@{u}"],
+        check=True,
+    )
+
+    rows = {r.repo: r for r in ls_mod.ls(pm_env, check_remote=False)}
+    assert rows["plain"].submodules == "none"
+    assert rows["synced"].submodules == "synced"
+    assert rows["stale"].submodules == "stale"
+    # Parent "dirty" stays false — stale submodules are tracked separately.
+    assert rows["stale"].dirty is False

@@ -5,6 +5,17 @@ from pathlib import Path
 from project_manager.subprocess_run import run
 
 
+def head_sha(repo: Path) -> str | None:
+    """Return HEAD's object ID, or None if HEAD is unresolvable (e.g. empty repo)."""
+    result = run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def current_branch(repo: Path) -> str | None:
     """Return the current branch name, or None if HEAD is detached."""
     result = run(
@@ -17,9 +28,15 @@ def current_branch(repo: Path) -> str | None:
 
 
 def is_dirty(repo: Path) -> bool:
-    """True if the working tree or index has any changes."""
+    """True if the working tree or index has any changes.
+
+    Submodules are ignored: a stale submodule working tree (common right
+    after a parent fast-forward that bumped a gitlink) must not block a
+    subsequent pull of the parent.
+    """
     result = run(
-        ["git", "-C", str(repo), "status", "--porcelain"],
+        ["git", "-C", str(repo), "status", "--porcelain",
+         "--ignore-submodules=all"],
         check=False,
     )
     return bool(result.stdout.strip())
@@ -35,6 +52,40 @@ def upstream_ref(repo: Path) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
+
+
+def submodule_state(repo: Path) -> str:
+    """Return 'none', 'synced', or 'stale' for the repo's submodules.
+
+    `git submodule status` prefixes each line with a single char:
+      ' '  → checked-out SHA matches the recorded gitlink
+      '-'  → submodule not initialized
+      '+'  → checked-out SHA differs from the recorded gitlink
+      'U'  → submodule has merge conflicts
+    Anything other than ' ' means the submodule working tree is out of
+    sync with what the parent expects.
+    """
+    result = run(
+        ["git", "-C", str(repo), "submodule", "status"],
+        check=False,
+    )
+    if result.returncode != 0:
+        return "none"
+    lines = [line for line in result.stdout.splitlines() if line]
+    if not lines:
+        return "none"
+    for line in lines:
+        if line[0] != " ":
+            return "stale"
+    return "synced"
+
+
+def submodule_update(repo: Path) -> None:
+    """Recursively init and check out submodules to match the parent's gitlinks."""
+    run(
+        ["git", "-C", str(repo), "submodule", "update", "--init", "--recursive"],
+        stream=True,
+    )
 
 
 _AHEAD_BEHIND_FIELDS = 2

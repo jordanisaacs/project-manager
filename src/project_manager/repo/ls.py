@@ -13,6 +13,7 @@ class RepoRow:
     repo: str
     branch: str | None        # None == detached
     dirty: bool
+    submodules: str           # "none" | "synced" | "stale"
     ahead: int | None         # None if no upstream or detached
     behind: int | None
     has_upstream: bool
@@ -74,10 +75,23 @@ def _state(row: "RepoRow") -> str:
     return "dirty" if row.dirty else "clean"
 
 
+def _submodules(row: "RepoRow") -> str:
+    # `-` for repos with no submodules so the column reads uniformly next to
+    # repos that do — avoids a blank cell masquerading as "synced".
+    if row.submodules == "none":
+        return "-"
+    return row.submodules
+
+
+def _submodules_style(row: "RepoRow") -> str | None:
+    return "yellow" if row.submodules == "stale" else None
+
+
 COLUMNS: list[Column] = [
     Column("Repo", "repo", style="blue"),
     Column("Branch", lambda r: r.branch or "-", style=_branch_style),
     Column("State", _state, style=lambda r: "red" if r.dirty else ""),
+    Column("Submodules", _submodules, style=_submodules_style),
     Column("Upstream", _upstream, style=_upstream_style),
     Column("Remote", _remote, style=_remote_style),
 ]
@@ -93,20 +107,24 @@ def _row(
     repo_dir = paths.repo(repo)
     branch = git.current_branch(repo_dir)
     dirty = git.is_dirty(repo_dir)
+    submodules = git.submodule_state(repo_dir)
     expected_branch = _resolve_trunk(repo_dir, configured_trunk)
     if branch is None:
         return RepoRow(repo=repo, branch=None, dirty=dirty,
+                       submodules=submodules,
                        ahead=None, behind=None, has_upstream=False,
                        fetch_needed=None, expected_branch=expected_branch)
     upstream = git.upstream_ref(repo_dir)
     if upstream is None:
         return RepoRow(repo=repo, branch=branch, dirty=dirty,
+                       submodules=submodules,
                        ahead=None, behind=None, has_upstream=False,
                        fetch_needed=None, expected_branch=expected_branch)
     ab = git.ahead_behind(repo_dir)
     ahead, behind = ab if ab is not None else (None, None)
     fetch_needed = _check_fetch_needed(repo_dir, upstream) if check_remote else None
     return RepoRow(repo=repo, branch=branch, dirty=dirty,
+                   submodules=submodules,
                    ahead=ahead, behind=behind, has_upstream=True,
                    fetch_needed=fetch_needed, expected_branch=expected_branch)
 

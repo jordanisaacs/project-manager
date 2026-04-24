@@ -37,27 +37,46 @@ def _precheck_skip(repo_dir: Path) -> str | None:
     return None
 
 
+def _sync_submodules(repo_dir: Path, base_message: str) -> PullResult:
+    """Recursively sync submodules, annotating the given result message."""
+    repo = repo_dir.name
+    if git.submodule_state(repo_dir) == "none":
+        return PullResult(repo=repo, ok=True, message=base_message)
+    try:
+        git.submodule_update(repo_dir)
+    except CommandError as e:
+        return PullResult(
+            repo=repo,
+            ok=False,
+            message=f"{base_message}; submodule update failed: {e}",
+        )
+    return PullResult(repo=repo, ok=True, message=base_message)
+
+
 def _pull_one(paths: Paths, repo: str) -> PullResult:
     repo_dir = paths.repo(repo)
     skip = _precheck_skip(repo_dir)
     if skip is not None:
         return PullResult(repo=repo, ok=False, message=skip)
 
+    head_before = git.head_sha(repo_dir)
     try:
-        run(["git", "-C", str(repo_dir), "fetch", "--prune", "origin"], stream=True)
+        run(
+            ["git", "-C", str(repo_dir), "pull", "--ff-only", "--prune",
+             "--recurse-submodules"],
+            stream=True,
+        )
     except CommandError as e:
-        return PullResult(repo=repo, ok=False, message=f"fetch failed: {e}")
+        return PullResult(repo=repo, ok=False, message=f"pull failed: {e}")
 
-    ab = git.ahead_behind(repo_dir)
-    if ab is not None and ab[1] == 0:
-        return PullResult(repo=repo, ok=True, message="up-to-date")
-
-    try:
-        run(["git", "-C", str(repo_dir), "merge", "--ff-only", "@{u}"], stream=True)
-    except CommandError as e:
-        return PullResult(repo=repo, ok=False, message=f"merge failed: {e}")
-
-    return PullResult(repo=repo, ok=True, message="fast-forwarded")
+    base_message = (
+        "up-to-date" if git.head_sha(repo_dir) == head_before
+        else "fast-forwarded"
+    )
+    # `pull --recurse-submodules` updates already-populated submodules but
+    # won't --init new ones; run `submodule update --init --recursive` so
+    # newly-added submodules are checked out.
+    return _sync_submodules(repo_dir, base_message)
 
 
 def pull(paths: Paths, repos: list[str] | None) -> list[PullResult]:
