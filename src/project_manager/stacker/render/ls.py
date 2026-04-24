@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from project_manager import config
 from project_manager.pool.db import OwnerKind, PoolDB
 from project_manager.stacker import gh, git
 from project_manager.stacker.models import (
@@ -20,6 +21,7 @@ from project_manager.stacker.pr.lineage import lineage
 
 from . import format as fmt
 from . import graph
+from . import prefetch as prefetch_mod
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -257,17 +259,19 @@ def _ls_tree(
     by_repo: dict[str, list[TrackedBranch]] = {}
     for item in branches:
         by_repo.setdefault(item.repo_name, []).append(item)
+    # One concurrent pre-pass computes every per-repo and per-node git
+    # fact before rendering. The render walk below is pure dict lookups.
+    facts = prefetch_mod.prefetch_all(
+        ctx, by_repo,
+        details=details, current=current,
+        limit=config.concurrency().limit,
+    )
     lines: list[str] = []
     for repo, items in sorted(by_repo.items()):
-        repo_path = ctx.paths.repo(repo)
-        try:
-            live = {
-                info.branch: info
-                for info in git.worktree_list(repo_path)
-                if info.branch
-            }
-        except git.GitError:
-            live = {}
+        repo_facts = facts[repo]
+        live = repo_facts.live
+        pr_states = repo_facts.pr_states
+        branch_projects = repo_facts.branch_projects
         # Two-space gutter mirrors the per-row `> ` current marker.
         lines.append("  " + fmt.style(repo, fg="blue", bold=True))
         tracked_branches = {item.branch for item in items}
@@ -296,8 +300,6 @@ def _ls_tree(
                 roots.append((item.parent_branch, True))
                 seen_roots.add(item.parent_branch)
         current_branch = current[1] if current and current[0] == repo else None
-        pr_states = {pr.branch: pr for pr in ctx.db.list_pr_states(repo)}
-        branch_projects = _resolve_branch_projects(ctx.paths, live)
         gctx = graph.GraphCtx(
             repo_name=repo,
             items=items,
@@ -308,6 +310,7 @@ def _ls_tree(
             current_branch=current_branch,
             branch_projects=branch_projects,
             wt_labels=wt_labels or {},
+            node_status=repo_facts.node_status,
         )
         for parent_branch, implicit in sorted(roots):
             graph.render_graph_node(
@@ -356,35 +359,27 @@ def _ls_json(
     children_map: dict[tuple[str, str], list[TrackedBranch]] = {}
     for b in branches:
         children_map.setdefault((b.parent_repo_name, b.parent_branch), []).append(b)
-    # Per-repo GraphCtx keeps the NodeStatus builder shareable with the
-    # text renderer. Online is forced false for JSON: the JSON path
-    # reflects cached state only, matching gitstack's emit-don't-fetch
-    # semantics for machine-readable output.
-    json_render = RenderOptions(online=False)
-    gctx_by_repo: dict[str, graph.GraphCtx] = {}
-    for repo in {b.repo_name for b in branches}:
-        try:
-            live = {
-                info.branch: info
-                for info in git.worktree_list(ctx.paths.repo(repo))
-                if info.branch
-            }
-        except git.GitError:
-            live = {}
-        gctx_by_repo[repo] = graph.GraphCtx(
-            repo_name=repo,
-            items=[b for b in branches if b.repo_name == repo],
-            live=live,
-            details=details,
-            render_opts=json_render,
-            pr_states={b: pr_map[(repo, b)] for (r, b) in pr_map if r == repo},
-            current_branch=current[1] if current and current[0] == repo else None,
-        )
+    by_repo: dict[str, list[TrackedBranch]] = {}
+    for b in branches:
+        by_repo.setdefault(b.repo_name, []).append(b)
+    # One async prefetch feeds both the tree and JSON paths. JSON output
+    # reflects cached state only (matching gitstack's emit-don't-fetch
+    # semantics), so RenderOptions isn't threaded through here.
+    facts = prefetch_mod.prefetch_all(
+        ctx, by_repo,
+        details=details, current=current,
+        limit=config.concurrency().limit,
+    )
 
     def node(b: TrackedBranch) -> dict[str, object]:
         pr = pr_map.get((b.repo_name, b.branch))
-        gctx = gctx_by_repo[b.repo_name]
-        status = graph.build_node_status(ctx, gctx, b, pr=pr, details=details)
+        status = facts[b.repo_name].node_status.get(b.branch)
+        if status is None:
+            status = graph.NodeStatus(
+                synced=False, commit_count=0, ahead_of_remote=0,
+                has_upstream=False, dirty=False, is_current=False,
+                merged=pr is not None and pr.merged,
+            )
         entry: dict[str, object] = {
             "repo_name": b.repo_name,
             "branch": b.branch,

@@ -27,6 +27,20 @@ class Display:
 
 
 @dataclass(frozen=True)
+class Concurrency:
+    """`[concurrency]` knobs shared by every bounded fanout in pm.
+
+    `limit` caps the number of git children run in parallel across every
+    (repo, pool-slot) target for `pm repo maintenance`, and bounds the
+    per-node / per-repo prefetch fanout in `pm stacker ls`. The default
+    of 10 keeps the disk busy on a multi-worktree layout without
+    spawning a watchman storm on cold fsmonitor state.
+    """
+
+    limit: int = 10
+
+
+@dataclass(frozen=True)
 class Agents:
     """Agent-launch preferences loaded from `[agents]` in config.
 
@@ -107,6 +121,22 @@ def display() -> Display:
             f"unknown timezone '{tz_name}' in [display].timezone — "
             f"expected an IANA name like 'America/Los_Angeles'",
         ) from e
+
+
+def concurrency() -> Concurrency:
+    """Load the `[concurrency]` section. Same lazy-read pattern as `display()`."""
+    config_path = _resolve_config_path()
+    if config_path is None:
+        return Concurrency()
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    section = data.get("concurrency", {})
+    raw = section.get("limit", Concurrency.limit)
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 1:
+        raise ValueError(
+            f"[concurrency].limit must be a positive integer, got {raw!r}",
+        )
+    return Concurrency(limit=raw)
 
 
 def agents() -> Agents:

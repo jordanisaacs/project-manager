@@ -59,6 +59,9 @@ ignore = [
     # Cyclopts commands pass frozen dataclasses as defaults; B008 would flag
     # the `RepoFlag()` / `StackerScope()` pattern that cyclopts requires.
     "B008",
+    # TODO comments don't need per-comment author/issue-link metadata —
+    # this project has no issue tracker plumbed into the source.
+    "TD002", "TD003", "FIX002",
 ]
 
 [tool.ruff.lint.per-file-ignores]

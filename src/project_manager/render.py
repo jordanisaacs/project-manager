@@ -15,7 +15,7 @@ dict`; otherwise the default serializer walks dataclass fields and coerces
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from enum import Enum
 from pathlib import Path
 from typing import Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
@@ -310,6 +310,24 @@ def emit_subprocess_line(line: SubprocessLogLine) -> None:
     can be carrying JSON.
     """
     console(stderr=True).print(_subprocess_line_text(line), highlight=False)
+
+
+def emit_command_start(cmd: list[str]) -> None:
+    """Print a `[HH:MM:SS.mmm start] <cmd>` line to stderr before a subprocess runs.
+
+    Announces work at the point of dispatch, not at the point of first
+    output — so users see that their `pm repo pull` / `pm repo maintenance`
+    actually kicked off a git child, even when the child is silent on
+    success. Uses the same time format as the per-line subprocess prefix
+    so start and output lines line up visually when they interleave.
+    """
+    ts = format_log_time(datetime.now(tz=UTC))
+    t = Text()
+    t.append(f"[{ts} ", style="dim")
+    t.append("start", style="cyan")
+    t.append("] ", style="dim")
+    t.append(" ".join(cmd))
+    console(stderr=True).print(t, highlight=False)
 
 
 def format_subprocess_lines(lines: Iterable[SubprocessLogLine]) -> str:

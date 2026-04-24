@@ -3,8 +3,10 @@ from pathlib import Path
 
 import pytest
 
+from project_manager.config import Concurrency
 from project_manager.paths import Paths
 from project_manager.repo import ls as ls_mod
+from project_manager.repo import maintenance as maintenance_mod
 from project_manager.repo import pull as pull_mod
 
 
@@ -478,3 +480,95 @@ def test_repo_ls_reports_submodule_state(
     assert rows["stale"].submodules == "stale"
     # Parent "dirty" stays false — stale submodules are tracked separately.
     assert rows["stale"].dirty is False
+
+
+def _add_pool_slot(pm_env: Paths, repo: str, uuid: str) -> Path:
+    """Create a linked worktree under the pool for `repo`.
+
+    Uses a detached HEAD checkout so the slot never contests the canonical
+    repo's branch — same shape as `pool.worktree` builds in production
+    code, minus the SQLite ownership row (the maintenance command doesn't
+    read the pool db).
+    """
+    slot_dir = pm_env.pool(repo) / uuid
+    slot_dir.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "-C", str(pm_env.repo(repo)), "worktree", "add", "--detach",
+         str(slot_dir), "HEAD"],
+        check=True, capture_output=True,
+    )
+    return slot_dir
+
+
+def test_repo_maintenance_runs_canonical_and_slot_ops(
+    pm_env: Paths,
+) -> None:
+    repo = pm_env.repo("foo")
+    repo.mkdir()
+    _init_repo(repo, branch="main")
+    slot_dir = _add_pool_slot(pm_env, "foo", "aaaa")
+
+    results = maintenance_mod.maintain(pm_env, ["foo"], Concurrency())
+    ops = {(r.target, r.op) for r in results}
+    # Canonical gets maintenance + worktree-prune + update-index; the slot
+    # contributes a second update-index row.
+    assert ("(repo)", "maintenance") in ops
+    assert ("(repo)", "worktree-prune") in ops
+    assert ("(repo)", "update-index") in ops
+    assert ("aaaa", "update-index") in ops
+    assert all(r.ok for r in results), [
+        (r.target, r.op, r.message) for r in results if not r.ok
+    ]
+    # Sanity: worktree metadata survived the prune call.
+    assert (slot_dir / ".git").exists()
+
+
+def test_repo_maintenance_update_index_tolerates_dirty_tree(
+    pm_env: Paths,
+) -> None:
+    """`update-index --refresh` exits 1 when files need refreshing.
+
+    That's an informational signal (cache primed, some files still dirty),
+    not a failure — the timer must not flag it. A touched-but-unchanged
+    working-copy file is the simplest way to trigger the nonzero exit.
+    """
+    repo = pm_env.repo("foo")
+    repo.mkdir()
+    _init_repo(repo, branch="main")
+    (repo / "README.md").write_text((repo / "README.md").read_text())
+    # Force the file's mtime forward so --refresh has to re-stat it.
+    subprocess.run(["touch", "--date=@100", str(repo / "README.md")], check=True)
+
+    results = maintenance_mod.maintain(pm_env, ["foo"], Concurrency())
+    update_rows = [r for r in results if r.op == "update-index"]
+    assert update_rows, "expected at least one update-index row"
+    assert all(r.ok for r in update_rows)
+
+
+def test_repo_maintenance_filters_by_repo(pm_env: Paths) -> None:
+    for name in ("foo", "bar"):
+        d = pm_env.repo(name)
+        d.mkdir()
+        _init_repo(d, branch="main")
+
+    results = maintenance_mod.maintain(pm_env, ["foo"], Concurrency())
+    assert {r.repo for r in results} == {"foo"}
+
+
+def test_repo_maintenance_all_when_repos_none(pm_env: Paths) -> None:
+    for name in ("foo", "bar"):
+        d = pm_env.repo(name)
+        d.mkdir()
+        _init_repo(d, branch="main")
+
+    results = maintenance_mod.maintain(pm_env, None, Concurrency())
+    assert {r.repo for r in results} == {"foo", "bar"}
+
+
+def test_repo_maintenance_unknown_repo_raises(pm_env: Paths) -> None:
+    repo = pm_env.repo("foo")
+    repo.mkdir()
+    _init_repo(repo, branch="main")
+
+    with pytest.raises(ValueError, match="unknown repo"):
+        maintenance_mod.maintain(pm_env, ["nope"], Concurrency())

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from project_manager.errors import CommandError
 from project_manager.paths import Paths
-from project_manager.render import Column
+from project_manager.render import Column, emit_command_start
 from project_manager.repo import discovery, git
 from project_manager.subprocess_run import run
 
@@ -42,6 +42,9 @@ def _sync_submodules(repo_dir: Path, base_message: str) -> PullResult:
     repo = repo_dir.name
     if git.submodule_state(repo_dir) == "none":
         return PullResult(repo=repo, ok=True, message=base_message)
+    emit_command_start(
+        ["git", "-C", str(repo_dir), "submodule", "update", "--init", "--recursive"],
+    )
     try:
         git.submodule_update(repo_dir)
     except CommandError as e:
@@ -60,12 +63,13 @@ def _pull_one(paths: Paths, repo: str) -> PullResult:
         return PullResult(repo=repo, ok=False, message=skip)
 
     head_before = git.head_sha(repo_dir)
+    cmd = [
+        "git", "-C", str(repo_dir), "pull", "--ff-only", "--prune",
+        "--recurse-submodules",
+    ]
+    emit_command_start(cmd)
     try:
-        run(
-            ["git", "-C", str(repo_dir), "pull", "--ff-only", "--prune",
-             "--recurse-submodules"],
-            stream=True,
-        )
+        run(cmd, stream=True)
     except CommandError as e:
         return PullResult(repo=repo, ok=False, message=f"pull failed: {e}")
 

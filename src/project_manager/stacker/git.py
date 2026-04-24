@@ -215,14 +215,15 @@ def worktree_list(repo_root: Path) -> list[WorktreeInfo]:
 
 
 def has_tracked_changes(path: Path) -> bool:
-    # `git status` is expensive in large repos. Quiet diff checks are enough here
-    # because stacker only needs a yes/no answer for tracked staged or unstaged changes.
-    git(path, "update-index", "-q", "--refresh", check=False)
-    if git(path, "rev-parse", "--verify", "HEAD", check=False).returncode != 0:
-        return bool(git(path, "status", "--porcelain=v1", "-uno").stdout.strip())
-    if git(path, "diff-index", "--quiet", "--cached", "HEAD", "--", check=False).returncode != 0:
-        return True
-    return git(path, "diff-files", "--quiet", "--", check=False).returncode != 0
+    # One fsmonitor query instead of three: `git status` drives the
+    # fsmonitor hook once and returns the same yes/no we need for
+    # tracked-changes gating. `-uno` skips untracked-file enumeration,
+    # `--ignored=no` skips the gitignore scan, and `--porcelain=v1` keeps
+    # output stable for the `bool(.strip())` check. Pre-fsmonitor this
+    # path was three quiet diffs because `git status` did redundant work;
+    # with fsmonitor the handshake cost dominates, so one call wins.
+    out = git(path, "status", "--porcelain=v1", "-uno", "--ignored=no", check=False).stdout
+    return bool(out.strip())
 
 
 def cherry_pick_in_progress(path: Path) -> bool:

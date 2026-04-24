@@ -8,4 +8,5 @@ repo_app = root.command(
 )
 
 from . import ls as _ls  # noqa: F401,E402
+from . import maintenance as _maintenance  # noqa: F401,E402
 from . import pull as _pull  # noqa: F401,E402

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from project_manager.stacker import git, locate, selectors
+from project_manager.stacker import git, selectors
 from project_manager.stacker.models import (
     Details,
     MergedStyle,
@@ -103,6 +103,12 @@ class GraphCtx:
     # (e.g. `main` in two pool repos) don't collide. An absent entry
     # falls through to the `(current)` fallback for the cwd's branch.
     wt_labels: dict[tuple[str, str], str] = field(default_factory=dict)
+    # Per-branch NodeStatus, populated by the async prefetch in
+    # `stacker.render.prefetch.prefetch_all` before render. A render
+    # call with a missing entry (e.g. an untracked root placeholder)
+    # skips status-dependent styling — mirrors today's `tracked is
+    # None` branch in `render_graph_node`.
+    node_status: dict[str, NodeStatus] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -143,11 +149,7 @@ def render_graph_node(
 ) -> None:
     tracked = next((item for item in gctx.items if item.branch == pos.branch), None)
     pr = gctx.pr_states.get(pos.branch) if tracked is not None else None
-    status = (
-        build_node_status(ctx, gctx, tracked, pr=pr, details=gctx.details)
-        if tracked is not None
-        else None
-    )
+    status = gctx.node_status.get(pos.branch) if tracked is not None else None
     merged = status is not None and status.merged
     needs_sync = status is not None and not status.synced
     connector = _connector(
@@ -415,91 +417,6 @@ def _suffix_token(
     if status and status.has_upstream:
         return fmt.style("[REMOTE]", fg="cyan")
     return fmt.style("[LOCAL]", fg="yellow")
-
-
-def build_node_status(
-    ctx: StackerCtx,
-    gctx: GraphCtx,
-    tracked: TrackedBranch,
-    *,
-    pr: PRState | None,
-    details: Details,
-) -> NodeStatus:
-    """Consolidate every per-row fact the renderer might consult.
-
-    Skips costly lookups when the detail level can't render them:
-    commit counts only at `status-counts+`, dirty/upstream/remote-ahead
-    only at `status+`. Synced and `is_current` are always computed
-    because they cost ≤ 1 cheap git call and simplify branching.
-    """
-    synced = is_synced(ctx, tracked)
-    is_current = gctx.current_branch == tracked.branch
-    merged = pr is not None and pr.merged
-    worktree = gctx.live.get(tracked.branch)
-    wt_path = worktree.path if worktree is not None else None
-    dirty = (
-        has_graph_blocking_changes(wt_path) if wt_path is not None and details != "none"
-        else False
-    )
-    if details == "none" or wt_path is None:
-        return NodeStatus(
-            synced=synced,
-            commit_count=0,
-            ahead_of_remote=0,
-            has_upstream=False,
-            dirty=False,
-            is_current=is_current,
-            merged=merged,
-        )
-    has_upstream = git.upstream_branch_name(wt_path) is not None
-    ahead_of_remote = (
-        count_ahead_of_remote(wt_path) if has_upstream else 0
-    )
-    commit_count = 0
-    if details in ("status-counts", "all"):
-        commit_count = _count_branch_commits(wt_path, tracked) or 0
-    return NodeStatus(
-        synced=synced,
-        commit_count=commit_count,
-        ahead_of_remote=ahead_of_remote,
-        has_upstream=has_upstream,
-        dirty=dirty,
-        is_current=is_current,
-        merged=merged,
-    )
-
-
-def count_ahead_of_remote(worktree_path: Path) -> int:
-    """`rev-list --count <upstream>..HEAD`, or 0 when no upstream / on error."""
-    upstream = git.upstream_branch(worktree_path)
-    if not upstream:
-        return 0
-    with contextlib.suppress(git.GitError):
-        return git.rev_count(worktree_path, f"{upstream}..HEAD")
-    return 0
-
-
-def _count_branch_commits(worktree_path: Path, tracked: TrackedBranch) -> int | None:
-    with contextlib.suppress(git.GitError):
-        return git.rev_count(worktree_path, f"{tracked.managed_base_commit}..HEAD")
-    return None
-
-
-def count_branch_commits(ctx: StackerCtx, tracked: TrackedBranch) -> int | None:
-    path = locate.locate_worktree(ctx.paths, tracked.repo_name, tracked.branch)
-    if path is None:
-        return None
-    return _count_branch_commits(path, tracked)
-
-
-def is_synced(ctx: StackerCtx, tracked: TrackedBranch) -> bool:
-    try:
-        parent_head = git.rev_parse(
-            ctx.paths.repo(tracked.parent_repo_name), tracked.parent_branch
-        )
-    except git.GitError:
-        return False
-    return parent_head == tracked.managed_base_commit
 
 
 def has_graph_blocking_changes(path: Path) -> bool:

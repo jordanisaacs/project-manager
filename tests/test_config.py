@@ -108,6 +108,56 @@ def test_agents_rejects_non_string_command(
         config.agents()
 
 
+def test_concurrency_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("PM_CONFIG", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert config.concurrency().limit == 10
+
+
+def test_concurrency_reads_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[concurrency]\nlimit = 4\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    assert config.concurrency().limit == 4
+
+
+def test_concurrency_rejects_non_positive_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[concurrency]\nlimit = 0\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    with pytest.raises(ValueError, match="positive integer"):
+        config.concurrency()
+
+
+def test_concurrency_rejects_non_integer_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
+        'stacker_root = "/s"\n'
+        '[concurrency]\nlimit = "lots"\n',
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    with pytest.raises(ValueError, match="positive integer"):
+        config.concurrency()
+
+
 def test_xdg_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("PM_CONFIG", raising=False)
     xdg = tmp_path / "xdg"
