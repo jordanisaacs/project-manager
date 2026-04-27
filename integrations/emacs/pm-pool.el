@@ -57,7 +57,7 @@
                (lambda (group)
                  (mapcar #'pm-pool--slot-cells (alist-get 'slots group)))
                groups))
-             (header '("UUID" "Claim" "Path"))
+             (header '("UUID" "Branch" "Status"))
              (cell-rows (cons header all-cells))
              (widths (pm-table-widths cell-rows)))
         (insert (propertize (pm-table-row header widths)
@@ -78,9 +78,14 @@
     (forward-line (1- line))))
 
 (defun pm-pool--slot-cells (slot)
+  "Return display cells for a pool SLOT (alist from `pm pool ls --json').
+
+The CLI's slot shape carries `uuid', `branch', and `status' (the
+status is the claiming project name, or `FREE'/`OPS' for unclaimed
+slots) — see `project_manager.pool.ls'."
   (list (propertize (or (alist-get 'uuid slot) "") 'face 'pm-id)
-        (or (alist-get 'claim slot) "")
-        (or (alist-get 'path slot) "")))
+        (or (alist-get 'branch slot) "")
+        (or (alist-get 'status slot) "")))
 
 (defun pm-pool-refresh ()
   "Refetch `pm pool ls --json' and re-render."
@@ -95,13 +100,31 @@
            (setq pm-pool--data rows)
            (pm-pool--render)))))))
 
+(defcustom pm-pool-worktrees-dir (expand-file-name "~/.worktrees/")
+  "Root directory under which pool slots live.
+
+Slots are laid out as `<pm-pool-worktrees-dir>/<repo>/<uuid>/' —
+the same convention `paths.worktree' uses on the Python side.
+RET on a slot in `*pm-pool*' opens `<repo>/<uuid>' under this root
+in `dired'."
+  :type 'directory
+  :group 'pm)
+
+(defun pm-pool--slot-path (slot)
+  "Resolve the on-disk path for SLOT (alist from `pm pool ls --json')."
+  (let ((repo (alist-get 'repo slot))
+        (uuid (alist-get 'uuid slot)))
+    (and repo uuid
+         (expand-file-name uuid
+                           (expand-file-name repo pm-pool-worktrees-dir)))))
+
 (defun pm-pool-act-at-point ()
   "Open the slot path at point in `dired'."
   (interactive)
   (let* ((sec (magit-current-section))
          (target (pm-section-ancestor-of-type sec '(pm-pool-slot))))
     (unless target (user-error "No slot at point"))
-    (let ((path (alist-get 'path (oref target value))))
+    (let ((path (pm-pool--slot-path (oref target value))))
       (unless (and path (file-exists-p path))
         (user-error "Slot path not on disk: %s" path))
       (dired path))))

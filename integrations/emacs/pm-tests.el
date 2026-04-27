@@ -590,6 +590,52 @@ sectioned wrapper, gets nil, and the buffer shows blank rows."
         (should (equal "alpha" (alist-get 'project (nth 0 flat))))
         (should (equal "beta" (alist-get 'project (nth 2 flat)))))))
 
+  (ert-deftest pm-test--pool-list-renders-real-cli-fields ()
+    "`*pm-pool*' must render the actual CLI fields (uuid/branch/status).
+
+Repro of the live symptom \"data isn't rendering\": the buffer
+columns were headed `UUID/Claim/Path' and the cell extractors
+looked up `claim'/`path'.  The CLI's slot shape only carries
+`repo'/`uuid'/`branch'/`status' — every cell came back empty.  We
+mock `pm--pool-ls' with the real CLI shape and assert the buffer
+text contains the slot's branch and status."
+    (let ((buf (generate-new-buffer "*pm-test-pool*"))
+          (groups
+           '(((repo . "alpha")
+              (slots . (((repo . "alpha")
+                         (uuid . "11111111-2222-3333-4444-555555555555")
+                         (branch . "feature-x")
+                         (status . "demo-project"))))))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'pm--pool-ls)
+                     (lambda (_repo cb) (funcall cb groups))))
+            (with-current-buffer buf
+              (pm-pool-mode)
+              (setq pm-pool--repo nil)
+              (pm-pool-refresh)
+              (let ((text (buffer-substring-no-properties
+                           (point-min) (point-max))))
+                (should (string-match-p "feature-x" text))
+                (should (string-match-p "demo-project" text))
+                (should (string-match-p "11111111" text))
+                (should (string-match-p "alpha" text)))))
+        (kill-buffer buf))))
+
+  (ert-deftest pm-test--pool-slot-path-resolves-from-uuid-and-repo ()
+    "`pm-pool--slot-path' builds <worktrees-dir>/<repo>/<uuid>.
+
+Used by RET on a slot row to open the on-disk path in dired —
+broken pre-fix because the renderer reached for a nonexistent
+`path' field."
+    (let ((pm-pool-worktrees-dir "/tmp/pm-pool-test/"))
+      (should (string= (pm-pool--slot-path
+                        '((repo . "alpha")
+                          (uuid . "abc-uuid")
+                          (branch . "main")
+                          (status . "FREE")))
+                       "/tmp/pm-pool-test/alpha/abc-uuid"))
+      (should (null (pm-pool--slot-path '((branch . "main")))))))
+
   (ert-deftest pm-test--agent-list-no-prefix-defaults-to-all ()
     "`M-x pm-agent-list' with no prefix arg must default to `--all'.
 
