@@ -203,17 +203,23 @@ Updated by full and per-section refreshes; renderers read from here.")
 ;;;; Buffer population
 
 (defun pm-status--render ()
-  "Populate the current buffer from `pm-status--data'."
+  "Populate the current buffer from `pm-status--data'.
+
+Every line goes inside a single root `pm-status' section so that
+`magit-section''s post-command hook can resolve `magit-current-section'
+at every position — bare top-level inserts produce text without the
+`magit-section' text property and trip the hook with a nil section."
   (let ((inhibit-read-only t)
         (line (line-number-at-pos)))
     (erase-buffer)
-    (insert (propertize
-             (format "pm: %s\n\n" pm-status--project)
-             'face 'bold))
-    (pm-status--insert-worktrees)
-    (pm-status--insert-prs)
-    (pm-status--insert-stacker)
-    (pm-status--insert-sessions)
+    (magit-insert-section (pm-status pm-status--project)
+      (magit-insert-heading
+        (propertize (format "pm: %s" pm-status--project) 'face 'bold))
+      (insert "\n")
+      (pm-status--insert-worktrees)
+      (pm-status--insert-prs)
+      (pm-status--insert-stacker)
+      (pm-status--insert-sessions))
     (goto-char (point-min))
     (forward-line (1- line))))
 
