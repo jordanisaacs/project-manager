@@ -1,0 +1,9 @@
+[Unit]
+Description=pm repo mgmt (fetch + ff-only, then warm git object store)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/pm repo pull
+ExecStart=%h/.local/bin/pm repo maintenance
