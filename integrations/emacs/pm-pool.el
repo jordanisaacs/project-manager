@@ -44,6 +44,7 @@
   (let ((inhibit-read-only t)
         (groups pm-pool--data)
         (line (line-number-at-pos)))
+    (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-pool nil)
       (magit-insert-heading

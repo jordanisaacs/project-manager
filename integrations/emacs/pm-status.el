@@ -205,12 +205,15 @@ Updated by full and per-section refreshes; renderers read from here.")
 (defun pm-status--render ()
   "Populate the current buffer from `pm-status--data'.
 
-Every line goes inside a single root `pm-status' section so that
-`magit-section''s post-command hook can resolve `magit-current-section'
-at every position — bare top-level inserts produce text without the
-`magit-section' text property and trip the hook with a nil section."
+The body sits inside a single root `pm-status' section so every
+char carries the `magit-section' text property —
+`magit-section-update-highlight' would otherwise iterate stale
+sections from the previous render and trip with a nil section, so
+we also reset its bookkeeping (`pm-table-reset-section-state')
+before re-rendering, mirroring `magit-refresh-buffer'."
   (let ((inhibit-read-only t)
         (line (line-number-at-pos)))
+    (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-status pm-status--project)
       (magit-insert-heading

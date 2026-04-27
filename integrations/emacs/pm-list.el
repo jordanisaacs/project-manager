@@ -55,11 +55,11 @@
   (let ((inhibit-read-only t)
         (rows pm-list--data)
         (line (line-number-at-pos)))
+    (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-list nil)
       (magit-insert-heading
-        (propertize (format "pm projects (%d)" (length rows))
-                    'face 'bold))
+        (propertize (format "pm projects (%d)" (length rows)) 'face 'bold))
       (let* ((all-cells (mapcan #'pm-list--row-cells rows))
              (header '("Worktree" "Repo" "Branch" "Status"))
              (cell-rows (cons header all-cells))

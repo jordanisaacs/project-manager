@@ -185,6 +185,7 @@ magit-section's post-command hook."
   (let ((inhibit-read-only t)
         (rows pm-agent-list--data)
         (line (line-number-at-pos)))
+    (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-agent-list nil)
       (magit-insert-heading

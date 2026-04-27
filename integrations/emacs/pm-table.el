@@ -71,6 +71,34 @@ across refreshes."
           (setq out (append out (list (cons k (list r))))))))
     out))
 
+;;;; Section state reset
+
+(defvar magit-section-pre-command-section)
+(defvar magit-section-highlight-overlays)
+(defvar magit-section-selection-overlays)
+(defvar magit-section-highlighted-sections)
+(defvar magit-section-focused-sections)
+
+(defun pm-table-reset-section-state ()
+  "Clear magit-section bookkeeping that would otherwise reference stale sections.
+
+`erase-buffer' invalidates the markers inside every section object
+left in these lists by the previous render — when
+`magit-section-post-command-hook' iterates them the next time, the
+stale objects can produce a nil and trip the hook with
+`(wrong-type-argument ... nil)'.  Mirrors the reset block in
+`magit-refresh-buffer' so our re-renders behave the same way."
+  (when (boundp 'magit-section-pre-command-section)
+    (setq magit-section-pre-command-section nil))
+  (when (boundp 'magit-section-highlight-overlays)
+    (setq magit-section-highlight-overlays nil))
+  (when (boundp 'magit-section-selection-overlays)
+    (setq magit-section-selection-overlays nil))
+  (when (boundp 'magit-section-highlighted-sections)
+    (setq magit-section-highlighted-sections nil))
+  (when (boundp 'magit-section-focused-sections)
+    (setq magit-section-focused-sections nil)))
+
 ;;;; Section ancestor walk
 
 (defun pm-section-ancestor-of-type (section types)
