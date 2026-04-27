@@ -3,7 +3,7 @@ Description=Run pm repo mgmt every 15 minutes
 
 [Timer]
 OnBootSec=15s
-OnUnitActiveSec=15min
+OnCalendar=*:0/15
 Unit=pm-repo-mgmt.service
 Persistent=true
 
