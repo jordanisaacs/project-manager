@@ -22,17 +22,24 @@
 
 (require 'cl-lib)
 
+;;;###autoload
 (defgroup pm nil
   "Emacs integration for the pm (project_manager) CLI."
   :group 'tools
   :prefix "pm-")
 
+;; The defcustoms are autoload-cookied so twist's pm-autoloads.el
+;; surfaces them eagerly — submodules (pm-process, pm-project, ...)
+;; reference these variables before pm.el itself is loaded.
+
+;;;###autoload
 (defcustom pm-executable "pm"
   "Path or name of the `pm' executable.
 Resolved via `executable-find' on first use."
   :type 'string
   :group 'pm)
 
+;;;###autoload
 (defcustom pm-projects-dir (expand-file-name "~/.projects/")
   "Root directory under which pm projects (containers) live.
 Each container is `<pm-projects-dir>/<name>/' and contains a
@@ -40,12 +47,14 @@ Each container is `<pm-projects-dir>/<name>/' and contains a
   :type 'directory
   :group 'pm)
 
+;;;###autoload
 (defcustom pm-confirm-destructive t
   "When non-nil, confirm destructive pm operations.
 Applies to `project delete', `wt detach --all', `wt delete', etc."
   :type 'boolean
   :group 'pm)
 
+;;;###autoload
 (defcustom pm-include-files-from-worktrees t
   "When non-nil, container `project-files' federates across worktrees.
 Each entry is prefixed with the worktree alias (e.g. `emacs/init.el').
