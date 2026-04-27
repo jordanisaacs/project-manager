@@ -235,6 +235,18 @@ magit-section's post-command hook."
   "Group ROWS by `project' field, preserving server-provided order."
   (pm-table-group-by rows 'project))
 
+(defun pm-agent-list--flatten-groups (groups)
+  "Flatten `pm agent ls --json' output into a list of session rows.
+
+The CLI emits a sectioned payload: a top-level array of
+\(project, sessions\) groups (see `JsonShape(\"project\",
+\"sessions\")' in `agent/cli/ls.py').  Each session already carries
+its `project' field via `AgentRow.__pm_json__', so flattening just
+concatenates every group's `sessions' list."
+  (apply #'append
+         (mapcar (lambda (group) (alist-get 'sessions group))
+                 groups)))
+
 (defun pm-agent-list-refresh ()
   "Refetch sessions from `pm agent ls --json' and re-render."
   (interactive)
@@ -246,10 +258,11 @@ magit-section's post-command hook."
          (buf (current-buffer)))
     (pm--agent-ls
      project all nil
-     (lambda (rows)
+     (lambda (groups)
        (when (buffer-live-p buf)
          (with-current-buffer buf
-           (setq pm-agent-list--data rows)
+           (setq pm-agent-list--data
+                 (pm-agent-list--flatten-groups groups))
            (pm-agent-list--render)))))))
 
 (defun pm-agent-list-act-at-point ()

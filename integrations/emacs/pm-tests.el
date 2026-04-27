@@ -563,6 +563,65 @@ walking sections from the previous render."
            (error (push (cons p err) errors))))
         (should-not errors))))
 
+  (ert-deftest pm-test--agent-list-flattens-sectioned-json ()
+    "`pm agent ls --json' returns sectioned data; the buffer renders rows.
+
+Repro of the live symptom \"no sessions showing up\": the CLI emits
+[{project, sessions: [...]}], but `pm-agent-list--render' iterates
+its data as if it were a flat list of sessions.  Without
+flattening, every cell looks up `agent'/`session_id' on the
+sectioned wrapper, gets nil, and the buffer shows blank rows."
+    (let ((groups
+           '(((project . "alpha")
+              (sessions . (((project . "alpha") (agent . "claude")
+                            (session_id . "a1") (title . "first")
+                            (last_active . "2026-01-01T00:00:00+00:00"))
+                           ((project . "alpha") (agent . "codex")
+                            (session_id . "a2") (title . "second")
+                            (last_active . "2026-01-02T00:00:00+00:00")))))
+             ((project . "beta")
+              (sessions . (((project . "beta") (agent . "cursor")
+                            (session_id . "b1") (title . "third")
+                            (last_active . "2026-01-03T00:00:00+00:00"))))))))
+      (let ((flat (pm-agent-list--flatten-groups groups)))
+        (should (= 3 (length flat)))
+        (should (equal "claude" (alist-get 'agent (nth 0 flat))))
+        (should (equal "a1" (alist-get 'session_id (nth 0 flat))))
+        (should (equal "alpha" (alist-get 'project (nth 0 flat))))
+        (should (equal "beta" (alist-get 'project (nth 2 flat)))))))
+
+  (ert-deftest pm-test--agent-list-render-shows-rows-after-refresh ()
+    "The agent-list buffer must show session rows after refresh.
+
+Direct repro of \"no sessions showing up\": the CLI returns
+sectioned JSON, `pm-agent-list-refresh' stores it on
+`pm-agent-list--data', then renders.  Pre-fix, the renderer treated
+the sectioned wrapper rows as session rows, looked up nonexistent
+fields, and the buffer printed blank cells.  We mock
+`pm--agent-ls' to feed the real CLI shape (a list of `(project,
+sessions: [...])' groups) into the refresh path."
+    (let ((buf (generate-new-buffer "*pm-test-agent*"))
+          (sectioned
+           '(((project . "alpha")
+              (sessions . (((project . "alpha") (agent . "claude")
+                            (session_id . "abc-123")
+                            (title . "demo title")
+                            (last_active . "2026-01-01T00:00:00+00:00"))))))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'pm--agent-ls)
+                     (lambda (_project _all _limit cb)
+                       (funcall cb sectioned))))
+            (with-current-buffer buf
+              (pm-agent-list-mode)
+              (setq pm-agent-list--scope (cons nil nil))
+              (pm-agent-list-refresh)
+              (let ((text (buffer-substring-no-properties
+                           (point-min) (point-max))))
+                (should (string-match-p "abc-123" text))
+                (should (string-match-p "demo title" text))
+                (should (string-match-p "claude" text)))))
+        (kill-buffer buf))))
+
   (ert-deftest pm-test--agent-dispatch-funcalls-custom-function ()
     "When `pm-agent-dispatch-function' is set, it gets the enriched plist."
     (let* (captured
