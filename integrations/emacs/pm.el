@@ -89,6 +89,7 @@ containers with many large worktrees)."
 (autoload 'pm-agent-list-current-project "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-term "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-vterm "pm-agent" nil t)
+(autoload 'pm-agent-dispatch-ghostel "pm-agent" nil t)
 
 (provide 'pm)
 

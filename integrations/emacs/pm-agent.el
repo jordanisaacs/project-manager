@@ -13,9 +13,10 @@
 ;;    :session-id "..."
 ;;    :project    "kms")
 ;;
-;; Two opt-in dispatchers ship with this file:
-;;   - `pm-agent-dispatch-term'  (built-in `term-mode')
-;;   - `pm-agent-dispatch-vterm' (requires the `vterm' package)
+;; Three opt-in dispatchers ship with this file:
+;;   - `pm-agent-dispatch-term'    (built-in `term-mode')
+;;   - `pm-agent-dispatch-vterm'   (requires the `vterm' package)
+;;   - `pm-agent-dispatch-ghostel' (requires the `ghostel' package)
 ;;
 ;; Default behavior (`pm-agent-dispatch-function' = nil) stages the
 ;; command on the kill-ring and prints a hint, so the package is
@@ -43,6 +44,11 @@
 (declare-function term-mode "term" ())
 (declare-function term-char-mode "term" ())
 
+(defvar ghostel-buffer-name)  ; declared dynamic so the let-binding takes effect
+(declare-function ghostel "ext:ghostel" (&optional arg))
+(declare-function ghostel-paste-string "ext:ghostel" (string))
+(declare-function ghostel-send-key "ext:ghostel" (key-name &optional mods))
+
 ;;;; Dispatch defcustom
 
 ;;;###autoload
@@ -54,8 +60,9 @@ When nil (the default), RET on a session row stages the command on
 the kill-ring and prints a message instead of launching anything.
 
 Set to one of the built-in dispatchers shipped with this file:
-  - `pm-agent-dispatch-term'  (uses Emacs's built-in `term-mode')
-  - `pm-agent-dispatch-vterm' (requires the `vterm' package)
+  - `pm-agent-dispatch-term'    (uses Emacs's built-in `term-mode')
+  - `pm-agent-dispatch-vterm'   (requires the `vterm' package)
+  - `pm-agent-dispatch-ghostel' (requires the `ghostel' package)
 or write your own — for example, to spawn an external terminal
 emulator."
   :type '(choice (const  :tag "Disabled (kill-ring stage)" nil)
@@ -149,6 +156,32 @@ users get a clear hint instead of a void-function backtrace."
       (vterm))
     (vterm-send-string (mapconcat #'shell-quote-argument argv " "))
     (vterm-send-return)))
+
+;;;###autoload
+(defun pm-agent-dispatch-ghostel (plist)
+  "Launch PLIST's `:argv' inside a `ghostel' buffer.
+
+Requires the `ghostel' package; raises `user-error' otherwise so
+users get a clear hint instead of a void-function backtrace.
+
+The argv is shell-quoted and forwarded via `ghostel-paste-string'
+(bracketed paste — the shell treats it as one atomic input even
+when it contains spaces or quotes), then a Return key is sent to
+execute it.  Bracketed paste falls back to a raw write before the
+shell has set DECSET 2004; either way the shell receives the
+argv as a single command line."
+  (unless (require 'ghostel nil t)
+    (user-error "ghostel not installed; pick another `pm-agent-dispatch-function'"))
+  (let* ((argv    (plist-get plist :argv))
+         (cwd     (plist-get plist :cwd))
+         (agent   (plist-get plist :agent))
+         (project (plist-get plist :project))
+         (default-directory cwd)
+         (ghostel-buffer-name (format "*pm-agent: %s/%s*" project agent))
+         (buf (ghostel)))
+    (with-current-buffer buf
+      (ghostel-paste-string (mapconcat #'shell-quote-argument argv " "))
+      (ghostel-send-key "return"))))
 
 ;;;; Buffer + mode
 
