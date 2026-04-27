@@ -223,6 +223,7 @@ before re-rendering, mirroring `magit-refresh-buffer'."
       (pm-status--insert-prs)
       (pm-status--insert-stacker)
       (pm-status--insert-sessions))
+    (pm-table-cover-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 

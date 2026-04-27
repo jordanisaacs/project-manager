@@ -29,6 +29,10 @@
 (defconst pm-test--has-magit-section
   (require 'magit-section nil t))
 (when pm-test--has-magit-section
+  (require 'pm-status)
+  (require 'pm-list)
+  (require 'pm-pool)
+  (require 'pm-repo)
   (require 'pm-agent))
 
 (defmacro pm-test--with-fixture (var &rest body)
@@ -385,6 +389,179 @@ buffer-level value and only :scope can carry the answer."
             (should (string-match-p "agent claude" (car kill-ring)))
             (should (string-match-p "--resume abc" (car kill-ring))))
         (delete-directory pm-projects-dir t))))
+
+  ;;;; Magit-section render correctness
+  ;;
+  ;; Regression tests for `magit-section-post-command-hook' errors.
+  ;; The hook walks `(magit-current-section)' and the
+  ;; highlighted-/focused-sections lists; stale section objects (from
+  ;; a previous render whose markers `erase-buffer' collapsed) plus a
+  ;; nil section at point both produce the cryptic
+  ;; `(wrong-type-argument (or eieio-object cl-structure-object
+  ;; oclosure) nil)'.
+
+  (defun pm-test--status-fixture-data ()
+    "Minimal JSON-shaped status payload exercising every section."
+    `((worktrees . (((wt . "main") (repo . "alpha")
+                     (branch . "trunk") (kind . "active")
+                     (pr . nil) (tracked . t) (detail . "healthy"))
+                    ((wt . "feat") (repo . "alpha")
+                     (branch . "f-x") (kind . "drift")
+                     (pr . nil) (tracked . :json-false)
+                     (detail . "branch ahead"))))
+      (prs . (((wt . "main") (repo . "alpha") (branch . "trunk")
+               (state . "OPEN") (is_draft . :json-false)
+               (merged . :json-false) (is_approved . t)
+               (has_open_comments . :json-false)
+               (pr_url . "https://example.com/pr/1"))))
+      (stacker . (((repo . "alpha")
+                   (info . "[bold blue]alpha[/]\n└── trunk"))))
+      (sessions . (((project . "demo") (agent . "claude")
+                    (session_id . "abc-123") (title . "First")
+                    (last_active . "2026-04-27T00:00:00+00:00"))
+                   ((project . "demo") (agent . "codex")
+                    (session_id . "def-456") (title . "Second")
+                    (last_active . "2026-04-26T12:00:00+00:00"))))))
+
+  (defmacro pm-test--with-rendered-status (&rest body)
+    "Make a `pm-status-mode' buffer with fixture data, render, run BODY in it."
+    (declare (indent 0))
+    `(let ((buf (generate-new-buffer "*pm-test-status*")))
+       (unwind-protect
+           (with-current-buffer buf
+             (pm-status-mode)
+             (setq pm-status--project "demo")
+             (setq pm-status--data (pm-test--status-fixture-data))
+             (pm-status--render)
+             ,@body)
+         (kill-buffer buf))))
+
+  (defun pm-test--every-pos-has-section-p ()
+    "Return nil iff every buffer position resolves to a non-nil section.
+
+`(magit-current-section)' falls back to `magit-root-section' so the
+real check is at every position, the property is set OR the root is
+non-nil — both contribute to a usable section.  This is what
+prevents the post-command hook from observing a nil section."
+    (save-excursion
+      (cl-loop for p from (point-min) to (point-max)
+               for cur = (progn (goto-char p) (magit-current-section))
+               unless cur return p
+               finally return nil)))
+
+  (ert-deftest pm-test--status-render-covers-all-positions ()
+    "Every buffer position must resolve to a non-nil current section.
+
+Repro: pre-fix, the preamble inserted with raw `insert' had no
+`magit-section' text property and `magit-root-section' was nil
+between renders, so `(magit-current-section)' returned nil at the
+top of the buffer."
+    (pm-test--with-rendered-status
+      (let ((bad-pos (pm-test--every-pos-has-section-p)))
+        (should (null bad-pos)))))
+
+  (ert-deftest pm-test--status-render-resets-stale-section-state ()
+    "Re-render must clear `magit-section-highlighted-sections' /
+`magit-section-focused-sections' so the post-command hook does not
+iterate stale section objects whose markers collapsed in
+`erase-buffer'.
+
+Without the reset, the next post-command-hook trips with
+`(wrong-type-argument ... nil)'."
+    (pm-test--with-rendered-status
+      ;; Simulate having highlighted state from a previous render.
+      (setq magit-section-highlighted-sections
+            (list (magit-current-section))
+            magit-section-focused-sections
+            (list (magit-current-section)))
+      ;; Re-render; the helper must wipe the stale lists.
+      (pm-status--render)
+      (should (null magit-section-highlighted-sections))
+      (should (null magit-section-focused-sections))))
+
+  (ert-deftest pm-test--status-post-command-hook-no-error ()
+    "Running the post-command hook at every buffer position must not error.
+
+This is the direct regression for the symptom in `*Messages*`:
+\"Error in post-command-hook (magit-section-post-command-hook):
+\(wrong-type-argument (or eieio-object cl-structure-object oclosure)
+nil)\".  We force `cursor-sensor-mode' off so the test doesn't need
+a live frame, but the rest of the hook (focus + highlight) still
+runs."
+    (pm-test--with-rendered-status
+      (let ((cursor-sensor-mode nil)
+            errors)
+        (cl-loop
+         for p from (point-min) to (point-max) do
+         (goto-char p)
+         (condition-case err
+             (run-hooks 'post-command-hook)
+           (error (push (cons p err) errors))))
+        (should-not errors))))
+
+  (ert-deftest pm-test--status-render-covers-root-with-section-property ()
+    "Every char inside the root section must carry `magit-section'.
+
+Regression for the crash in `magit-region-sections':
+  rbeg = position 1 (root heading text, no `magit-section' property)
+  → `(magit-section-at rbeg)' returns nil
+  → `(magit-section-siblings nil 'next)'
+  → `(oref nil parent)' inside `and-let*'
+  → `(wrong-type-argument (or eieio-object cl-structure-object oclosure) nil)'
+`magit-section--set-section-properties' explicitly skips the root,
+so heading text and any inter-child gap need explicit covering."
+    (pm-test--with-rendered-status
+      ;; `point-max' is one past the last char; the property at that
+      ;; position is irrelevant since `magit-section-at' is only
+      ;; called at positions of actual buffer text.
+      (cl-loop
+       for p from (point-min) below (point-max) do
+       (should (get-text-property p 'magit-section)))))
+
+  (ert-deftest pm-test--status-region-from-root-heading-no-error ()
+    "`magit-region-sections' must not error when the region begins at point-min.
+
+Direct repro of the live-daemon symptom.  When the user activates a
+region that begins inside the root section's heading line and ends
+inside a child section, magit-section's post-command hook
+eventually calls `(magit-region-sections)', which calls
+`(magit-section-at rbeg)'.  If rbeg has no `magit-section'
+property (root-heading region pre-fix), that returns nil; then
+`magit-section-siblings' calls `(oref nil parent)' inside
+`and-let*' and signals
+`(wrong-type-argument (or eieio-object cl-structure-object oclosure) nil)'."
+    (pm-test--with-rendered-status
+      (let ((inhibit-read-only t))
+        (goto-char (point-min))
+        (forward-line 5)
+        (push-mark (point-min) t t)
+        (activate-mark)
+        ;; The hook itself calls this — call it directly to exercise
+        ;; the exact failing path without depending on the hook's
+        ;; cond branches firing in batch.
+        (let (err)
+          (condition-case e (magit-region-sections)
+            (error (setq err e)))
+          (should-not err)))))
+
+  (ert-deftest pm-test--status-multiple-renders-no-stale-state ()
+    "A render-erase-render cycle must not leave the post-command hook
+walking sections from the previous render."
+    (pm-test--with-rendered-status
+      ;; First render already happened; now move point so the hook
+      ;; populates highlight state, then re-render and walk again.
+      (goto-char (point-min))
+      (run-hooks 'post-command-hook)
+      ;; Re-render with the same data.
+      (pm-status--render)
+      (let (errors)
+        (cl-loop
+         for p from (point-min) to (point-max) do
+         (goto-char p)
+         (condition-case err
+             (run-hooks 'post-command-hook)
+           (error (push (cons p err) errors))))
+        (should-not errors))))
 
   (ert-deftest pm-test--agent-dispatch-funcalls-custom-function ()
     "When `pm-agent-dispatch-function' is set, it gets the enriched plist."

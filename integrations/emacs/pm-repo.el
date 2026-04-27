@@ -57,6 +57,7 @@
           (magit-insert-section (pm-repo row)
             (insert (pm-table-row (pm-repo--cells row) widths))
             (insert "\n")))))
+    (pm-table-cover-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 

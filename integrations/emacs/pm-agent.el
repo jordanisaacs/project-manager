@@ -215,6 +215,7 @@ magit-section's post-command hook."
                     (insert (propertize agent-cell 'face agent-face))
                     (insert after)
                     (insert "\n")))))))))
+    (pm-table-cover-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 

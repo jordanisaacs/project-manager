@@ -73,6 +73,7 @@
                 (magit-insert-section (pm-pool-slot slot)
                   (insert (pm-table-row cells widths))
                   (insert "\n"))))))))
+    (pm-table-cover-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 

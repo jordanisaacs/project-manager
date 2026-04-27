@@ -78,6 +78,7 @@ across refreshes."
 (defvar magit-section-selection-overlays)
 (defvar magit-section-highlighted-sections)
 (defvar magit-section-focused-sections)
+(defvar magit-root-section)
 
 (defun pm-table-reset-section-state ()
   "Clear magit-section bookkeeping that would otherwise reference stale sections.
@@ -98,6 +99,33 @@ stale objects can produce a nil and trip the hook with
     (setq magit-section-highlighted-sections nil))
   (when (boundp 'magit-section-focused-sections)
     (setq magit-section-focused-sections nil)))
+
+(defun pm-table-cover-root-section ()
+  "Stamp `magit-section' on every char in the root section's region.
+
+`magit-section--set-section-properties' explicitly skips the root
+section, so any text in the root that's not inside a child (e.g. a
+heading line, or a blank line between top-level children) carries
+no `magit-section' property.  When such a position participates in
+a region selection, `magit-region-sections' calls
+`(magit-section-at rbeg)' → nil, then `magit-section-siblings nil'
+→ `(oref nil parent)' → `(wrong-type-argument ... nil)'.
+
+Run this as the last step of every render so every position in the
+buffer resolves to a non-nil section."
+  (when (and (boundp 'magit-root-section) magit-root-section)
+    (let ((start (oref magit-root-section start))
+          (end   (oref magit-root-section end))
+          (props `(magit-section ,magit-root-section))
+          (inhibit-read-only t))
+      (save-excursion
+        (goto-char start)
+        (while (< (point) end)
+          (let ((next (or (next-single-property-change (point) 'magit-section)
+                          end)))
+            (unless (get-text-property (point) 'magit-section)
+              (add-text-properties (point) next props))
+            (goto-char next)))))))
 
 ;;;; Section ancestor walk
 
