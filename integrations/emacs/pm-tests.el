@@ -590,6 +590,51 @@ sectioned wrapper, gets nil, and the buffer shows blank rows."
         (should (equal "alpha" (alist-get 'project (nth 0 flat))))
         (should (equal "beta" (alist-get 'project (nth 2 flat)))))))
 
+  (ert-deftest pm-test--agent-list-no-prefix-defaults-to-all ()
+    "`M-x pm-agent-list' with no prefix arg must default to `--all'.
+
+The global agent-list buffer should always show sessions across
+every project — the single-project view is reachable via
+`pm-agent-list-current-project'.  Without a prefix arg, scope must
+be `(nil . t)' (project nil, all t) so the CLI is invoked as
+`pm agent ls --all --json'."
+    (let (captured-scope captured-args)
+      (cl-letf (((symbol-function 'pm--agent-ls)
+                 (lambda (project all limit cb)
+                   (setq captured-args (list project all limit))
+                   (funcall cb '())))
+                ((symbol-function 'pop-to-buffer) #'identity))
+        (let ((current-prefix-arg nil))
+          (call-interactively #'pm-agent-list))
+        (when-let ((buf (get-buffer "*pm-agent-ls*")))
+          (with-current-buffer buf
+            (setq captured-scope pm-agent-list--scope))
+          (kill-buffer buf)))
+      (should (equal captured-scope (cons nil t)))
+      (should (equal captured-args (list nil t nil)))))
+
+  (ert-deftest pm-test--agent-list-prefix-prompts-for-project ()
+    "With a prefix arg, `pm-agent-list' prompts for a project name.
+
+Scope must be `(<chosen> . nil)' so the CLI runs with `--project
+<chosen>' and no `--all'."
+    (let (captured-scope captured-args)
+      (cl-letf (((symbol-function 'pm--agent-ls)
+                 (lambda (project all limit cb)
+                   (setq captured-args (list project all limit))
+                   (funcall cb '())))
+                ((symbol-function 'pm--read-project)
+                 (lambda (&rest _) "alpha"))
+                ((symbol-function 'pop-to-buffer) #'identity))
+        (let ((current-prefix-arg '(4)))
+          (call-interactively #'pm-agent-list))
+        (when-let ((buf (get-buffer "*pm-agent-ls*")))
+          (with-current-buffer buf
+            (setq captured-scope pm-agent-list--scope))
+          (kill-buffer buf)))
+      (should (equal captured-scope (cons "alpha" nil)))
+      (should (equal captured-args (list "alpha" nil nil)))))
+
   (ert-deftest pm-test--agent-list-render-shows-rows-after-refresh ()
     "The agent-list buffer must show session rows after refresh.
 

@@ -282,20 +282,19 @@ concatenates every group's `sessions' list."
 
 ;;;###autoload
 (defun pm-agent-list (&optional project all)
-  "Open a magit-style buffer listing recent agent sessions.
+  "Open a magit-style buffer listing recent agent sessions across pm projects.
 
-With no arguments, scope follows the same rule as `pm agent ls':
-inside a pm tree it shows that project, otherwise it shows every
-project.  PROJECT (a name) limits to one project; ALL forces the
-all-projects view.
+With no arguments (or interactively with no prefix), shows sessions
+from every project — i.e. `pm agent ls --all'.  Use
+`pm-agent-list-current-project' for the single-project view.
 
-Interactively, with a prefix arg, prompt for the project; with two
-prefix args, force `--all'."
+PROJECT (a name) limits to one project; ALL forces the
+all-projects view.  Interactively, a prefix arg prompts for a
+project to scope to."
   (interactive
    (cond
-    ((equal current-prefix-arg '(16)) (list nil t))
-    (current-prefix-arg               (list (pm--read-project "Sessions for: ") nil))
-    (t                                (list nil nil))))
+    (current-prefix-arg (list (pm--read-project "Sessions for: ") nil))
+    (t                  (list nil t))))
   (let ((buf (get-buffer-create "*pm-agent-ls*")))
     (with-current-buffer buf
       (pm-agent-list-mode)
