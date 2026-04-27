@@ -1,8 +1,8 @@
 ;;; pm.el --- Emacs integration for pm CLI -*- lexical-binding: t -*-
 
 ;; Author: Jordan Isaacs
-;; Version: 0.1.0
-;; Package-Requires: ((emacs "28.1") (transient "0.4"))
+;; Version: 0.2.0
+;; Package-Requires: ((emacs "28.1") (transient "0.4") (magit-section "4.0"))
 ;; Keywords: tools, vc
 
 ;;; Commentary:
@@ -67,22 +67,28 @@ containers with many large worktrees)."
 (require 'pm-project)
 (require 'pm-commands)
 
-;; pm-ui and pm-transient are loaded on demand via autoloads.
+;; pm-ui, pm-transient, and the magit-section buffer modules are loaded
+;; on demand via autoloads.  Heavy modules (status / agent / list /
+;; pool / repo) only load when the user actually opens that buffer.
 (autoload 'pm-dispatch "pm-transient" nil t)
 (autoload 'pm-project-dispatch "pm-transient" nil t)
 (autoload 'pm-project-create "pm-ui" nil t)
-(autoload 'pm-project-status "pm-ui" nil t)
-(autoload 'pm-project-list "pm-ui" nil t)
 (autoload 'pm-project-delete "pm-ui" nil t)
 (autoload 'pm-project-switch "pm-ui" nil t)
 (autoload 'pm-wt-create "pm-ui" nil t)
 (autoload 'pm-wt-attach "pm-ui" nil t)
 (autoload 'pm-wt-detach "pm-ui" nil t)
 (autoload 'pm-wt-delete "pm-ui" nil t)
-(autoload 'pm-pool-list "pm-ui" nil t)
 (autoload 'pm-pool-add "pm-ui" nil t)
-(autoload 'pm-repo-list "pm-ui" nil t)
 (autoload 'pm-repo-pull "pm-ui" nil t)
+(autoload 'pm-project-status "pm-status" nil t)
+(autoload 'pm-project-list "pm-list" nil t)
+(autoload 'pm-pool-list "pm-pool" nil t)
+(autoload 'pm-repo-list "pm-repo" nil t)
+(autoload 'pm-agent-list "pm-agent" nil t)
+(autoload 'pm-agent-list-current-project "pm-agent" nil t)
+(autoload 'pm-agent-dispatch-term "pm-agent" nil t)
+(autoload 'pm-agent-dispatch-vterm "pm-agent" nil t)
 
 (provide 'pm)
 

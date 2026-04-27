@@ -9,6 +9,9 @@ git worktree under a container as a "subproject" of that container.
 ## Requirements
 
 - Emacs 28.1 or newer (built-in `transient`, `cl-defmethod`).
+- `magit-section` 4.0 or newer — the standalone library, not full
+  magit. Available on MELPA / NonGNU ELPA. Used by every
+  status / list / pool / repo / agent buffer.
 - `pm` on `$PATH`.
 
 ## Install
@@ -42,9 +45,10 @@ Adjust `:load-path` if the repo lives elsewhere.
 | ------- | --- | ------------------------------------------------------- |
 | Create  | `c` | new project                                             |
 |         | `+` | mint a pool slot                                        |
-| Inspect | `l` | list projects (tabulated)                               |
-|         | `o` | list pool                                               |
+| Inspect | `l` | list projects (magit-section)                           |
+|         | `o` | list pool slots                                         |
 |         | `R` | list canonical repos                                    |
+|         | `a` | list recent agent sessions                              |
 | Switch  | `p` | switch to a project                                     |
 | System  | `g` | refresh                                                 |
 |         | `F` | pull all canonical repos                                |
@@ -63,6 +67,7 @@ prompt even when in a pm tree.
 |           | `-n` | `--no-branch` (attach skips branch restore) |
 |           | `-d` | `--dry-run` (detach simulation)           |
 | Inspect   | `s`  | status                                    |
+|           | `a`  | sessions for this project                 |
 | Worktrees | `n`  | new                                       |
 |           | `a`  | attach                                    |
 |           | `D`  | detach                                    |
@@ -83,6 +88,78 @@ worktree prompt.
 
 Every `pm` invocation is async; non-zero exits surface via
 `display-warning` and a kept `*pm: <verb>*` buffer for inspection.
+
+### Buffers
+
+All listing / status surfaces are `magit-section` buffers. Movement
+(`n`/`p`/`M-n`/`M-p`), folding (`TAB`/`S-TAB`), and section ancestry
+behave exactly like in magit.
+
+#### `*pm-status: <name>*` (`M-x pm-project-status`)
+
+Sections: **Worktrees** (grouped by repo), **PRs**, **Stacker** (rich
+markup parsed into Emacs faces), **Recent sessions** (grouped by
+project, agent name colored).
+
+| Key   | Action                                                       |
+| ----- | ------------------------------------------------------------ |
+| `g`   | Refetch every section (`pm project status --json`)           |
+| `r w` | Refetch only Worktrees (`-s worktrees`)                      |
+| `r p` | Refetch only PRs (`-s prs`)                                  |
+| `r s` | Refetch only Stacker (`-s stacker`)                          |
+| `r a` | Refetch only Sessions (`-s sessions`)                        |
+| `RET` | Action depends on row: switch project (worktree), open URL (PR), resume (session) |
+| `q`   | Quit                                                         |
+
+Per-section refresh exists because `pm project status` accepts a
+`--section` flag (see "CLI extensions" below) — Emacs only re-pays for
+the section the user wants up-to-date.
+
+#### `*pm-agent-ls*` (`M-x pm-agent-list`)
+
+Sections per project; rows per session, agent name styled. `RET`
+hands the row off to `pm-agent-dispatch-function`. Prefix arg prompts
+for a project; double-prefix forces `--all`.
+
+#### Project / pool / repo
+
+`pm-project-list`, `pm-pool-list`, `pm-repo-list` are also
+`magit-section` buffers. Common keys: `g` refresh, `RET` row action,
+`q` quit. Project-list adds `s` (status) and `D` (delete); repo-list's
+`RET` pulls the repo at point.
+
+### Resuming agent sessions from Emacs
+
+`RET` on a session row calls `pm-agent-dispatch-function`. Default is
+`nil`, which stages the resume command on the kill-ring and prints a
+hint — safe out of the box.
+
+Two opt-in dispatchers ship with the package:
+
+```elisp
+;; Built-in `term-mode' (no extra deps)
+(setq pm-agent-dispatch-function #'pm-agent-dispatch-term)
+
+;; vterm (if you have it)
+(setq pm-agent-dispatch-function #'pm-agent-dispatch-vterm)
+```
+
+Or write your own — the function receives a plist with `:argv`,
+`:cwd`, `:agent`, `:session-id`, `:project`.
+
+### CLI extensions
+
+`pm project status` learned `--section` / `-s`:
+
+```sh
+pm project status -s worktrees,prs       # skip stacker + sessions
+pm project status -s sessions --json     # cheapest variant
+```
+
+`-s` accepts a comma-separated subset of
+`worktrees,prs,stacker,sessions`. JSON output only includes keys for
+the requested sections; unknown values fail with `pm: unknown section
+'<name>'`.
 
 ### Subproject naming
 
@@ -112,6 +189,7 @@ top-level container entries.
 | `pm-projects-dir`                   | `"~/.projects/"`                  | Container root.                          |
 | `pm-confirm-destructive`            | `t`                               | Prompt before destructive ops.           |
 | `pm-include-files-from-worktrees`   | `t`                               | Federate `project-files` across worktrees. |
+| `pm-agent-dispatch-function`        | `nil`                             | Function called on `RET` over a session row. `nil` stages the command on the kill-ring; set to `pm-agent-dispatch-term`, `pm-agent-dispatch-vterm`, or your own to launch in-Emacs. |
 
 ## Tests
 

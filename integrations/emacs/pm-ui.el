@@ -139,118 +139,6 @@
   (project-switch-project
    (file-name-as-directory (expand-file-name name pm-projects-dir))))
 
-;;;; Status buffer
-
-(defun pm--render-status (name data)
-  (insert (propertize (format "pm project status: %s\n\n" name)
-                      'face 'bold))
-  (let ((sections '((worktrees . "Worktrees")
-                    (prs       . "Pull requests")
-                    (sessions  . "Recent agent sessions"))))
-    (dolist (sec sections)
-      (let ((rows (alist-get (car sec) data)))
-        (insert (propertize (format "%s\n" (cdr sec))
-                            'face '(:weight bold)))
-        (if (null rows)
-            (insert "  (none)\n\n")
-          (dolist (row rows)
-            (insert "  ")
-            (insert (mapconcat
-                     (lambda (cell)
-                       (format "%s=%s" (car cell)
-                               (or (cdr cell) "—")))
-                     row "  "))
-            (insert "\n"))
-          (insert "\n"))))))
-
-;;;###autoload
-(defun pm-project-status (name)
-  "Show `pm project status NAME' in a popup buffer."
-  (interactive (list (pm--read-project "Status of: ")))
-  (pm--project-status
-   name
-   (lambda (data)
-     (let ((buf (get-buffer-create (format "*pm-status: %s*" name))))
-       (with-current-buffer buf
-         (let ((inhibit-read-only t))
-           (erase-buffer)
-           (pm--render-status name data))
-         (goto-char (point-min))
-         (special-mode))
-       (pop-to-buffer buf)))))
-
-;;;; Project list (tabulated)
-
-(defvar pm-list-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'pm-list-switch)
-    (define-key map (kbd "s") #'pm-list-status)
-    (define-key map (kbd "D") #'pm-list-delete)
-    map))
-
-(define-derived-mode pm-list-mode tabulated-list-mode "pm-list"
-  "Tabulated list of pm projects × worktrees."
-  (setq tabulated-list-format
-        [("Project" 24 t)
-         ("Worktree" 16 t)
-         ("Repo" 20 t)
-         ("Branch" 30 t)
-         ("Status" 10 t)])
-  (setq tabulated-list-padding 1)
-  (tabulated-list-init-header)
-  (add-hook 'tabulated-list-revert-hook
-            (lambda () (pm--list-populate)) nil t))
-
-(defun pm--list-populate ()
-  (pm--project-ls
-   (lambda (rows)
-     (let (entries)
-       (dolist (row rows)
-         (let ((project (alist-get 'project row)))
-           (dolist (wt (alist-get 'worktrees row))
-             (push (list (cons project (alist-get 'wt wt))
-                         (vector project
-                                 (or (alist-get 'wt wt) "")
-                                 (or (alist-get 'repo wt) "")
-                                 (or (alist-get 'branch wt) "")
-                                 (or (alist-get 'status wt) "")))
-                   entries))))
-       (with-current-buffer (get-buffer-create "*pm-list*")
-         (let ((inhibit-read-only t))
-           (setq tabulated-list-entries (nreverse entries))
-           (tabulated-list-print t)))))))
-
-;;;###autoload
-(defun pm-project-list ()
-  "List pm projects and worktrees in a tabulated buffer."
-  (interactive)
-  (let ((buf (get-buffer-create "*pm-list*")))
-    (with-current-buffer buf
-      (pm-list-mode)
-      (pm--list-populate))
-    (pop-to-buffer buf)))
-
-(defun pm-list-current-project ()
-  (car (tabulated-list-get-id)))
-
-(defun pm-list-current-worktree ()
-  (cdr (tabulated-list-get-id)))
-
-(defun pm-list-switch ()
-  (interactive)
-  (when-let ((name (pm-list-current-project)))
-    (pm-project-switch name)))
-
-(defun pm-list-status ()
-  (interactive)
-  (when-let ((name (pm-list-current-project)))
-    (pm-project-status name)))
-
-(defun pm-list-delete ()
-  (interactive)
-  (when-let ((name (pm-list-current-project)))
-    (pm-project-delete name)))
-
 ;;;; Worktree commands
 
 ;;;###autoload
@@ -315,29 +203,7 @@ ACTION is the wrapper symbol; VERB is the user-visible name."
   (interactive (list (pm--read-project "Delete worktrees in: ")))
   (pm--wt-action 'delete "Delete" name))
 
-;;;; Pool
-
-;;;###autoload
-(defun pm-pool-list (&optional repo)
-  "Show pool slots; optionally filtered by REPO."
-  (interactive (list (when current-prefix-arg
-                       (read-string "Repo (empty = all): "))))
-  (pm--pool-ls
-   (and repo (not (string-empty-p repo)) repo)
-   (lambda (data)
-     (pm--show-tabulated
-      "*pm-pool*"
-      [("Repo" 20 t) ("UUID" 38 t) ("Claim" 16 t) ("Path" 60 t)]
-      (mapcan
-       (lambda (group)
-         (mapcar
-          (lambda (slot)
-            (list nil (vector (or (alist-get 'repo group) "")
-                              (or (alist-get 'uuid slot) "")
-                              (or (alist-get 'claim slot) "")
-                              (or (alist-get 'path slot) ""))))
-          (alist-get 'slots group)))
-       data)))))
+;;;; Pool / repo verbs (the listing buffers live in `pm-pool', `pm-repo')
 
 ;;;###autoload
 (defun pm-pool-add (repo)
@@ -351,29 +217,6 @@ ACTION is the wrapper symbol; VERB is the user-visible name."
               (mapconcat (lambda (r) (or (alist-get 'uuid r) "?"))
                          rows ", ")))))
 
-;;;; Repo
-
-;;;###autoload
-(defun pm-repo-list (&optional offline)
-  "List canonical repos; with prefix arg, OFFLINE (skip fetch)."
-  (interactive "P")
-  (pm--repo-ls
-   offline
-   (lambda (rows)
-     (pm--show-tabulated
-      "*pm-repos*"
-      [("Repo" 20 t) ("Branch" 24 t) ("Dirty" 6 t) ("Ahead" 6 t)
-       ("Behind" 6 t) ("Submods" 10 t)]
-      (mapcar
-       (lambda (r)
-         (list nil (vector (or (alist-get 'repo r) "")
-                           (or (alist-get 'branch r) "")
-                           (if (alist-get 'dirty r) "yes" "no")
-                           (format "%s" (or (alist-get 'ahead r) 0))
-                           (format "%s" (or (alist-get 'behind r) 0))
-                           (or (alist-get 'submodules r) ""))))
-       rows)))))
-
 ;;;###autoload
 (defun pm-repo-pull (&optional repo)
   "Fetch all canonical repos; with prefix arg, prompt for one REPO."
@@ -383,25 +226,6 @@ ACTION is the wrapper symbol; VERB is the user-visible name."
   (pm--repo-pull
    (and repo (not (string-empty-p repo)) repo)
    (lambda (_) (message "pm: pull complete"))))
-
-;;;; Generic tabulated buffer helper
-
-(defvar-local pm--tabulated-format nil)
-
-(define-derived-mode pm-tabulated-mode tabulated-list-mode "pm"
-  "Generic tabulated buffer for pm output."
-  (tabulated-list-init-header))
-
-(defun pm--show-tabulated (buffer-name format entries)
-  (let ((buf (get-buffer-create buffer-name)))
-    (with-current-buffer buf
-      (pm-tabulated-mode)
-      (setq tabulated-list-format format)
-      (setq pm--tabulated-format format)
-      (tabulated-list-init-header)
-      (setq tabulated-list-entries entries)
-      (tabulated-list-print t))
-    (pop-to-buffer buf)))
 
 (provide 'pm-ui)
 

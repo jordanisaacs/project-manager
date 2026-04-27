@@ -1,6 +1,7 @@
 """Single-project status: per-worktree findings joined with branch + PR + stacker state."""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from project_manager import check as check_mod
@@ -15,6 +16,29 @@ from project_manager.stacker.models import PRState, TrackedBranch
 from project_manager.stacker.render import graph
 from project_manager.stacker.render.ls import LsOptions, RenderOptions
 from project_manager.stacker.render.ls import ls_text as render_ls_text
+
+
+class StatusSection(StrEnum):
+    """One slice of a project status report.
+
+    Selectable via `pm project status --section`. `SESSIONS` is gathered
+    by `agent.ls` (not this module) but lives in the same enum so the
+    CLI parses one comma list. The other three are fields on
+    `ProjectStatus`; `status()` skips work for any not requested.
+    """
+
+    WORKTREES = "worktrees"
+    PRS = "prs"
+    STACKER = "stacker"
+    SESSIONS = "sessions"
+
+
+ALL_STATUS_SECTIONS: frozenset[StatusSection] = frozenset(StatusSection)
+# The subset that this module's `status()` actually populates; sessions
+# are someone else's problem.
+_PROJECT_SECTIONS: frozenset[StatusSection] = frozenset(
+    {StatusSection.WORKTREES, StatusSection.PRS, StatusSection.STACKER},
+)
 
 _KIND_STYLE: dict[check_mod.Kind, str] = {
     check_mod.Kind.ACTIVE: "green",
@@ -349,11 +373,28 @@ def _gather_stacker(
     return rows
 
 
-def status(paths: Paths, project: str) -> ProjectStatus:
+def status(
+    paths: Paths,
+    project: str,
+    sections: frozenset[StatusSection] = ALL_STATUS_SECTIONS,
+) -> ProjectStatus:
     """Gather worktree findings + branch + cached PR state + stacker arms.
+
+    `sections` selects which slices to populate; unrequested fields are
+    empty lists. Pass `frozenset({StatusSection.WORKTREES})` to skip the
+    stacker tree render (the most expensive piece) when the caller only
+    wants the worktree health table. With no project section requested,
+    all heavy fanout is skipped and an empty `ProjectStatus` is returned
+    — useful when the caller only wants sessions (gathered elsewhere).
 
     Raises `ProjectError` if the project doesn't exist.
     """
+    wanted = sections & _PROJECT_SECTIONS
+    if not wanted:
+        # Validate the project still exists so a typo / wrong cwd fails
+        # fast instead of returning an empty status silently.
+        discovery.require_project_db(paths, project)
+        return ProjectStatus(worktrees=[], prs=[], stacker=[])
     wt_rows = {w: (r, u) for w, r, u in discovery.read_wts(paths, project)}
     findings = check_mod.check_project(paths, project)
     repo_branches: dict[str, dict[Path, str]] = {}
@@ -366,6 +407,9 @@ def status(paths: Paths, project: str) -> ProjectStatus:
     tracked_by_key: dict[tuple[str, str], TrackedBranch] = {
         (tb.repo_name, tb.branch): tb for tb in ctx.db.list_branches()
     }
+    want_worktrees = StatusSection.WORKTREES in sections
+    want_prs = StatusSection.PRS in sections
+    want_stacker = StatusSection.STACKER in sections
     worktrees: list[WorktreeRow] = []
     prs: list[PRRow] = []
     tracked_per_repo: dict[str, list[TrackedBranch]] = {}
@@ -380,25 +424,32 @@ def status(paths: Paths, project: str) -> ProjectStatus:
         tracked_entry = (
             tracked_by_key.get((repo, branch)) if repo and branch else None
         )
-        worktrees.append(
-            WorktreeRow(
-                wt=f.wt,
-                repo=repo,
-                branch=branch,
-                pr=pr,
-                tracked=tracked_entry is not None,
-                finding=f,
-            ),
-        )
-        if pr is not None and f.wt is not None and repo is not None and branch is not None:
+        if want_worktrees:
+            worktrees.append(
+                WorktreeRow(
+                    wt=f.wt,
+                    repo=repo,
+                    branch=branch,
+                    pr=pr,
+                    tracked=tracked_entry is not None,
+                    finding=f,
+                ),
+            )
+        if (
+            want_prs and pr is not None and f.wt is not None
+            and repo is not None and branch is not None
+        ):
             prs.append(PRRow(wt=f.wt, repo=repo, branch=branch, pr=pr))
-        if tracked_entry is not None and repo is not None:
+        if want_stacker and tracked_entry is not None and repo is not None:
             tracked_per_repo.setdefault(repo, []).append(tracked_entry)
         # Every live worktree with a known branch contributes a label,
         # even if untracked — so if a branch later becomes tracked but
         # the renderer consults this map, it still gets the right label.
-        if f.wt is not None and repo is not None and branch is not None:
+        if want_stacker and f.wt is not None and repo is not None and branch is not None:
             wt_labels[(repo, branch)] = f.wt
     prs.sort(key=lambda r: (r.repo, r.wt))
-    stacker = _gather_stacker(ctx, paths, tracked_per_repo, wt_labels)
+    stacker = (
+        _gather_stacker(ctx, paths, tracked_per_repo, wt_labels)
+        if want_stacker else []
+    )
     return ProjectStatus(worktrees=worktrees, prs=prs, stacker=stacker)

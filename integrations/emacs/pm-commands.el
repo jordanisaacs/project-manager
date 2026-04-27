@@ -29,6 +29,17 @@
 (defun pm--project-status (name cb)
   (pm--run-async (pm--strs "project" "status" name "--json") cb))
 
+(defun pm--project-status-section (sections name cb)
+  "Run `pm project status NAME -s SECTIONS --json' asynchronously.
+
+SECTIONS is a comma-separated string drawn from
+`worktrees,prs,stacker,sessions' — passed through to the CLI's
+`-s' flag.  The callback receives a JSON object whose keys are
+exactly the requested sections."
+  (pm--run-async
+   (pm--strs "project" "status" name "-s" sections "--json")
+   cb))
+
 (defun pm--project-create (name spec cb)
   (pm--run-async
    (pm--strs "project" "create" name
@@ -95,6 +106,21 @@
   (pm--run-async
    (pm--strs "repo" "pull" (and repo (list "--repo" repo)) "--json")
    cb :tag 'repo-pull))
+
+;;;; agent
+
+(defun pm--agent-ls (project all limit cb)
+  "Run `pm agent ls --json' (optionally scoped to PROJECT or ALL projects).
+
+LIMIT is the integer per-project session cap (passed via `-n');
+nil omits the flag and lets the CLI pick a default."
+  (pm--run-async
+   (pm--strs "agent" "ls"
+             (and project (list "--project" project))
+             (and all '("--all"))
+             (and limit (list "-n" (number-to-string limit)))
+             "--json")
+   cb))
 
 (provide 'pm-commands)
 

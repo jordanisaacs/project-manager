@@ -21,6 +21,15 @@
 (require 'pm-commands)
 (require 'pm-ui)
 (require 'pm-transient)
+(require 'pm-faces)
+(require 'pm-table)
+
+;; magit-section is required for `pm-status', `pm-list', `pm-pool',
+;; `pm-repo', `pm-agent'.  Tests that touch those modules guard on it.
+(defconst pm-test--has-magit-section
+  (require 'magit-section nil t))
+(when pm-test--has-magit-section
+  (require 'pm-agent))
 
 (defmacro pm-test--with-fixture (var &rest body)
   "Bind VAR to a temp pm-projects-dir and evaluate BODY.
@@ -298,6 +307,105 @@ buffer-level value and only :scope can carry the answer."
         (should captured-scope)
         (should (string= (file-name-as-directory captured-scope)
                          (file-name-as-directory (concat root "beta"))))))))
+
+;;;; Rich-markup parser
+
+(defun pm-test--rich (s)
+  "Strip text properties from a parser output for equality checks."
+  (substring-no-properties (pm-table-render-rich-markup s)))
+
+(ert-deftest pm-test--rich-markup-passes-plain-text ()
+  (should (string= (pm-test--rich "hello") "hello")))
+
+(ert-deftest pm-test--rich-markup-strips-known-tags ()
+  (should (string= (pm-test--rich "[bold blue]name[/]") "name"))
+  (should (string= (pm-test--rich "[/]trailing-close[/]") "trailing-close"))
+  (should (string= (pm-test--rich "a[bold]b[/]c") "abc")))
+
+(ert-deftest pm-test--rich-markup-keeps-unknown-tags-as-no-style ()
+  ;; Unknown style words don't break parsing — content passes through.
+  (should (string= (pm-test--rich "[mystery]hi[/]") "hi")))
+
+(ert-deftest pm-test--rich-markup-handles-escaped-brackets ()
+  (should (string= (pm-test--rich "x\\[y\\]z") "x[y]z")))
+
+(ert-deftest pm-test--rich-markup-applies-faces ()
+  "Bytes inside a known tag carry the mapped face on a `face' property."
+  (let* ((out (pm-table-render-rich-markup "[bold]A[/]B"))
+         (face-on-A (get-text-property 0 'face out))
+         (face-on-B (get-text-property 1 'face out)))
+    (should (string= (substring-no-properties out) "AB"))
+    (should (memq 'bold face-on-A))
+    (should (or (null face-on-B) (equal face-on-B '())))))
+
+;;;; Table grouping + width helpers
+
+(ert-deftest pm-test--table-group-by-preserves-order ()
+  (let* ((rows '(((repo . "a") (wt . "x"))
+                 ((repo . "b") (wt . "y"))
+                 ((repo . "a") (wt . "z"))))
+         (groups (pm-table-group-by rows 'repo)))
+    (should (equal (mapcar #'car groups) '("a" "b")))
+    (should (= (length (cdr (assoc "a" groups))) 2))
+    (should (= (length (cdr (assoc "b" groups))) 1))))
+
+(ert-deftest pm-test--table-row-pads-non-trailing-cells ()
+  (let* ((widths '(5 5 5))
+         (line (pm-table-row '("a" "bb" "ccc") widths)))
+    (should (string= line "a      bb     ccc"))))
+
+;;;; Agent argv + dispatch
+
+(when pm-test--has-magit-section
+  (ert-deftest pm-test--agent-build-argv-claude ()
+    (let ((pm-executable "pm"))
+      (should (equal (pm-agent--build-argv "claude" "abc" "alpha")
+                     '("pm" "agent" "claude" "--project" "alpha"
+                       "--resume" "abc")))))
+
+  (ert-deftest pm-test--agent-build-argv-codex-uses-subcommand ()
+    "Codex takes `resume <id>' as a positional subcommand, not `--resume'."
+    (let ((pm-executable "pm"))
+      (should (equal (pm-agent--build-argv "codex" "xyz" "beta")
+                     '("pm" "agent" "codex" "--project" "beta"
+                       "resume" "xyz")))))
+
+  (ert-deftest pm-test--agent-dispatch-default-stages-to-kill-ring ()
+    "With `pm-agent-dispatch-function' nil, the command goes to the kill-ring."
+    (let ((pm-agent-dispatch-function nil)
+          (pm-projects-dir (file-name-as-directory (make-temp-file "pm-d-" t)))
+          (pm-executable "pm")
+          (kill-ring nil))
+      (unwind-protect
+          (progn
+            (make-directory (concat pm-projects-dir "alpha/") t)
+            (pm-agent--dispatch
+             '(:agent "claude" :session-id "abc" :project "alpha"))
+            (should (= 1 (length kill-ring)))
+            (should (string-match-p "agent claude" (car kill-ring)))
+            (should (string-match-p "--resume abc" (car kill-ring))))
+        (delete-directory pm-projects-dir t))))
+
+  (ert-deftest pm-test--agent-dispatch-funcalls-custom-function ()
+    "When `pm-agent-dispatch-function' is set, it gets the enriched plist."
+    (let* (captured
+           (pm-agent-dispatch-function (lambda (plist) (setq captured plist)))
+           (pm-projects-dir (file-name-as-directory (make-temp-file "pm-d-" t)))
+           (pm-executable "pm"))
+      (unwind-protect
+          (progn
+            (make-directory (concat pm-projects-dir "alpha/") t)
+            (pm-agent--dispatch
+             '(:agent "claude" :session-id "abc" :project "alpha"))
+            (should captured)
+            (should (equal (plist-get captured :agent) "claude"))
+            (should (equal (plist-get captured :session-id) "abc"))
+            (should (equal (plist-get captured :project) "alpha"))
+            (should (listp (plist-get captured :argv)))
+            (should (member "--resume" (plist-get captured :argv)))
+            (should (string-prefix-p pm-projects-dir
+                                     (plist-get captured :cwd))))
+        (delete-directory pm-projects-dir t)))))
 
 (provide 'pm-tests)
 

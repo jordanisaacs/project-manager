@@ -25,6 +25,11 @@
 (require 'pm-ui)
 (require 'pm-commands)
 
+;; The magit-section buffer entry points are autoloaded from pm.el;
+;; declare so the byte-compiler can resolve their symbols here.
+(declare-function pm-project-status            "pm-status" (name))
+(declare-function pm-agent-list-current-project "pm-agent" ())
+
 (defvar pm-projects-dir)
 (defvar pm-confirm-destructive)
 
@@ -206,7 +211,8 @@
     ("-n" "Skip branch restore"     "--no-branch")
     ("-d" "Dry run"                 "--dry-run")]]
   [["Inspect"
-    ("s" pm-project-dispatch--status)]
+    ("s" pm-project-dispatch--status)
+    ("a" "sessions" pm-agent-list-current-project)]
    ["Worktrees"
     ("n" pm-project-dispatch--wt-create)
     ("a" pm-project-dispatch--wt-attach)
@@ -270,7 +276,8 @@ available."
    ["Inspect"
     ("l" "projects"  pm-project-list)
     ("o" "pool"      pm-pool-list)
-    ("R" "repos"     pm-repo-list)]
+    ("R" "repos"     pm-repo-list)
+    ("a" "sessions"  pm-agent-list)]
    ["Switch"
     ("p" "project"   pm-project-switch)]
    ["System"
