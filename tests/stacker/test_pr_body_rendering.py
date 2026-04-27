@@ -3,8 +3,10 @@
 Uses `RecordingPRBackend` so assertions target the exact bytes we would
 have written to `gh pr create --body-file` / `gh api POST /repos/.../pulls`.
 """
+
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -31,7 +33,10 @@ def _set_config(service: StackerService, repo: str, mode: str) -> None:
 
 
 def _build_branch(
-    repo_path: Path, slot_path: Path, branch: str, parent: str,
+    repo_path: Path,
+    slot_path: Path,
+    branch: str,
+    parent: str,
     commit: tuple[str, str],
 ) -> None:
     """Create `branch` off `parent`'s tip and add one commit.
@@ -43,8 +48,9 @@ def _build_branch(
     stacker_git.git(slot_path, "checkout", "-b", branch, parent_head)
     (slot_path / f"{branch}.txt").write_text(content)
     stacker_git.git(slot_path, "add", f"{branch}.txt")
-    stacker_git.git(slot_path, "-c", "user.email=t@e.com", "-c", "user.name=t",
-                    "commit", "-m", commit_msg)
+    stacker_git.git(
+        slot_path, "-c", "user.email=t@e.com", "-c", "user.name=t", "commit", "-m", commit_msg
+    )
 
 
 def _setup_fake_upstream(slot_path: Path, branch: str) -> None:
@@ -54,11 +60,11 @@ def _setup_fake_upstream(slot_path: Path, branch: str) -> None:
     gitstack's `remote_branch_for_branch()`), so no real push or
     remote-tracking ref is needed.
     """
-    stacker_git.git(slot_path, "remote", "add", "origin-fake",
-                    "git@github.com:acme/widgets.git", check=False)
+    stacker_git.git(
+        slot_path, "remote", "add", "origin-fake", "git@github.com:acme/widgets.git", check=False
+    )
     stacker_git.git(slot_path, "config", f"branch.{branch}.remote", "origin-fake")
-    stacker_git.git(slot_path, "config", f"branch.{branch}.merge",
-                    f"refs/heads/{branch}")
+    stacker_git.git(slot_path, "config", f"branch.{branch}.merge", f"refs/heads/{branch}")
 
 
 @pytest.fixture
@@ -73,7 +79,9 @@ def service(
     backend: RecordingPRBackend,
 ) -> StackerService:
     return StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=backend,
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=backend,
     )
 
 
@@ -86,22 +94,32 @@ def _two_branch_stack(
     repo_name, repo_path = stacker_repo
     slot_a, slot_b = three_slots[0], three_slots[1]
 
-    _build_branch(repo_path, slot_a.path, "feature-a", "main",
-                  ("A\n", "A: first commit\n\nExtra body for A."))
+    _build_branch(
+        repo_path, slot_a.path, "feature-a", "main", ("A\n", "A: first commit\n\nExtra body for A.")
+    )
     _setup_fake_upstream(slot_a.path, "feature-a")
     service.init_adopt_branch(
         WorktreeInit(
-            repo_name=repo_name, worktree_path=slot_a.path, branch="feature-a",
+            repo_name=repo_name,
+            worktree_path=slot_a.path,
+            branch="feature-a",
             parent=ParentLocator(repo_name=repo_name, branch="main"),
         )
     )
 
-    _build_branch(repo_path, slot_b.path, "feature-b", "feature-a",
-                  ("B\n", "B: second commit\n\nExtra body for B."))
+    _build_branch(
+        repo_path,
+        slot_b.path,
+        "feature-b",
+        "feature-a",
+        ("B\n", "B: second commit\n\nExtra body for B."),
+    )
     _setup_fake_upstream(slot_b.path, "feature-b")
     service.init_adopt_branch(
         WorktreeInit(
-            repo_name=repo_name, worktree_path=slot_b.path, branch="feature-b",
+            repo_name=repo_name,
+            worktree_path=slot_b.path,
+            branch="feature-b",
             parent=ParentLocator(repo_name=repo_name, branch="feature-a"),
         )
     )
@@ -125,7 +143,10 @@ def test_pr_body_has_actual_commit_message_not_file_path(
     which only substitutes file refs on REST, not on graphql variables.
     """
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
-        service, stacker_repo, three_slots, monkeypatch,
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
     )
     _set_config(service, repo_name, "repo-pr")
 
@@ -145,7 +166,10 @@ def test_pr_body_includes_first_commit_body_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
-        service, stacker_repo, three_slots, monkeypatch,
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
     )
     _set_config(service, repo_name, "repo-pr")
 
@@ -172,7 +196,10 @@ def test_refreshed_stack_block_links_both_prs_even_when_list_is_empty(
     Fix: preload the PRs we just created into _refresh_component_pr_bodies.
     """
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
-        service, stacker_repo, three_slots, monkeypatch,
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
     )
     _set_config(service, repo_name, "repo-pr")
     # Simulate the race: list_open_prs returns nothing (GitHub index lag).
@@ -197,12 +224,8 @@ def test_refreshed_stack_block_links_both_prs_even_when_list_is_empty(
     # its PR URL (via the `[branch](pr-url)` form universe uses) proves the
     # race is closed.
     for label, body in [("PR A", body_a), ("PR B", body_b)]:
-        assert (
-            "](https://github.com/acme/widgets/pull/1)" in body
-        ), f"{label} missing link to PR A"
-        assert (
-            "](https://github.com/acme/widgets/pull/2)" in body
-        ), f"{label} missing link to PR B"
+        assert "](https://github.com/acme/widgets/pull/1)" in body, f"{label} missing link to PR A"
+        assert "](https://github.com/acme/widgets/pull/2)" in body, f"{label} missing link to PR B"
 
 
 def test_repo_pr_includes_compare_url_in_block(
@@ -213,7 +236,10 @@ def test_repo_pr_includes_compare_url_in_block(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
-        service, stacker_repo, three_slots, monkeypatch,
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
     )
     _set_config(service, repo_name, "repo-pr")
 
@@ -235,7 +261,10 @@ def test_pr_pr_mode_stack_block_omits_compare_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
-        service, stacker_repo, three_slots, monkeypatch,
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
     )
     _set_config(service, repo_name, "pr-pr")
 
@@ -246,6 +275,72 @@ def test_pr_pr_mode_stack_block_omits_compare_link(
     body_b = final[2]
     assert "Files changed" not in body_b, "pr-pr mode must not embed files URLs"
     assert "review incremental changes" not in body_b
+
+
+def test_second_push_preserves_user_edits_to_pr_body(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: editing the PR description and re-running `pm stacker push`
+    must not overwrite the user's prose with the first-commit body.
+
+    Real universe PR #1859413 hit this: the user filled in the repo's
+    PULL_REQUEST_TEMPLATE.md sections, then a follow-up `pm stacker push`
+    silently reset the body to the first commit message.
+    """
+    repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
+    )
+    _set_config(service, repo_name, "repo-pr")
+    target = SelectorTarget(repo_name=repo_name, branch="feature-b")
+
+    service.push(target, PushOptions(draft=True))
+
+    # Simulate the user editing PR B's description in the GitHub UI: replace
+    # the body with template prose. view_pr() reads back from prs_by_head,
+    # so the next push sees this body instead of the first-commit message.
+    user_body = (
+        "## What did you change, and why?\n\n"
+        "Filled in by the human, must not be clobbered.\n\n"
+        "## How do you know it works?\n\n"
+        "Tested in dev.\n"
+    )
+    key = (backend.default_repo.name_with_owner, "feature-b")
+    backend.prs_by_head[key] = replace(backend.prs_by_head[key], body=user_body)
+    edits_before_second_push = len(backend.edited)
+
+    service.push(target, PushOptions(draft=True))
+
+    # create_or_update_current_pr emits the first edit_pr per branch on a
+    # re-push; that call must NOT carry a body_file. Otherwise it
+    # overwrites the user-edited description with the first-commit body
+    # before the refresh step ever sees it.
+    second_push_edits = backend.edited[edits_before_second_push:]
+    assert second_push_edits, "second push should hit edit_pr for the existing PR"
+    update_requests_with_body = [
+        req for req, body in second_push_edits if body is not None and req.number == 2
+    ]
+    # Exactly one body-bearing edit_pr per branch — the refresh-stack-block
+    # write. The create-or-update step on an existing PR must skip body.
+    assert len(update_requests_with_body) == 1, (
+        "create_or_update_current_pr must not write a body for an existing PR"
+    )
+
+    # The refresh that follows reads the (still user-edited) body, swaps
+    # only the managed block, and writes it back. The user's prose
+    # survives end-to-end.
+    final_body_for_pr_b = next(
+        body for req, body in reversed(backend.edited) if req.number == 2 and body is not None
+    )
+    assert "Filled in by the human, must not be clobbered." in final_body_for_pr_b
+    assert "<!-- stacker:begin -->" in final_body_for_pr_b
+    assert "<!-- stacker:end -->" in final_body_for_pr_b
 
 
 def test_head_repo_set_when_upstream_is_distinct_fork(
@@ -261,7 +356,10 @@ def test_head_repo_set_when_upstream_is_distinct_fork(
     name_with_owner=acme/widgets, matching the stub URL we set — so
     head_repo should be populated and equal to acme/widgets."""
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
-        service, stacker_repo, three_slots, monkeypatch,
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
     )
     _set_config(service, repo_name, "repo-pr")
     service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))

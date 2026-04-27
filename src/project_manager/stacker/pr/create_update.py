@@ -56,26 +56,28 @@ def create_or_update_current_pr(
     remote_branch = remote_branch_name(ctx, tracked)
     head_repo = head_repo_for_branch(ctx, tracked)
     title, first_body = first_commit_text(ctx, tracked)
-    body = compose_body_with_block(first_body, "")
     base = pr_base_for_current_branch(ctx, tracked, config, current_repo)
     existing = find_open_pr(ctx, tracked, config, current_repo)
     head = head_ref_for_branch(config, current_repo, remote_branch)
     label = selectors.selector_for(tracked.repo_name, tracked.branch)
-    with body_file(body) as file_path:
-        if existing:
-            fmt.record(ctx, logs, f"Updating PR #{existing.number} for {label}")
-            ctx.pr_backend.edit_pr(
-                gh.EditPRRequest(
-                    repo=target_repo,
-                    number=existing.number,
-                    title=title,
-                    base=base,
-                    body_file=file_path,
-                )
+    if existing:
+        # Don't ship a body — refresh_component_pr_bodies() runs next and
+        # rewrites only the managed stacker block, preserving any edits
+        # the user has made to the surrounding PR description.
+        fmt.record(ctx, logs, f"Updating PR #{existing.number} for {label}")
+        ctx.pr_backend.edit_pr(
+            gh.EditPRRequest(
+                repo=target_repo,
+                number=existing.number,
+                title=title,
+                base=base,
             )
-            pr_url = existing.url
-        else:
-            fmt.record(ctx, logs, f"Creating PR for {label}")
+        )
+        pr_url = existing.url
+    else:
+        fmt.record(ctx, logs, f"Creating PR for {label}")
+        body = compose_body_with_block(first_body, "")
+        with body_file(body) as file_path:
             pr_url = ctx.pr_backend.create_pr(
                 gh.CreatePRRequest(
                     repo=target_repo,
