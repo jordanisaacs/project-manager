@@ -1,49 +1,36 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
-from project_manager.stacker import git, locate, ops_slot, selectors
+from project_manager.stacker import git, locate, selectors, slot
 from project_manager.stacker.models import OperationState, TrackedBranch
 from project_manager.stacker.render import format as fmt
+from project_manager.stacker.slot import AcquiredSlot
 
 if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
 
 
-@dataclass
-class _Acquired:
-    """A worktree path to run git commands in, plus the ops slot if we acquired one.
+# Back-compat alias: existing callers `from project_manager.stacker.ops import
+# worktree` and reference `worktree._Acquired`. Keep the name pointing at the
+# unified type so type annotations and isinstance checks still work.
+_Acquired = AcquiredSlot
 
-    If `ops` is set, the caller claimed it via ops_slot.acquire. Clean completion
-    must call release(). A paused/failed op must NOT release — the claim is the
-    resumable state that `continue` / `abort` drive.
+
+def acquire(ctx: StackerCtx, repo_name: str, branch: str) -> AcquiredSlot:
+    """Resolve a worktree for sync/push/absorb/etc.
+
+    Cwd reuse only kicks in when the cwd slot is detached — sync ops never
+    clobber a live branch in the user's worktree.
     """
-
-    path: Path
-    ops: slot_mod.Slot | None
+    return slot.resolve_slot(ctx, repo_name, branch)
 
 
-def acquire(ctx: StackerCtx, repo_name: str, branch: str) -> _Acquired:
-    existing = locate.locate_worktree(ctx.paths, repo_name, branch)
-    if existing is not None:
-        return _Acquired(path=existing, ops=None)
-    claimed = ops_slot.acquire(
-        ctx.paths,
-        PoolDB(ctx.paths.pool_db()),
-        repo_name,
-        branch,
-        wait=ops_slot.WaitOptions(progress=ctx.progress),
-    )
-    return _Acquired(path=claimed.path, ops=claimed)
-
-
-def release_if_owned(ctx: StackerCtx, acquired: _Acquired) -> None:
-    if acquired.ops is not None:
-        ops_slot.release(PoolDB(ctx.paths.pool_db()), acquired.ops)
+def release_if_owned(ctx: StackerCtx, acquired: AcquiredSlot) -> None:
+    slot.release_if_owned(ctx, acquired)
 
 
 def slot_path_for_active_op(

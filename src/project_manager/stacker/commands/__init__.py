@@ -15,6 +15,7 @@ from . import create as _create  # noqa: F401,E402
 from . import guard as _guard  # noqa: F401,E402
 from . import log as _log  # noqa: F401,E402
 from . import ls as _ls  # noqa: F401,E402
+from . import pr as _pr  # noqa: F401,E402
 from . import push as _push  # noqa: F401,E402
 from . import remove as _remove  # noqa: F401,E402
 from . import rename as _rename  # noqa: F401,E402
@@ -22,4 +23,3 @@ from . import repair as _repair  # noqa: F401,E402
 from . import reparent as _reparent  # noqa: F401,E402
 from . import split as _split  # noqa: F401,E402
 from . import sync as _sync  # noqa: F401,E402
-from . import unlink_pr as _unlink_pr  # noqa: F401,E402

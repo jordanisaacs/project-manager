@@ -59,8 +59,10 @@ from .ops import (
 from .ops import (
     track as track_ops,
 )
+from .pr import find as pr_find
 from .pr.config import get_config as pr_get_config
 from .pr.config import list_config as pr_list_config
+from .pr.config import pr_config as pr_get_repo_config
 from .pr.config import set_config as pr_set_config
 from .pr.config import unset_config as pr_unset_config
 from .pr_backend import GhCliBackend, PRBackend
@@ -70,7 +72,7 @@ from .render import status as render_status
 from .render.ls import LsOptions
 
 if TYPE_CHECKING:
-    pass
+    from . import gh
 
 
 class StackerService:
@@ -245,3 +247,11 @@ class StackerService:
 
     def delete_all_pr_state(self, repo_name: str) -> int:
         return self._ctx.db.delete_all_pr_state(repo_name)
+
+    def refresh_pr(self, target: SelectorTarget) -> gh.PullRequest | None:
+        """Drop and re-run PR discovery for `target`. Returns the cached PR or None."""
+        tracked = track_ops.require_tracked(self._ctx, target)
+        repo_config = pr_get_repo_config(self._ctx, target.repo_name)
+        repo_path = self._ctx.paths.repo(target.repo_name)
+        current_repo = self._ctx.pr_backend.repo_info(cwd=repo_path)
+        return pr_find.refresh_pr(self._ctx, tracked, repo_config, current_repo)

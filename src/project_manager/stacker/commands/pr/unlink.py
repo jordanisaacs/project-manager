@@ -1,16 +1,16 @@
-"""`pm stacker unlink-pr` — clear cached PR association for a branch."""
+"""`pm stacker pr unlink` — clear cached PR association for a branch."""
 from typing import Annotated
 
 from cyclopts import Parameter
 
 from project_manager import config, render
 from project_manager.cli._shared import RepoFlag
+from project_manager.stacker.commands import _common
+from project_manager.stacker.commands.pr import pr_app
 
-from . import _common, stacker_app
 
-
-@stacker_app.command
-def unlink_pr(
+@pr_app.command
+def unlink(
     branch: str | None = None,
     flag: RepoFlag = RepoFlag(),
     *,

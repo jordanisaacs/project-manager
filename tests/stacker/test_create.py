@@ -124,3 +124,58 @@ def test_track_adopts_existing_branch(
         ParentLocator(repo_name=repo_name, branch="main"),
     )
     assert tracked.parent_branch == "main"
+
+
+def test_track_adopts_via_cwd_when_branch_unchecked_out(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cwd-detached + branch ref exists → track() checks it out in cwd, no fresh slot."""
+    repo_name, repo_path = stacker_repo
+    stacker_git.git(repo_path, "branch", "feature-detached", "main")
+    here = three_slots[0]
+    monkeypatch.chdir(here.path)
+
+    tracked = service.track(
+        SelectorTarget(repo_name=repo_name, branch="feature-detached"),
+        ParentLocator(repo_name=repo_name, branch="main"),
+    )
+    assert tracked.parent_branch == "main"
+    # Cwd slot is now on the adopted branch.
+    assert stacker_git.current_branch(here.path) == "feature-detached"
+    # No claim taken on the cwd slot.
+    from project_manager.pool.db import PoolDB
+    assert PoolDB(pm_env.pool_db()).get_owner(here.repo, here.uuid) is None
+
+
+def test_track_adopts_via_ops_slot_when_cwd_unsuitable(  # noqa: PLR0913 (fixture plumbing)
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cwd outside pool + branch unchecked-out → track() claims a fresh ops slot."""
+    from project_manager.pool.db import OWNER_STACKER_OPS, PoolDB
+
+    repo_name, repo_path = stacker_repo
+    stacker_git.git(repo_path, "branch", "feature-orphan", "main")
+    monkeypatch.chdir(tmp_path)
+
+    tracked = service.track(
+        SelectorTarget(repo_name=repo_name, branch="feature-orphan"),
+        ParentLocator(repo_name=repo_name, branch="main"),
+    )
+    assert tracked.parent_branch == "main"
+    # An ops slot was claimed and the branch is now checked out there.
+    pooldb = PoolDB(pm_env.pool_db())
+    claimed = [
+        s for s in three_slots
+        if pooldb.get_owner(s.repo, s.uuid) == OWNER_STACKER_OPS
+    ]
+    assert len(claimed) == 1
+    assert stacker_git.current_branch(claimed[0].path) == "feature-orphan"

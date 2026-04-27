@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from project_manager.stacker import git, locate, selectors
+from project_manager.stacker import git, selectors, slot
 from project_manager.stacker.models import ParentLocator, SelectorTarget, TrackedBranch
+from project_manager.stacker.pr import find as pr_find
+from project_manager.stacker.pr.config import pr_config
+from project_manager.stacker.slot import AcquiredSlot, CwdReusePolicy
 
 if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
@@ -58,17 +61,63 @@ def create_tracked_branch(
 def track(
     ctx: StackerCtx, target: SelectorTarget, parent: ParentLocator
 ) -> TrackedBranch:
+    """Adopt an existing branch into stacker tracking.
+
+    Slot resolution mirrors fresh `create` (`allow_branch_switch=True`) so
+    `pm stacker create --replace <b>` can adopt `<b>` from the cwd slot
+    even when `<b>` isn't checked out anywhere yet — the user typed
+    `--replace`, that's the opt-in. On success the slot stays claimed
+    (the adopted branch lives there); on failure it's released to undo
+    a wasted `ops_slot` acquisition.
+    """
     if target.repo_name != parent.repo_name:
         raise git.GitError("Parent and child must be in the same repo.")
+    acquired = slot.resolve_slot(
+        ctx,
+        target.repo_name,
+        target.branch,
+        cwd_reuse=CwdReusePolicy(allow_branch_switch=True),
+    )
+    try:
+        tracked = _persist_adoption(ctx, target, parent, acquired)
+    except Exception:
+        slot.release_if_owned(ctx, acquired)
+        raise
+    _try_link_existing_pr(ctx, tracked)
+    return tracked
+
+
+def _try_link_existing_pr(ctx: StackerCtx, tracked: TrackedBranch) -> None:
+    """Best-effort: if the adopted branch already has an open PR on GitHub,
+    cache it so `pm stacker ls` shows the URL right away.
+
+    Adoption flows often pick up a branch that someone else (or an
+    earlier `git pp`) already pushed and opened a PR for — without this,
+    the row stays `[LOCAL]` until the next push. Failure modes (no
+    upstream, no remote, gh CLI absent, network blip) all silently
+    no-op: discovery is a convenience, not a precondition for adoption.
+    """
+    try:
+        repo_config = pr_config(ctx, tracked.repo_name)
+        repo_path = ctx.paths.repo(tracked.repo_name)
+        current_repo = ctx.pr_backend.repo_info(cwd=repo_path)
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        pr_find.find_pr(ctx, tracked, repo_config, current_repo)
+    except Exception:  # noqa: BLE001
+        return
+
+
+def _persist_adoption(
+    ctx: StackerCtx,
+    target: SelectorTarget,
+    parent: ParentLocator,
+    acquired: AcquiredSlot,
+) -> TrackedBranch:
     repo_path = ctx.paths.repo(target.repo_name)
     base_commit = git.merge_base(repo_path, parent.branch, target.branch)
     parent_head = git.rev_parse(repo_path, parent.branch)
-    branch_slot = locate.locate_worktree(ctx.paths, target.repo_name, target.branch)
-    if branch_slot is None:
-        raise git.GitError(
-            f"{selectors.selector_for(target.repo_name, target.branch)} is not checked out "
-            "in any worktree; nothing to adopt."
-        )
     tracked = TrackedBranch(
         repo_name=target.repo_name,
         branch=target.branch,
@@ -76,7 +125,7 @@ def track(
         parent_branch=parent.branch,
         managed_base_commit=base_commit,
         last_synced_parent_commit=parent_head,
-        last_clean_head=git.rev_parse(branch_slot, "HEAD"),
+        last_clean_head=git.rev_parse(acquired.path, "HEAD"),
     )
     ctx.db.upsert_branch(tracked)
     return tracked

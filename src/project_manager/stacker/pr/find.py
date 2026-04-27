@@ -88,6 +88,23 @@ def find_pr(
     return found
 
 
+def refresh_pr(
+    ctx: StackerCtx,
+    tracked: TrackedBranch,
+    config: RepoPRConfig,
+    current_repo: gh.RepoInfo,
+) -> gh.PullRequest | None:
+    """Drop the cached row and re-run discovery from scratch.
+
+    `find_pr` short-circuits on a cached URL, so a stale or
+    no-longer-current cache row would otherwise hide the real PR. This
+    forces a fresh `repo:X head:Y is:pr is:open` search and persists
+    the hit (or returns None when nothing is open).
+    """
+    ctx.db.delete_pr_state(tracked.repo_name, tracked.branch)
+    return find_pr(ctx, tracked, config, current_repo)
+
+
 def record_pr_url(ctx: StackerCtx, tracked: TrackedBranch, url: str) -> None:
     """Persist only a PR URL (when the full state isn't available yet).
 
