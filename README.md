@@ -47,6 +47,7 @@ pm stacker log [<branch>]
 pm stacker continue | abort                     # resume/cancel paused op
 pm stacker config [--list | --unset] [<key> [<value>]]   # pr.mode, pr.trunk, pr.target-repo
 
+pm cd <project> [<wt>]                    # print project (or worktree) path; wrap with `cd "$(pm cd …)"`
 pm check [--fix]                          # invariant scan across pool + projects
 ```
 

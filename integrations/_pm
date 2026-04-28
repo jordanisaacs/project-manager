@@ -14,16 +14,90 @@ _pm() {
     cmds)
       local -a commands
       commands=(
+        'agent:list recent coding-agent sessions'
         'pool:manage worktree pool'
         'project:manage projects'
         'repo:manage canonical repos under ~/.repos'
         'stacker:branch-stack tracking against pm'\''s pool'
+        'cd:Print the path of a project, or one of its worktrees.'
         'check:Verify invariants across pool and projects.'
       )
       _describe -t commands 'command' commands
       ;;
     args)
       case $words[1] in
+        agent)
+          _arguments -C \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]' \
+            '1: :->cmds' \
+            '*::arg:->args'
+
+          case $state in
+            cmds)
+              local -a commands
+              commands=(
+                'ls:List recent chat sessions across Claude / Codex / Cursor, per project.'
+                'claude:Launch Claude Code in the pm project dir, forwarding extra args.'
+                'codex:Launch Codex CLI in the pm project dir, forwarding extra args.'
+                'cursor:Launch Cursor agent in the pm project dir, forwarding extra args.'
+              )
+              _describe -t commands 'command' commands
+              ;;
+            args)
+              case $words[1] in
+                ls)
+                  _arguments \
+                    '1:limit to one project' \
+                    '2:every project' \
+                    '-p[limit to one project]:p' \
+                    '--project[limit to one project]:project' \
+                    '--all[every project]' \
+                    '-n[-n]:n' \
+                    '--limit[-n]:limit' \
+                    '--agent[comma-separated subset\: claude,codex,cursor]:agent' \
+                    '--json[--json]' \
+                    '--resume[pick a session interactively and resume it]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                claude)
+                  _arguments \
+                    '*:ARGS' \
+                    '-p[-p]:p' \
+                    '--project[-p]:project' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                codex)
+                  _arguments \
+                    '*:ARGS' \
+                    '-p[-p]:p' \
+                    '--project[-p]:project' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                cursor)
+                  _arguments \
+                    '*:ARGS' \
+                    '-p[-p]:p' \
+                    '--project[-p]:project' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+              esac
+              ;;
+          esac
+          ;;
         pool)
           _arguments -C \
             '--help[Display this message and exit.]' \
@@ -37,7 +111,7 @@ _pm() {
               local -a commands
               commands=(
                 'add:Mint a new pool slot.'
-                'ls:List pool slots with claim status.'
+                'ls:List pool slots with claim status, grouped by repo.'
               )
               _describe -t commands 'command' commands
               ;;
@@ -47,6 +121,7 @@ _pm() {
                   _arguments \
                     '1:repo:_pm_repos' \
                     '--repo[--repo]:repo:_pm_repos' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -56,6 +131,7 @@ _pm() {
                   _arguments \
                     '1:repo:_pm_repos' \
                     '--repo[--repo]:repo:_pm_repos' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -79,8 +155,8 @@ _pm() {
               commands=(
                 'create:Create a project (optionally with initial worktrees).'
                 'delete:Delete a whole project.'
-                'ls:List projects.'
-                'status:Show health + db rows for a single project (defaults to current).'
+                'ls:List projects, grouped by project name.'
+                'status:Show worktree health, PR state, stacker arms, and recent agent sessions.'
                 'wt:manage worktrees within a project'
               )
               _describe -t commands 'command' commands
@@ -92,6 +168,7 @@ _pm() {
                     '1:--project' \
                     '--project[--project]:project' \
                     '--wt[--wt]:wt' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -103,6 +180,7 @@ _pm() {
                     '--project[--project]:project:_pm_projects' \
                     '--dry-run[--dry-run]' \
                     '--no-dry-run[--dry-run]' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -110,6 +188,7 @@ _pm() {
                   ;;
                 ls)
                   _arguments \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -119,6 +198,9 @@ _pm() {
                   _arguments \
                     '1:project:_pm_projects' \
                     '--project[--project]:project:_pm_projects' \
+                    '--json[--json]' \
+                    '-s[comma-separated subset\: worktrees,prs,stacker,sessions]:s' \
+                    '--section[comma-separated subset\: worktrees,prs,stacker,sessions]:section' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -155,6 +237,7 @@ _pm() {
                             '--wt[comma-separated worktree names]:wt:_pm_wt_attachable' \
                             '--all[every worktree in the project]' \
                             '--no-branch[--no-branch]' \
+                            '--json[--json]' \
                             '--help[Display this message and exit.]' \
                             '-h[Display this message and exit.]' \
                             '--version[Display application version.]'
@@ -167,6 +250,7 @@ _pm() {
                             '--spec[--spec]:spec' \
                             '-p[project name (defaults to current project)]:p:_pm_projects' \
                             '--project[project name (defaults to current project)]:project:_pm_projects' \
+                            '--json[--json]' \
                             '--help[Display this message and exit.]' \
                             '-h[Display this message and exit.]' \
                             '--version[Display application version.]'
@@ -183,6 +267,7 @@ _pm() {
                             '--all[every worktree in the project]' \
                             '--dry-run[--dry-run]' \
                             '--no-dry-run[--dry-run]' \
+                            '--json[--json]' \
                             '--help[Display this message and exit.]' \
                             '-h[Display this message and exit.]' \
                             '--version[Display application version.]'
@@ -199,6 +284,7 @@ _pm() {
                             '--all[every worktree in the project]' \
                             '--dry-run[--dry-run]' \
                             '--no-dry-run[--dry-run]' \
+                            '--json[--json]' \
                             '--help[Display this message and exit.]' \
                             '-h[Display this message and exit.]' \
                             '--version[Display application version.]'
@@ -225,6 +311,7 @@ _pm() {
               local -a commands
               commands=(
                 'ls:List canonical repos with branch + upstream status.'
+                'maintenance:Warm git object store + index + fsmonitor across repos and pool slots.'
                 'pull:Fetch + ff-only pull each canonical repo.'
               )
               _describe -t commands 'command' commands
@@ -233,6 +320,17 @@ _pm() {
               case $words[1] in
                 ls)
                   _arguments \
+                    '--offline[--offline]' \
+                    '--json[--json]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                maintenance)
+                  _arguments \
+                    '--repo[--repo]:repo:_pm_repos' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -241,6 +339,7 @@ _pm() {
                 pull)
                   _arguments \
                     '--repo[--repo]:repo:_pm_repos' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -263,12 +362,14 @@ _pm() {
               local -a commands
               commands=(
                 'abort:Abort a paused stacker operation and reset state.'
+                'absorb:Cherry-pick the current branch'\''s new commits onto its parent.'
                 'config:Get/set per-repo stacker config.'
                 'continue:Resume a paused stacker operation.'
                 'create:Create or adopt a tracked branch (optionally in a pool slot).'
                 'guard:internal guardrails for Git hooks'
                 'log:Show commits since the branch'\''s managed base.'
                 'ls:Render the stack tree.'
+                'pr:manage the cached PR association for tracked branches'
                 'push:Force-push + create/update PRs for a scope.'
                 'remove:Untrack a branch (optionally delete it); reparent children.'
                 'rename:Rename the current branch.'
@@ -290,6 +391,19 @@ _pm() {
                     '--version[Display application version.]'
 
                   ;;
+                absorb)
+                  _arguments \
+                    '1:--branch' \
+                    '2:defaults to the cwd'\''s pm slot' \
+                    '--branch[--branch]:branch' \
+                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '--continue[resume a paused absorb]' \
+                    '--abort[abort the paused op]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
                 config)
                   _arguments \
                     '1:--key' \
@@ -299,6 +413,7 @@ _pm() {
                     '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
                     '--list[list all set keys]' \
                     '--unset[remove a key]' \
+                    '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -382,12 +497,67 @@ _pm() {
                     '--skip-ancestors[exclude ancestors from the walk]' \
                     '--skip-descendants[exclude descendants from the walk]' \
                     '--from[start the walk from this branch]:from' \
+                    '-c[narrow to the current branch'\''s lineage (default\: all)]' \
+                    '--current[narrow to the current branch'\''s lineage (default\: all)]' \
                     '--details[--details]:details:(none status status-counts all)' \
                     '--json[--json]' \
+                    '--icons[--icons]' \
+                    '--no-icons[--icons]' \
+                    '--merged[--merged]' \
+                    '--no-merged[--merged]' \
+                    '--merged-style[--merged-style]:merged-style:(dimmed strikethrough normal)' \
+                    '--color-mode[--color-mode]:color-mode:(off icon title full)' \
+                    '--legend[--legend]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
 
+                  ;;
+                pr)
+                  _arguments -C \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]' \
+                    '1: :->cmds' \
+                    '*::arg:->args'
+
+                  case $state in
+                    cmds)
+                      local -a commands
+                      commands=(
+                        'refresh:Look up the current GitHub PR for a tracked branch and cache it.'
+                        'unlink:Clear the cached PR association for a branch (or --all branches).'
+                      )
+                      _describe -t commands 'command' commands
+                      ;;
+                    args)
+                      case $words[1] in
+                        refresh)
+                          _arguments \
+                            '1:--branch' \
+                            '2:defaults to the cwd'\''s pm slot' \
+                            '--branch[--branch]:branch' \
+                            '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                        unlink)
+                          _arguments \
+                            '1:--branch' \
+                            '2:defaults to the cwd'\''s pm slot' \
+                            '--branch[--branch]:branch' \
+                            '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                            '--all[clear PR links for every branch]' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
+                      esac
+                      ;;
+                  esac
                   ;;
                 push)
                   _arguments \
@@ -503,10 +673,22 @@ _pm() {
               ;;
           esac
           ;;
+        cd)
+          _arguments \
+            '1:project:_pm_projects' \
+            '2:wt:_pm_wt_for_cd' \
+            '--project[--project]:project:_pm_projects' \
+            '--wt[--wt]:wt:_pm_wt_for_cd' \
+            '--help[Display this message and exit.]' \
+            '-h[Display this message and exit.]' \
+            '--version[Display application version.]'
+
+          ;;
         check)
           _arguments \
             '--fix[--fix]' \
             '--no-fix[--fix]' \
+            '--json[--json]' \
             '--help[Display this message and exit.]' \
             '-h[Display this message and exit.]' \
             '--version[Display application version.]'
@@ -571,6 +753,27 @@ _pm_wt_list() {
 _pm_wt_attachable() { _pm_wt_list unattached }
 _pm_wt_detachable() { _pm_wt_list attached }
 _pm_wt_all()        { _pm_wt_list all }
+
+_pm_wt_for_cd() {
+  # `pm cd <project> <wt>` — read the project from the first positional
+  # ($words[1]=pm, $words[2]=cd, $words[3]=<project>). Falls back to the
+  # --project flag if someone wrote it that way.
+  local project=${words[3]:-}
+  if [[ -z "$project" || "$project" == --* || "$project" == -* ]]; then
+    project=$(_pm_extract_flag --project -p)
+  fi
+  if [[ -z "$project" ]]; then
+    _message -e worktrees "specify a project first"
+    return 1
+  fi
+  local -a items
+  items=(${(f)"$(command pm __complete worktrees --state all --project "$project" 2>/dev/null)"})
+  if (( ${#items} == 0 )); then
+    _message -e worktrees "no worktrees in project '$project'"
+    return 1
+  fi
+  _describe -t worktrees 'worktree' items
+}
 
 _pm "$@"
 

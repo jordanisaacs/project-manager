@@ -142,6 +142,27 @@ _pm_wt_attachable() { _pm_wt_list unattached }
 _pm_wt_detachable() { _pm_wt_list attached }
 _pm_wt_all()        { _pm_wt_list all }
 
+_pm_wt_for_cd() {
+  # `pm cd <project> <wt>` — read the project from the first positional
+  # ($words[1]=pm, $words[2]=cd, $words[3]=<project>). Falls back to the
+  # --project flag if someone wrote it that way.
+  local project=${words[3]:-}
+  if [[ -z "$project" || "$project" == --* || "$project" == -* ]]; then
+    project=$(_pm_extract_flag --project -p)
+  fi
+  if [[ -z "$project" ]]; then
+    _message -e worktrees "specify a project first"
+    return 1
+  fi
+  local -a items
+  items=(${(f)"$(command pm __complete worktrees --state all --project "$project" 2>/dev/null)"})
+  if (( ${#items} == 0 )); then
+    _message -e worktrees "no worktrees in project '$project'"
+    return 1
+  fi
+  _describe -t worktrees 'worktree' items
+}
+
 _pm "$@"
 """
 
@@ -171,6 +192,12 @@ _SIMPLE_SUBS: tuple[tuple[str, str], ...] = (
     # `pm project wt create` positional spec defaults to `<repo>` (or
     # `<wt>:<repo>`). Completing repo names covers the common case.
     ("'1:--spec'", "'1:repo:_pm_repos'"),
+    # `pm cd <project> <wt>` — `'2:--wt'` only appears here, and the
+    # `'--wt[--wt]:wt'` in `pm project create` (a comma-separated *spec*,
+    # not an existing wt name) is shielded by the create-block mask
+    # below, so a global rewrite is safe.
+    ("'2:--wt'", "'2:wt:_pm_wt_for_cd'"),
+    ("'--wt[--wt]:wt'", "'--wt[--wt]:wt:_pm_wt_for_cd'"),
 )
 
 # --- Context-sensitive substitutions ----------------------------------------
