@@ -102,14 +102,16 @@ def refresh_component_pr_bodies(
     ctx: StackerCtx,
     tracked: TrackedBranch,
     pr_ctx: PrContext,
-    current_pr: gh.PullRequest | None,
     logs: list[str],
 ) -> None:
     config = pr_ctx.config
     component = lineage(ctx, tracked)
+    # Each iteration of the push loop calls record_pr() before returning,
+    # so pr_map_for_component's cache-first lookup already sees every PR
+    # we just created/updated. No focus-branch override needed — and any
+    # such override would be wrong when the focus isn't the last-processed
+    # branch (e.g. push from the middle of a stack with descendants).
     pr_map = pr_map_for_component(ctx, component, config, pr_ctx.current_repo)
-    if current_pr:
-        pr_map[tracked.branch] = current_pr
     if not pr_map:
         return
     render_ctx = _StackRender(

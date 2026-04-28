@@ -50,7 +50,7 @@ def push(
         else None
     )
     leaf = resolved[-1]
-    latest_pr: gh.PullRequest | None = None
+    focus_pr: gh.PullRequest | None = None
     for item in resolved:
         acquired = worktree.acquire(ctx, item.repo_name, item.branch)
         try:
@@ -62,20 +62,20 @@ def push(
                     publish=options.publish,
                     is_leaf=is_leaf,
                 )
-                latest_pr = pr_create_update.create_or_update_current_pr(
+                pr = pr_create_update.create_or_update_current_pr(
                     ctx, item, pr_ctx, draft=item_draft, logs=logs
                 )
+                if item.branch == target.branch:
+                    focus_pr = pr
         finally:
             if item.branch != target.branch:
                 worktree.release_if_owned(ctx, acquired)
     if pr_ctx is None:
         return fmt.finish(ctx, logs, "Push complete.")
-    assert latest_pr is not None
+    assert focus_pr is not None
     refreshed = require_tracked(ctx, target)
-    pr_create_update.refresh_component_pr_bodies(
-        ctx, refreshed, pr_ctx, latest_pr, logs,
-    )
-    return fmt.finish(ctx, logs, f"PR ready: {latest_pr.url}")
+    pr_create_update.refresh_component_pr_bodies(ctx, refreshed, pr_ctx, logs)
+    return fmt.finish(ctx, logs, f"PR ready: {focus_pr.url}")
 
 
 def _pr_draft_decision(*, draft: bool, publish: bool, is_leaf: bool) -> bool:

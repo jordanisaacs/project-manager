@@ -6,6 +6,7 @@ have written to `gh pr create --body-file` / `gh api POST /repos/.../pulls`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -341,6 +342,92 @@ def test_second_push_preserves_user_edits_to_pr_body(
     assert "Filled in by the human, must not be clobbered." in final_body_for_pr_b
     assert "<!-- stacker:begin -->" in final_body_for_pr_b
     assert "<!-- stacker:end -->" in final_body_for_pr_b
+
+
+def test_push_from_middle_branch_links_focus_pr_in_stack_blocks(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pushing from a non-leaf focus must link the focus's own PR everywhere.
+
+    Real universe trigger: a 3-branch stack pushed from the middle wrote
+    the leaf's PR URL into every line referencing the middle branch. The
+    fix is that `record_pr` (called per-iteration inside
+    `create_or_update_current_pr`) keeps the cache fresh, so a later
+    `pr_map_for_component` lookup resolves each branch to its own PR
+    without needing an override that assumed the focus was the
+    last-processed branch.
+    """
+    repo_name, repo_path = stacker_repo
+    slot_a, slot_b, slot_c = three_slots[0], three_slots[1], three_slots[2]
+
+    _build_branch(
+        repo_path, slot_a.path, "feature-a", "main", ("A\n", "A: first commit\n\n"),
+    )
+    _setup_fake_upstream(slot_a.path, "feature-a")
+    service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot_a.path,
+            branch="feature-a",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
+    )
+
+    _build_branch(
+        repo_path, slot_b.path, "feature-b", "feature-a", ("B\n", "B: second commit\n\n"),
+    )
+    _setup_fake_upstream(slot_b.path, "feature-b")
+    service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot_b.path,
+            branch="feature-b",
+            parent=ParentLocator(repo_name=repo_name, branch="feature-a"),
+        )
+    )
+
+    _build_branch(
+        repo_path, slot_c.path, "feature-c", "feature-b", ("C\n", "C: third commit\n\n"),
+    )
+    _setup_fake_upstream(slot_c.path, "feature-c")
+    service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot_c.path,
+            branch="feature-c",
+            parent=ParentLocator(repo_name=repo_name, branch="feature-b"),
+        )
+    )
+
+    monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
+    _set_config(service, repo_name, "repo-pr")
+
+    # Default scope walks the full lineage parent→leaf, so PR #1 (feature-a),
+    # PR #2 (feature-b), PR #3 (feature-c) get created in that order.
+    service.push(
+        SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True),
+    )
+
+    final = {req.number: body for (req, body) in backend.edited if body is not None}
+    assert {1, 2, 3} <= final.keys(), (
+        "every branch's body must be refreshed; if PR #2 is missing, "
+        "the focus PR was overwritten in pr_map and skipped its body update"
+    )
+
+    pattern = re.compile(
+        r"\[\*?\*?feature-b\*?\*?\]\((https://github\.com/acme/widgets/pull/\d+)\)"
+    )
+    for label, number in [("PR A", 1), ("PR B", 2), ("PR C", 3)]:
+        body = final[number]
+        match = pattern.search(body)
+        assert match, f"{label} body missing feature-b link: {body!r}"
+        assert match.group(1) == "https://github.com/acme/widgets/pull/2", (
+            f"{label} renders feature-b → {match.group(1)}, expected /pull/2"
+        )
 
 
 def test_head_repo_set_when_upstream_is_distinct_fork(
