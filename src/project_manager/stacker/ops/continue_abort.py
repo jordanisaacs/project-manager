@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from project_manager.pool.db import PoolDB
 from project_manager.stacker import git, ops_slot, selectors
 from project_manager.stacker.cherry_pick import driver as cp_driver
+from project_manager.stacker.slot import AcquiredSlot
 
 from . import worktree
 
@@ -20,9 +21,9 @@ def continue_operation(ctx: StackerCtx, repo_name: str) -> str:
     # Queue-advance state has op.branch=None; the driver will reacquire from
     # the queue on its own, so we leave the handle unset in that case.
     handle = (
-        cp_driver.DriveHandle(
-            slot_path=slot_path,
-            acquired_ops=worktree.existing_ops_slot(ctx, op, slot_path),
+        AcquiredSlot(
+            path=slot_path,
+            ops=worktree.existing_ops_slot(ctx, op, slot_path),
         )
         if slot_path is not None
         else None

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from project_manager.pool import slot as slot_mod
-from project_manager.pool.db import PoolDB
-from project_manager.stacker import git, ops_slot, selectors
+from project_manager.stacker import git, selectors, slot
 from project_manager.stacker.models import OperationState, SelectorTarget, TrackedBranch
 from project_manager.stacker.ops import worktree
 from project_manager.stacker.ops.track import require_tracked
 from project_manager.stacker.render import format as fmt
+from project_manager.stacker.slot import AcquiredSlot
 
 from . import resume
 
@@ -25,19 +25,6 @@ _SINGLE_OP_DONE: dict[str, str] = {
     "local_sync": "Sync complete.",
     "local_absorb": "Absorb complete.",
 }
-
-
-@dataclass(frozen=True)
-class DriveHandle:
-    """Worktree + pool slot currently bound to an in-flight op.
-
-    `slot_path` is where git commands run. `acquired_ops` is the pool
-    slot this stacker invocation claimed (and must release on clean
-    completion); None when we reused an existing project-owned slot.
-    """
-
-    slot_path: Path
-    acquired_ops: slot_mod.Slot | None
 
 
 def sync_plan(
@@ -89,7 +76,7 @@ def prepare_local_operation(
 def run_until_pause_or_finish(
     ctx: StackerCtx,
     repo_name: str,
-    handle: DriveHandle | None = None,
+    handle: AcquiredSlot | None = None,
     *,
     continuing: bool = False,
     logs: list[str] | None = None,
@@ -98,31 +85,25 @@ def run_until_pause_or_finish(
         logs = []
     op = ctx.db.get_operation(repo_name)
     assert op
-    # Outer try/finally: a `KeyboardInterrupt` (or any unexpected raise)
-    # mid-loop must still hand the in-flight slot back to the pool when
-    # the worktree is clean. Without it, cancelling a downstream_sync
-    # leaves the just-checked-out branch claimed as `stacker|ops`,
-    # blocking the next stacker op until manual recovery.
+    # Outer try/finally is the safety net for the gap between
+    # `advance_downstream` returning a fresh slot and the next
+    # iteration's `_owned_slot` `with`-block taking ownership. Inside
+    # the `with`, the context manager releases the slot on success,
+    # exception, and `KeyboardInterrupt`.
     try:
         while True:
             if op.branch:
-                if handle is None:
-                    slot_path = worktree.require_checked_out(ctx, repo_name, op.branch)
-                    handle = DriveHandle(
-                        slot_path=slot_path,
-                        acquired_ops=worktree.existing_ops_slot(ctx, op, slot_path),
+                with _owned_slot(ctx, repo_name, op, handle) as h:
+                    result = drive_local(
+                        ctx, op, slot_path=h.path,
+                        continuing=continuing, logs=logs,
                     )
-                result = drive_local(
-                    ctx, op, slot_path=handle.slot_path, continuing=continuing, logs=logs
-                )
-                continuing = False
+                    continuing = False
+                handle = None
                 if result is not None:
-                    _release_handle_if_clean(ctx, handle)
-                    handle = None
                     return fmt.finish(ctx, logs, result)
                 op = ctx.db.get_operation(repo_name)
                 assert op
-                handle = None
                 continue
             single_op_done = _SINGLE_OP_DONE.get(op.op_type)
             if single_op_done is not None:
@@ -138,23 +119,44 @@ def run_until_pause_or_finish(
                 continue
             raise git.GitError(f"Unknown operation type {op.op_type}.")
     finally:
-        _release_handle_if_clean(ctx, handle)
+        if handle is not None:
+            slot.release_if_clean(ctx, handle)
 
 
-def _release_handle_if_clean(ctx: StackerCtx, handle: DriveHandle | None) -> None:
-    """Hand `handle.acquired_ops` back to the pool when safe.
+@contextlib.contextmanager
+def _owned_slot(
+    ctx: StackerCtx,
+    repo_name: str,
+    op: OperationState,
+    existing: AcquiredSlot | None,
+) -> Iterator[AcquiredSlot]:
+    """Yield an `AcquiredSlot` for `op.branch`; `release_if_clean` on exit.
 
-    The cherry-pick driver carries the active slot in the handle. We
-    release it the same way `slot.release_if_clean` releases a fresh
-    `AcquiredSlot`: skip when no claim is held, hold when the worktree
-    has resumable state (uncommitted changes / `CHERRY_PICK_HEAD`),
-    otherwise detach + release.
+    Three slot origins funnel through here uniformly:
+      - Caller passed one in (e.g. `_sync_one` after `acquired_for_op`).
+      - Loop reconstructs it from the live worktree for an op resumed
+        from disk (`require_checked_out` + `existing_ops_slot`).
+      - `advance_downstream` minted one for the next queue entry.
+    Cleanup is the shared `slot.release_if_clean` so a paused cherry-pick
+    (CHERRY_PICK_HEAD set) keeps its slot for `pm stacker continue`,
+    and a clean exit returns it to the pool. Caller-passed slots are
+    released here too — that's idempotent against the caller's own
+    `acquired_for_op`/`release_if_clean`, both of which no-op once the
+    pool row is gone.
     """
-    if handle is None or handle.acquired_ops is None:
-        return
-    if git.has_resumable_state(handle.slot_path):
-        return
-    ops_slot.release(PoolDB(ctx.paths.pool_db()), handle.acquired_ops)
+    assert op.branch is not None
+    if existing is not None:
+        owned = existing
+    else:
+        slot_path = worktree.require_checked_out(ctx, repo_name, op.branch)
+        owned = AcquiredSlot(
+            path=slot_path,
+            ops=worktree.existing_ops_slot(ctx, op, slot_path),
+        )
+    try:
+        yield owned
+    finally:
+        slot.release_if_clean(ctx, owned)
 
 
 def advance_downstream(
@@ -162,11 +164,13 @@ def advance_downstream(
     repo_name: str,
     op: OperationState,
     logs: list[str],
-) -> DriveHandle | None:
+) -> AcquiredSlot | None:
     """Move the downstream_sync queue forward by one entry.
 
-    Returns a DriveHandle for the newly in-flight local op, or None if
-    the entry was skipped because the parent was unchanged.
+    Returns the freshly-acquired `AcquiredSlot` for the newly in-flight
+    local op, or None if the entry was skipped because the parent was
+    unchanged. The slot becomes the loop's in-flight handle and is
+    released by `_owned_slot`'s `with`-block.
     """
     next_branch = op.queue[op.current_index]
     tracked = ctx.db.get_branch(repo_name, next_branch)
@@ -176,10 +180,9 @@ def advance_downstream(
             f"{selectors.selector_for(repo_name, next_branch)}"
         )
     acquired = worktree.acquire(ctx, repo_name, next_branch)
-    # Bridge the acquire → DriveHandle handoff: an interrupt or raise
-    # between here and `return DriveHandle(...)` would orphan the
-    # just-claimed slot since the caller's outer finally only sees
-    # `handle = advance_downstream(...)` after this returns.
+    # Bridge the acquire → return handoff: an interrupt or raise here
+    # would orphan the just-claimed slot, since the caller's outer
+    # finally only sees the new slot after this returns.
     try:
         parent_head, _, _ = sync_plan(ctx, tracked, acquired.path)
         if parent_head == tracked.managed_base_commit:
@@ -203,7 +206,7 @@ def advance_downstream(
     except BaseException:
         worktree.release_if_clean(ctx, acquired)
         raise
-    return DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops)
+    return acquired
 
 
 def drive_local(

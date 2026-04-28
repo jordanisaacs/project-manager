@@ -85,6 +85,59 @@ def test_sync_branch_not_checked_out_acquires_ops_slot(
         assert owner != OWNER_STACKER_OPS
 
 
+def test_sync_multi_branch_releases_leaf_slot(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """Regression: `downstream_sync` must release every slot it acquires,
+    including the last branch in the queue. The driver's per-iteration
+    transition (`finalize_local_op` returns None → loop continues to
+    next branch) used to drop `handle` without releasing — leaving the
+    final branch's slot stuck as `stacker|ops` after a clean sync.
+    """
+    repo_name, repo_path = stacker_repo
+    parent_slot = three_slots[0]
+    leaf_slot = three_slots[1]
+    _initialize(service, repo_name, parent_slot, "feature-parent")
+    parent_commit = commit_file(
+        parent_slot.path, "parent.txt", "p\n", "parent: first commit",
+    )
+    service.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=leaf_slot.path,
+            branch="feature-leaf",
+            parent=ParentLocator(repo_name=repo_name, branch="feature-parent"),
+        )
+    )
+    commit_file(leaf_slot.path, "leaf.txt", "l\n", "leaf: first commit")
+    # Detach the leaf so sync has to mint an ops slot for it — that's the
+    # path that exposed the leak.
+    stacker_git.git(leaf_slot.path, "checkout", "--detach", "HEAD")
+    pooldb = PoolDB(pm_env.pool_db())
+    if not pooldb.is_free(leaf_slot.repo, leaf_slot.uuid):
+        pooldb.release(leaf_slot.repo, leaf_slot.uuid)
+
+    # Advance main so the parent's sync has work to do; the leaf rides
+    # along behind and gets its own cherry-pick onto the new parent tip.
+    _advance_main(repo_path)
+    assert parent_commit != ""
+
+    result = service.sync(SelectorTarget(repo_name=repo_name, branch="feature-leaf"))
+    assert "Sync complete." in result
+
+    leaked = [
+        slot for slot in slot_mod.list_slots(pm_env, repo_name)
+        if pooldb.get_owner(slot.repo, slot.uuid) == OWNER_STACKER_OPS
+    ]
+    assert leaked == [], (
+        f"downstream_sync left {len(leaked)} ops slot(s) claimed: "
+        f"{[s.uuid for s in leaked]}"
+    )
+
+
 def test_sync_paused_on_conflict_keeps_slot_claimed(
     stacker_repo: tuple[str, Path],
     three_slots: list[slot_mod.Slot],

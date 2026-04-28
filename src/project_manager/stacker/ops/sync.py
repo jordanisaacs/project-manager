@@ -89,10 +89,7 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch) -> str:
                 ctx, tracked, op_type="local_sync", slot_path=acquired.path, logs=logs
             )
             return cp_driver.run_until_pause_or_finish(
-                ctx,
-                tracked.repo_name,
-                cp_driver.DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops),
-                logs=logs,
+                ctx, tracked.repo_name, acquired, logs=logs,
             )
     except BaseException:
         # The slot is already handled by the context manager above; we
