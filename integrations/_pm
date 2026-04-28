@@ -37,7 +37,6 @@ _pm() {
               local -a commands
               commands=(
                 'add:Mint a new pool slot.'
-                'gc-ops:Release stacker-ops slots that have no live operation.'
                 'ls:List pool slots with claim status.'
               )
               _describe -t commands 'command' commands
@@ -48,13 +47,6 @@ _pm() {
                   _arguments \
                     '1:repo:_pm_repos' \
                     '--repo[--repo]:repo:_pm_repos' \
-                    '--help[Display this message and exit.]' \
-                    '-h[Display this message and exit.]' \
-                    '--version[Display application version.]'
-
-                  ;;
-                gc-ops)
-                  _arguments \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'

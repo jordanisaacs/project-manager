@@ -34,7 +34,6 @@ pm project ls | status <name>
 
 pm pool ls [<repo>]                       # slots with claim status
 pm pool add <repo>                        # mint a slot
-pm pool gc-ops                            # release stacker-ops slots w/ no live op
 
 pm stacker create <branch> [--on current|parent|<branch>] [--copy <b>] [--replace] [--no-checkout]
 pm stacker sync [<branch>] [-c|-a] [--skip-ancestors] [--skip-descendants] [--from <b>] [--continue | --abort]
