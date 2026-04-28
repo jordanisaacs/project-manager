@@ -1,9 +1,10 @@
 """Cyclopts root App plus cross-cutting helpers for `pm` commands.
 
 - `root` is the top-level cyclopts App every group registers against.
-- `RepoBranch` / `WtSelection` / `StackerScope` are flattened parameter
-  dataclasses reused across many commands (see cyclopts "Sharing
-  Parameters").
+- `WtSelection` / `ProjectOrAllScope` / `StackerScope` are flattened
+  parameter dataclasses reused across many commands (see cyclopts
+  "Sharing Parameters"). The bare `--project` / `--repo` building blocks
+  these compose against live in `project_manager.cli._params`.
 - `fail` renders the consistent `pm: <msg>` error line used everywhere.
 """
 import sys
@@ -12,6 +13,12 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 
+from project_manager.cli._params import (
+    ProjectArg,
+    ProjectFlag,
+    RepoArg,
+    RepoFlag,
+)
 from project_manager.paths import Paths
 from project_manager.project import current, discovery
 
@@ -28,20 +35,6 @@ def fail(msg: str) -> int:
 
 
 # --- reusable scope / selection dataclasses ----------------------------------
-
-
-@Parameter(name="*")
-@dataclass(frozen=True)
-class ProjectFlag:
-    """`-p/--project <name>`; defaults to the cwd's current project."""
-
-    project: Annotated[
-        str | None,
-        Parameter(
-            name=("-p", "--project"),
-            help="project name (defaults to current project)",
-        ),
-    ] = None
 
 
 @Parameter(name="*")
@@ -70,16 +63,6 @@ def selected_wts(sel: WtSelection) -> list[str] | None:
 
 @Parameter(name="*")
 @dataclass(frozen=True)
-class RepoFlag:
-    """Just `--repo`; defaults to the cwd's pm slot."""
-
-    repo: Annotated[
-        str | None, Parameter(help="defaults to the cwd's pm slot"),
-    ] = None
-
-
-@Parameter(name="*")
-@dataclass(frozen=True)
 class ProjectOrAllScope:
     """`-p/--project <name>` or `--all`; mutually exclusive.
 
@@ -89,10 +72,7 @@ class ProjectOrAllScope:
     and from anywhere else (all-projects view).
     """
 
-    project: Annotated[
-        str | None,
-        Parameter(name=("-p", "--project"), help="limit to one project"),
-    ] = None
+    project: ProjectArg = None
     all: Annotated[
         bool,
         Parameter(name="--all", negative="", help="every project"),
@@ -124,9 +104,7 @@ class StackerScope:
     `pm stacker <cmd> [<branch>]` UX is preserved.
     """
 
-    repo: Annotated[
-        str | None, Parameter(help="defaults to the cwd's pm slot"),
-    ] = None
+    repo: RepoArg = None
     all: Annotated[
         bool,
         Parameter(
@@ -147,3 +125,16 @@ class StackerScope:
         str | None,
         Parameter(name="--from", help="start the walk from this branch"),
     ] = None
+
+
+__all__ = [
+    "root",
+    "fail",
+    "ProjectFlag",
+    "RepoFlag",
+    "WtSelection",
+    "selected_wts",
+    "ProjectOrAllScope",
+    "resolve_project_scope",
+    "StackerScope",
+]

@@ -4,6 +4,7 @@ from typing import Annotated
 from cyclopts import Parameter
 
 from project_manager import config, render
+from project_manager.cli._params import RepoOptionalArg
 from project_manager.pool import ls as ls_mod
 
 from . import pool_app
@@ -11,7 +12,7 @@ from . import pool_app
 
 @pool_app.command
 def ls(
-    repo: str | None = None,
+    repo: RepoOptionalArg = None,
     *,
     json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:

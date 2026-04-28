@@ -16,10 +16,10 @@ from cyclopts import Parameter
 
 from project_manager.agent import run as run_mod
 from project_manager.agent.run import AgentName
+from project_manager.cli._params import ProjectArg
 
 from . import agent_app
 
-_ProjectFlag = Annotated[str | None, Parameter(name=("-p", "--project"))]
 _Forwarded = Annotated[str, Parameter(allow_leading_hyphen=True)]
 
 # Signature ordering matters: `*args` MUST come before the `-p`
@@ -35,21 +35,21 @@ _Forwarded = Annotated[str, Parameter(allow_leading_hyphen=True)]
 
 
 @agent_app.command(name="claude", help_flags="")
-def claude(*args: _Forwarded, project: _ProjectFlag = None) -> int:
+def claude(*args: _Forwarded, project: ProjectArg = None) -> int:
     """Launch Claude Code in the pm project dir, forwarding extra args."""
     run_mod.run(AgentName.CLAUDE, project, args)
     return 0  # unreachable; os.execvp replaces the process on success
 
 
 @agent_app.command(name="codex", help_flags="")
-def codex(*args: _Forwarded, project: _ProjectFlag = None) -> int:
+def codex(*args: _Forwarded, project: ProjectArg = None) -> int:
     """Launch Codex CLI in the pm project dir, forwarding extra args."""
     run_mod.run(AgentName.CODEX, project, args)
     return 0
 
 
 @agent_app.command(name="cursor", help_flags="")
-def cursor(*args: _Forwarded, project: _ProjectFlag = None) -> int:
+def cursor(*args: _Forwarded, project: ProjectArg = None) -> int:
     """Launch Cursor agent in the pm project dir, forwarding extra args."""
     run_mod.run(AgentName.CURSOR, project, args)
     return 0

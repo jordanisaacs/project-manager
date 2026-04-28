@@ -4,6 +4,7 @@ from typing import Annotated
 from cyclopts import Parameter
 
 from project_manager import config, render
+from project_manager.cli._params import RepoListArg, parse_repo_list
 from project_manager.repo import maintenance as maintenance_mod
 
 from . import repo_app
@@ -12,7 +13,7 @@ from . import repo_app
 @repo_app.command
 def maintenance(
     *,
-    repo: str | None = None,
+    repo: RepoListArg = None,
     json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Warm git object store + index + fsmonitor across repos and pool slots.
@@ -23,13 +24,12 @@ def maintenance(
     `pm repo pull`. Intended for a timer: keeps cold watchman crawls out
     of interactive commands.
 
-    --repo accepts a comma-separated list; defaults to every repo.
     Concurrency is controlled by `[concurrency].limit` in config.toml
     (default 10).
     """
     paths = config.load()
     cfg = config.concurrency()
-    repos = [r.strip() for r in repo.split(",") if r.strip()] if repo else None
+    repos = parse_repo_list(repo)
     results = maintenance_mod.maintain(paths, repos, cfg)
     render.emit_rows(results, maintenance_mod.COLUMNS, as_json=json)
     return 1 if any(not r.ok for r in results) else 0

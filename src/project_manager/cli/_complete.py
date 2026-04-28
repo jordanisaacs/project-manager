@@ -20,6 +20,7 @@ from typing import Literal
 from cyclopts import App
 
 from project_manager import config
+from project_manager.cli._params import ProjectArg
 from project_manager.cli._shared import root
 from project_manager.project import current, discovery
 from project_manager.project import db as project_db
@@ -53,7 +54,7 @@ def repos() -> int:
 @complete_app.command(show=False)
 def worktrees(
     *,
-    project: str | None = None,
+    project: ProjectArg = None,
     state: Literal["all", "attached", "unattached"] = "all",
 ) -> int:
     """Worktree names for a project, optionally filtered by attach state.

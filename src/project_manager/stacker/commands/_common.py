@@ -6,6 +6,7 @@ things remaining here all resolve/construct values the `StackerService`
 needs; they know nothing about how the user invoked the command.
 """
 from project_manager import render
+from project_manager.cli._params import resolve_repo, resolve_repo_optional
 from project_manager.cli._shared import StackerScope
 from project_manager.paths import Paths
 from project_manager.stacker import git, locate, selectors
@@ -18,6 +19,21 @@ from project_manager.stacker.models import (
 )
 from project_manager.stacker.service import StackerService
 
+# Re-exported so existing `_common.resolve_repo(...)` call sites and tests
+# keep working; canonical definitions live in `cli._params`.
+__all__ = [
+    "service",
+    "stderr_progress",
+    "resolve_repo",
+    "resolve_repo_optional",
+    "resolve_branch",
+    "target",
+    "resolve_on_spec",
+    "scope_of",
+    "scope_spec",
+    "emit",
+]
+
 
 def service(paths: Paths) -> StackerService:
     db = StackerDB(paths.stacker_db())
@@ -26,24 +42,6 @@ def service(paths: Paths) -> StackerService:
 
 def stderr_progress(msg: str) -> None:
     render.console(stderr=True).print(f"pm: {msg}", markup=False, highlight=False)
-
-
-def resolve_repo(repo: str | None, paths: Paths) -> str:
-    if repo:
-        return repo
-    here = locate.slot_for_cwd(paths)
-    if here is None:
-        raise git.GitError(
-            "pass --repo <name> (or run from inside a pm worktree slot)."
-        )
-    return here.repo_name
-
-
-def resolve_repo_optional(repo: str | None, paths: Paths) -> str | None:
-    if repo:
-        return repo
-    here = locate.slot_for_cwd(paths)
-    return here.repo_name if here is not None else None
 
 
 def resolve_branch(branch: str | None, paths: Paths) -> str:

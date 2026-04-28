@@ -8,6 +8,7 @@ from project_manager import check as check_mod
 from project_manager import config, render
 from project_manager.agent import ls as agent_ls
 from project_manager.agent.sources import REGISTRY
+from project_manager.cli._params import ProjectArg
 from project_manager.project import current
 from project_manager.project import status as status_mod
 from project_manager.project.status import ALL_STATUS_SECTIONS, StatusSection
@@ -101,7 +102,7 @@ def _emit_text(
 
 @project_app.command
 def status(
-    project: str | None = None,
+    project: ProjectArg = None,
     *,
     json: Annotated[bool, Parameter(negative="")] = False,
     sections: Annotated[
