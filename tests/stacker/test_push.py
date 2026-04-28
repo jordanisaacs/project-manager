@@ -12,6 +12,7 @@ from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import (
     ParentLocator,
+    PRState,
     PushOptions,
     ScopeSpec,
     SelectorTarget,
@@ -262,6 +263,57 @@ def test_push_holds_target_slot_when_worktree_dirty(
     assert len(stacker_owned) == 1, (
         f"dirty worktree should keep the stacker slot held: {stacker_owned}"
     )
+
+
+def _mark_merged(svc: StackerService, repo_name: str, branch: str, number: int) -> None:
+    svc.db.upsert_pr_state(
+        PRState(
+            repo_name=repo_name,
+            branch=branch,
+            pr_url=f"https://github.com/acme/widgets/pull/{number}",
+            pr_number=number,
+            state="MERGED",
+            merged=True,
+        ),
+    )
+
+
+def test_push_skips_merged_ancestors(
+    push_service: StackerService,
+    backend: RecordingPRBackend,
+    tracked_stack: TrackedStack,
+) -> None:
+    """Default-scope push from a leaf must not force-push merged ancestors.
+
+    Reproduces the `pm stacker push` regression where a long-running
+    branch sat downstream of an already-merged ancestor: every push from
+    the leaf re-pushed the merged ref (clobbering the GitHub merge
+    commit) and reopened body edits on the closed PR.
+    """
+    _mark_merged(push_service, tracked_stack.repo_name, "a", number=10)
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
+    result = push_service.push(target)
+    heads = [req.head for req, _body in backend.created]
+    assert "a" not in heads
+    assert heads == ["b", "c", "d"]
+    assert "Skipping demo:a" in result
+
+
+def test_push_target_already_merged_short_circuits(
+    push_service: StackerService,
+    backend: RecordingPRBackend,
+    tracked_stack: TrackedStack,
+) -> None:
+    """Pushing a merged target reports the merge and creates no PRs."""
+    _mark_merged(push_service, tracked_stack.repo_name, "b", number=11)
+    target = SelectorTarget(
+        repo_name=tracked_stack.repo_name, branch="b",
+    )
+    result = push_service.push(
+        target, PushOptions(scope=ScopeSpec(only=True)),
+    )
+    assert backend.created == []
+    assert "already merged" in result
 
 
 def test_push_empty_scope_when_target_has_no_lineage(
