@@ -14,6 +14,8 @@ to free it; previously each flow had its own ad-hoc resolution.
 """
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,8 +71,12 @@ def resolve_slot(
     """Pick a worktree to run an op for `branch` in, checking it out as needed.
 
     Resolution order: existing checkout → cwd reuse (when policy permits) →
-    fresh ops slot. Pool exhaustion in the last step raises
-    `slot_mod.PoolExhaustedError` (same as today's `ops_slot.acquire`).
+    fresh ops slot → cwd reuse with branch-switch (last-resort fallback).
+    The fallback kicks in only when `ops_slot.acquire` raises
+    `PoolExhaustedError`; without it the user is stuck whenever every slot
+    is project-claimed and they're sitting in one of those slots — adding
+    a slot just to push is heavyweight, and clobbering the cwd's branch
+    is recoverable (cwd is the user's, by definition).
     """
     existing = locate.locate_worktree(ctx.paths, repo_name, branch)
     if existing is not None:
@@ -80,10 +86,20 @@ def resolve_slot(
         git.git(cwd_path, "checkout", branch)
         return AcquiredSlot(path=cwd_path, ops=None)
     pooldb = PoolDB(ctx.paths.pool_db())
-    claimed = ops_slot.acquire(
-        ctx.paths, pooldb, repo_name, branch,
-        wait=ops_slot.WaitOptions(progress=ctx.progress),
-    )
+    try:
+        claimed = ops_slot.acquire(
+            ctx.paths, pooldb, repo_name, branch,
+            wait=ops_slot.WaitOptions(progress=ctx.progress),
+        )
+    except slot_mod.PoolExhaustedError:
+        fallback = _cwd_reuse_path(
+            ctx, repo_name,
+            CwdReusePolicy(enabled=cwd_reuse.enabled, allow_branch_switch=True),
+        )
+        if fallback is None:
+            raise
+        git.git(fallback, "checkout", branch)
+        return AcquiredSlot(path=fallback, ops=None)
     return AcquiredSlot(path=claimed.path, ops=claimed)
 
 
@@ -114,9 +130,88 @@ def reserve_for_new_branch(
 def release_if_owned(ctx: StackerCtx, acquired: AcquiredSlot) -> None:
     """Release a fresh ops slot. No-op when the slot was a cwd reuse or
     locate-fast-path hit (i.e. `acquired.ops is None`).
+
+    Prefer `release_if_clean` for steady-state post-op cleanup — this
+    variant is for paths that have already decided the worktree state
+    doesn't need preserving (e.g. early-return after a no-op sync).
     """
     if acquired.ops is not None:
         ops_slot.release(PoolDB(ctx.paths.pool_db()), acquired.ops)
+
+
+@contextlib.contextmanager
+def acquired_for_op(
+    ctx: StackerCtx,
+    repo_name: str,
+    branch: str,
+    *,
+    cwd_reuse: CwdReusePolicy = CwdReusePolicy(),
+) -> Iterator[AcquiredSlot]:
+    """Context-managed slot acquisition with automatic clean-release.
+
+    Wraps `resolve_slot` + `release_if_clean` into a single `with`
+    block — the body of the block is the op, and on exit (success,
+    exception, `KeyboardInterrupt`) the slot is returned to the pool
+    iff the worktree has nothing to preserve. A mid-cherry-pick
+    (`CHERRY_PICK_HEAD` present) or uncommitted change keeps the slot
+    held so `pm stacker continue` can resume.
+
+    Use for any single-acquire op (push iteration, sync setup, absorb,
+    create, etc.). The cherry-pick driver manages slot handoffs across
+    its own queue and uses `release_if_clean` directly.
+    """
+    acquired = resolve_slot(ctx, repo_name, branch, cwd_reuse=cwd_reuse)
+    try:
+        yield acquired
+    finally:
+        release_if_clean(ctx, acquired)
+
+
+def release_if_clean(ctx: StackerCtx, acquired: AcquiredSlot) -> None:
+    """Release a stacker-minted slot iff the worktree has nothing to
+    preserve.
+
+    Designed for `try/finally` cleanup that fires on success, exception,
+    and `KeyboardInterrupt` alike. Returns the slot to the pool when:
+      - The slot wasn't stacker-minted (`acquired.ops is None`).
+      - The worktree has no resumable state (clean tree, no
+        `CHERRY_PICK_HEAD`).
+    Otherwise holds the slot so `pm stacker continue` can pick up the
+    user's mid-flight resolution. Resume relies on the DB-side
+    `OperationState`, not on which slot the work lives in — releasing a
+    clean slot is safe because the next continue rebinds via that state.
+    """
+    if acquired.ops is None:
+        return
+    try_release_ops_slot(ctx, acquired.ops.repo, acquired.ops.uuid)
+
+
+def try_release_ops_slot(ctx: StackerCtx, repo: str, uuid: str) -> bool:
+    """Release the stacker-ops slot at (repo, uuid) when its worktree has
+    no resumable state. Returns True if the slot was released, False if
+    held.
+
+    Single source of truth for "is this stacker slot reclaimable?" —
+    consulted by both `release_if_clean` (post-op cleanup) and
+    `pm check --fix` (steady-state recovery of leaked claims). The
+    predicate (`git.has_resumable_state`) and the action
+    (`ops_slot.release` → `git.detach_head` + `pooldb.release`) live
+    here so future callers don't drift into divergent dirty checks.
+
+    Caller is responsible for already knowing the slot is owned by
+    `OWNER_STACKER_OPS`; the function will silently no-op if not, since
+    it only constructs the `slot_mod.Slot` view used by
+    `ops_slot.release` and that release is itself idempotent against
+    a missing pool row.
+    """
+    slot_path = ctx.paths.slot(repo, uuid)
+    if git.has_resumable_state(slot_path):
+        return False
+    ops_slot.release(
+        PoolDB(ctx.paths.pool_db()),
+        slot_mod.Slot(repo=repo, uuid=uuid, path=slot_path),
+    )
+    return True
 
 
 def _cwd_reuse_path(

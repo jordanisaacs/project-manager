@@ -5,9 +5,12 @@ from enum import StrEnum
 from pathlib import Path
 
 from project_manager.paths import Paths
+from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.project import db, discovery
 from project_manager.render import Column
+from project_manager.stacker import git as stacker_git
+from project_manager.stacker import ops_slot
 
 
 class Kind(StrEnum):
@@ -18,7 +21,8 @@ class Kind(StrEnum):
     BROKEN = "broken"                  # forward points at a missing slot dir
     ORPHAN_FORWARD = "orphan-forward"  # forward exists, no db row
     ORPHAN_OWNER = "orphan-owner"      # project-owned pool row with no backing forward
-    OPS_OWNED = "ops-owned"            # pool row with owner_kind == stacker
+    OPS_OWNED = "ops-owned"            # stacker-owned slot mid-op (resumable state present)
+    STALE_OPS = "stale-ops"            # stacker-owned slot with a clean worktree — leaked
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ _KIND_STYLE: dict[Kind, str] = {
     Kind.ORPHAN_FORWARD: "red",
     Kind.ORPHAN_OWNER: "red",
     Kind.OPS_OWNED: "cyan",
+    Kind.STALE_OPS: "red",
 }
 
 
@@ -171,13 +176,25 @@ def _classify_pool_rows(
         if owner.kind == OwnerKind.STACKER:
             if scope is not None:
                 continue
+            # Split stacker-ops claims by whether the worktree still has
+            # work to preserve. STALE_OPS means a previous push/sync
+            # leaked the claim — `--fix` can safely release it. OPS_OWNED
+            # means there's a paused cherry-pick or uncommitted change
+            # that `pm stacker continue` will pick up; we must hold.
+            stale = slot_path.is_dir() and not stacker_git.has_resumable_state(
+                slot_path,
+            )
             yield Finding(
-                kind=Kind.OPS_OWNED,
+                kind=Kind.STALE_OPS if stale else Kind.OPS_OWNED,
                 wt=None,
                 repo=repo,
                 slot_path=slot_path,
                 forward_path=None,
-                detail="slot held by a stacker ops operation",
+                detail=(
+                    "stacker ops claim with a clean worktree — leaked"
+                    if stale
+                    else "slot held by a stacker ops operation"
+                ),
             )
             continue
         if scope is not None and owner.id != scope:
@@ -273,9 +290,10 @@ def fix(paths: Paths, findings: list[Finding]) -> int:
     """Apply safe fixes. Returns count of applied fixes.
 
     Fixed: BROKEN (unlink forward), ORPHAN_FORWARD (unlink forward),
-           ORPHAN_OWNER (release pool row), STALE (unlink forward).
+           ORPHAN_OWNER (release pool row), STALE (unlink forward),
+           STALE_OPS (detach HEAD + release pool row).
     Left alone: DETACHED (intentional), ACTIVE (healthy), DRIFT (info),
-                OPS_OWNED (intentional).
+                OPS_OWNED (mid-op — `pm stacker continue` owns it).
     """
     pooldb = PoolDB(paths.pool_db())
     n = 0
@@ -286,5 +304,17 @@ def fix(paths: Paths, findings: list[Finding]) -> int:
                 n += 1
         elif f.kind == Kind.ORPHAN_OWNER and f.slot_path is not None:
             pooldb.release(f.slot_path.parent.name, f.slot_path.name)
+            n += 1
+        elif f.kind == Kind.STALE_OPS and f.slot_path is not None and f.repo is not None:
+            # Re-check `has_resumable_state` here: the classification was
+            # observed earlier in the run, and a concurrent stacker op
+            # could have entered a paused state since. Cheap insurance
+            # against detaching from a worktree that's now mid-conflict.
+            if stacker_git.has_resumable_state(f.slot_path):
+                continue
+            ops_slot.release(
+                pooldb,
+                slot_mod.Slot(repo=f.repo, uuid=f.slot_path.name, path=f.slot_path),
+            )
             n += 1
     return n

@@ -72,6 +72,44 @@ def test_crash_after_checkout_leaves_slot_claimed(
     assert branch == "refs/heads/feature-crash"
 
 
+def test_acquire_releases_claim_when_checkout_interrupted(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],  # noqa: ARG001 — populates the pool
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a Ctrl+C during `git checkout` (or any non-`GitError`
+    raise inside the post-claim block) must still release the pool claim.
+
+    The original `except GitError` clause caught the typed checkout
+    failure but not `KeyboardInterrupt`; canceling a `pm stacker push`
+    mid-acquire left the slot stuck as `stacker|ops` with no resumable
+    state to recover, blocking subsequent pushes on pool exhaustion.
+    """
+    repo_name, _ = stacker_repo
+    pooldb = _pooldb(pm_env)
+    before_free = {s.uuid for s in slot_mod.free_slots(pm_env, pooldb, repo_name)}
+
+    real_git = stacker_git.git
+
+    def _interrupt_checkout(
+        path: Path, *args: str, check: bool = True,
+    ) -> object:
+        if args[:1] == ("checkout",):
+            raise KeyboardInterrupt
+        return real_git(path, *args, check=check)
+
+    monkeypatch.setattr(stacker_git, "git", _interrupt_checkout)
+
+    with pytest.raises(KeyboardInterrupt):
+        ops_slot.acquire(pm_env, pooldb, repo_name, "feature-irrelevant")
+
+    after_free = {s.uuid for s in slot_mod.free_slots(pm_env, pooldb, repo_name)}
+    assert after_free == before_free, (
+        "interrupted acquire must not leak a pool claim: every slot tried got released"
+    )
+
+
 def test_acquire_of_branch_held_elsewhere_releases_claim(
     pm_env: Paths,
     stacker_repo: tuple[str, Path],

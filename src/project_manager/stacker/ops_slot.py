@@ -102,14 +102,19 @@ def acquire(
 ) -> slot_mod.Slot:
     """Claim a pool slot and check `branch` out in it.
 
-    Steady-state release happens via `release` on clean completion. On crash
-    mid-op the slot stays claimed so `stacker continue` / `abort` can drive
-    resolution — do NOT wrap this in try/finally.
+    Steady-state release happens via `release` on clean completion. The
+    pre-completion window — claim succeeded, checkout running — catches
+    `BaseException` so a `KeyboardInterrupt` (or any unexpected error)
+    releases the just-taken claim instead of orphaning it. There's no
+    resumable op for a single-shot acquire and the worktree is clean by
+    construction at this point, so the slot is safe to return to the
+    pool. Once this returns, the caller's own `try/finally` (with
+    `release_if_clean`) governs.
     """
     target = claim(paths, pooldb, repo_name, wait=wait)
     try:
         git.git(target.path, "checkout", branch)
-    except git.GitError:
+    except BaseException:
         pooldb.release(repo_name, target.uuid)
         raise
     return target
@@ -117,5 +122,5 @@ def acquire(
 
 def release(pooldb: PoolDB, slot: slot_mod.Slot) -> None:
     """Return a stacker-ops slot to the pool with detached HEAD."""
-    git.git(slot.path, "checkout", "--detach", "HEAD")
+    git.detach_head(slot.path)
     pooldb.release(slot.repo, slot.uuid)

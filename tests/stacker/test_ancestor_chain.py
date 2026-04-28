@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -92,8 +94,11 @@ def test_pr_walks_ancestors_root_first(
         pp_order.append(tb.branch)
         return True
 
-    def _fake_acquire(_ctx: object, _repo: str, _branch: str) -> _Acquired:
-        return _Acquired(path=service.paths.repo("demo"), ops=None)
+    @contextlib.contextmanager
+    def _fake_acquired_for_op(
+        _ctx: object, _repo: str, _branch: str
+    ) -> Iterator[_Acquired]:
+        yield _Acquired(path=service.paths.repo("demo"), ops=None)
 
     def _fake_create(
         _ctx: object, tb: TrackedBranch, *_args: object, **_kwargs: object
@@ -109,8 +114,7 @@ def test_pr_walks_ancestors_root_first(
     # push_ops uses namespace imports (`worktree.run_single_pp`) so patching the
     # module attribute takes effect. Same for pr_create_update.*.
     monkeypatch.setattr(push_ops.worktree, "run_single_pp", _fake_pp)
-    monkeypatch.setattr(push_ops.worktree, "acquire", _fake_acquire)
-    monkeypatch.setattr(push_ops.worktree, "release_if_owned", lambda *_a, **_k: None)
+    monkeypatch.setattr(push_ops.worktree, "acquired_for_op", _fake_acquired_for_op)
     monkeypatch.setattr(pr_create_update, "create_or_update_current_pr", _fake_create)
     monkeypatch.setattr(
         push_ops.pr_create_update, "refresh_component_pr_bodies", lambda *_a, **_k: None

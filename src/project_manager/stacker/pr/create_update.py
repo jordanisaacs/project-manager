@@ -119,6 +119,7 @@ def refresh_component_pr_bodies(
         pr_map=pr_map,
         config=config,
         current_repo=pr_ctx.current_repo,
+        live_heads=_live_heads(ctx, component),
     )
     for node in component:
         pr = pr_map.get(node.branch)
@@ -140,6 +141,30 @@ def refresh_component_pr_bodies(
             f"Updated stack block for PR #{pr.number} "
             f"({selectors.selector_for(node.repo_name, node.branch)})",
         )
+
+
+def _live_heads(
+    ctx: StackerCtx, component: list[TrackedBranch]
+) -> dict[str, str]:
+    """Map `branch -> git rev-parse <branch>` from the canonical repo.
+
+    Source of truth for the head SHA in `_files_url`. Reads the branch
+    ref directly so it tracks the latest commit regardless of which
+    worktree (if any) has the branch checked out — refs are shared
+    across all worktrees of a repo. The DB's `last_clean_head` is only
+    refreshed by sync/init/repair, so it goes stale as soon as the user
+    adds a local commit; reading the ref live closes that gap.
+    Branches missing locally fall through to the `last_clean_head`
+    fallback in `_files_url`.
+    """
+    heads: dict[str, str] = {}
+    for node in component:
+        repo_path = ctx.paths.repo(node.repo_name)
+        try:
+            heads[node.branch] = git.rev_parse(repo_path, node.branch)
+        except git.GitError:
+            continue
+    return heads
 
 
 def erase_component_pr_bodies(

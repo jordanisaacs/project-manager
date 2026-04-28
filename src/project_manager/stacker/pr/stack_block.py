@@ -23,6 +23,11 @@ class _StackRender:
     pr_map: dict[str, gh.PullRequest]
     config: RepoPRConfig
     current_repo: gh.RepoInfo
+    # Live `git rev-parse <branch>` from the canonical repo, keyed by branch.
+    # Lets `_files_url` render `<base>..<head>` against the SHA actually
+    # pushed (or about to be) instead of the `last_clean_head` cached at
+    # init/sync time, which goes stale the moment a local commit lands.
+    live_heads: dict[str, str]
 
 
 def render_stack_block(
@@ -96,20 +101,31 @@ def _render_stack_lines(
 
 
 def _files_url(node: TrackedBranch, render_ctx: _StackRender) -> str | None:
-    """Build `<pr-url>/files/<base>..<head>` for reviewer navigation.
+    """Build a Files-changed URL for reviewer navigation.
 
-    Scoped to the PR so reviewers see only the commits unique to that
-    branch. For a merged PR the range is dropped (`<pr>/files`) since
-    the commit range no longer reflects reviewable changes. Uses
-    `last_clean_head` (persisted by sync/init/repair), so ancestors
-    and siblings render correctly even when not currently checked out.
+    The range form `<pr>/files/<base>..<head>` only renders when both
+    SHAs are reachable in the PR's commit graph — true for branches
+    nested under another tracked, non-merged branch (parent commits are
+    part of the child's repo-pr commit list) but not for branches whose
+    parent is the trunk. For root-of-stack branches the base SHA is a
+    trunk commit outside the PR graph, so GitHub 404s; we emit
+    `<pr>/files` instead, mirroring universe gitstack's `get_diff_link`.
+    A merged parent collapses to the same case (its commits land on
+    trunk and the parent ref is gone). Head SHA prefers the live branch
+    ref via `render_ctx.live_heads`, falling back to the `last_clean_head`
+    cached by sync/init/repair.
     """
     pr = render_ctx.pr_map.get(node.branch)
     if pr is None:
         return None
     if pr.state == "MERGED":
         return f"{pr.url}/files"
-    head_sha = node.last_clean_head
+    parent_pr = render_ctx.pr_map.get(node.parent_branch)
+    parent_is_trunk = node.parent_branch == render_ctx.config.trunk_branch
+    parent_is_merged = parent_pr is not None and parent_pr.state == "MERGED"
+    if parent_is_trunk or parent_is_merged:
+        return f"{pr.url}/files"
+    head_sha = render_ctx.live_heads.get(node.branch) or node.last_clean_head
     if not head_sha:
         return None
     base_sha = node.managed_base_commit

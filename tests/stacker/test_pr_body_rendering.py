@@ -254,6 +254,106 @@ def test_repo_pr_includes_compare_url_in_block(
     assert "[[Files changed](" in body_b
 
 
+def test_repo_pr_files_url_uses_current_head_after_local_commit(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: `Files changed` head SHA must reflect the pushed HEAD,
+    not the stale `last_clean_head` written at init time.
+
+    Real universe PRs (#1845320, #1845321) rendered
+    `/files/<sha>..<sha>` — an empty diff — because after `pm stacker init`
+    seeded `last_clean_head = parent_head`, a follow-up local commit
+    advanced HEAD but `pm stacker pp` never refreshed `last_clean_head`
+    in the DB before rendering the stack block.
+    """
+    repo_name, _leaf, _slot_a, slot_b = _two_branch_stack(
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
+    )
+    _set_config(service, repo_name, "repo-pr")
+
+    # Advance feature-b's HEAD past the value `init_adopt_branch` recorded
+    # in `last_clean_head`. This is the user-perspective scenario: branch
+    # was tracked, then more local commits landed before pp.
+    (slot_b.path / "feature-b-extra.txt").write_text("more\n")
+    stacker_git.git(slot_b.path, "add", "feature-b-extra.txt")
+    stacker_git.git(
+        slot_b.path,
+        "-c", "user.email=t@e.com", "-c", "user.name=t",
+        "commit", "-m", "B: extra local commit",
+    )
+    actual_head_b = stacker_git.rev_parse(slot_b.path, "HEAD")
+
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
+
+    final = {r.number: b for (r, b) in backend.edited if b is not None}
+    body_b = final[2]
+    match = re.search(r"/pull/2/files/([0-9a-f]+)\.\.([0-9a-f]+)", body_b)
+    assert match is not None, f"Files-changed URL missing from body: {body_b!r}"
+    base_sha, head_sha = match.group(1), match.group(2)
+    assert head_sha == actual_head_b, (
+        f"head SHA in stack block ({head_sha}) does not match feature-b's "
+        f"current HEAD ({actual_head_b}); last_clean_head was not refreshed "
+        f"after the local commit"
+    )
+    assert base_sha != head_sha, (
+        f"base..head collapsed to {base_sha}..{head_sha} (empty diff)"
+    )
+
+
+def test_repo_pr_root_branch_files_link_omits_range(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: branches whose parent is the trunk must render
+    `<pr>/files` (no range) — the base SHA is a trunk commit that lives
+    outside the PR's commit graph, so GitHub 404s a `/files/<base>..<head>`
+    URL. Mirrors universe gitstack's `get_diff_link`, which suppresses
+    the range when `parent == default_branch`.
+
+    Real universe PR #1845320 (stack/stacker-test-a, parent=master)
+    surfaced this: GitHub returned 404 even after we fixed the head SHA
+    staleness — the URL itself was structurally wrong for a root branch.
+    """
+    repo_name, _leaf, _slot_a, _slot_b = _two_branch_stack(
+        service,
+        stacker_repo,
+        three_slots,
+        monkeypatch,
+    )
+    _set_config(service, repo_name, "repo-pr")
+
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
+
+    final = {r.number: b for (r, b) in backend.edited if b is not None}
+    body_a = final[1]
+    # feature-a's self-line in its own stack block. Should link to /files,
+    # not /files/<sha>..<sha>.
+    assert re.search(
+        r"\[\*\*feature-a\*\*\]\(https://github\.com/acme/widgets/pull/1\) "
+        r"\[\[Files changed\]\(https://github\.com/acme/widgets/pull/1/files\)\]",
+        body_a,
+    ), f"feature-a (root, parent=trunk) must render /files without a range: {body_a!r}"
+
+    # The body of PR B should also render feature-a's ancestor row without
+    # a range, since the rule is per-branch (depends on its parent).
+    body_b = final[2]
+    assert re.search(
+        r"\[feature-a\]\(https://github\.com/acme/widgets/pull/1\) "
+        r"\[\[Files changed\]\(https://github\.com/acme/widgets/pull/1/files\)\]",
+        body_b,
+    ), f"feature-a row in PR B must also use /files without a range: {body_b!r}"
+
+
 def test_pr_pr_mode_stack_block_omits_compare_link(
     service: StackerService,
     backend: RecordingPRBackend,

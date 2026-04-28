@@ -52,8 +52,12 @@ def push(
     leaf = resolved[-1]
     focus_pr: gh.PullRequest | None = None
     for item in resolved:
-        acquired = worktree.acquire(ctx, item.repo_name, item.branch)
-        try:
+        # `acquired_for_op` releases the slot on exit when the worktree
+        # has nothing to preserve — covers success, exception, and Ctrl+C
+        # uniformly. Push has no resumable state of its own; if a cherry
+        # -pick somehow remains in progress at exit time, the predicate
+        # holds the slot for `pm stacker continue` to pick up.
+        with worktree.acquired_for_op(ctx, item.repo_name, item.branch):
             worktree.run_single_pp(ctx, item, logs)
             if pr_ctx is not None:
                 is_leaf = item.branch == leaf.branch
@@ -67,9 +71,6 @@ def push(
                 )
                 if item.branch == target.branch:
                     focus_pr = pr
-        finally:
-            if item.branch != target.branch:
-                worktree.release_if_owned(ctx, acquired)
     if pr_ctx is None:
         return fmt.finish(ctx, logs, "Push complete.")
     assert focus_pr is not None

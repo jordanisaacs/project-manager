@@ -71,6 +71,6 @@ def _remove_one(
     slot_path = locate.locate_worktree(ctx.paths, tracked.repo_name, tracked.branch)
     if slot_path is not None:
         # Detach so `git branch -D` won't refuse because it's checked out.
-        git.git(slot_path, "checkout", "--detach", "HEAD")
+        git.detach_head(slot_path)
     repo_path = ctx.paths.repo(tracked.repo_name)
     git.git(repo_path, "branch", "-D", tracked.branch, check=False)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +33,21 @@ def acquire(ctx: StackerCtx, repo_name: str, branch: str) -> AcquiredSlot:
 
 def release_if_owned(ctx: StackerCtx, acquired: AcquiredSlot) -> None:
     slot.release_if_owned(ctx, acquired)
+
+
+def release_if_clean(ctx: StackerCtx, acquired: AcquiredSlot) -> None:
+    slot.release_if_clean(ctx, acquired)
+
+
+@contextmanager
+def acquired_for_op(
+    ctx: StackerCtx,
+    repo_name: str,
+    branch: str,
+) -> Iterator[AcquiredSlot]:
+    """Re-export of `slot.acquired_for_op` for the `worktree.` namespace."""
+    with slot.acquired_for_op(ctx, repo_name, branch) as acquired:
+        yield acquired
 
 
 def slot_path_for_active_op(

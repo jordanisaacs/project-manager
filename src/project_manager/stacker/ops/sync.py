@@ -66,39 +66,41 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch) -> str:
             parent_branch=tracked.parent_branch,
         )
     )
+    # The context manager releases the slot iff the worktree is clean on
+    # exit — covers success, exception, and `KeyboardInterrupt` in one
+    # place. A pause-on-conflict mid-cherry-pick keeps the slot (predicate
+    # sees `CHERRY_PICK_HEAD`) so `pm stacker continue` can resume.
     try:
-        acquired = worktree.acquire(ctx, tracked.repo_name, tracked.branch)
-    except Exception:
-        ctx.db.clear_operation(tracked.repo_name)
+        with worktree.acquired_for_op(ctx, tracked.repo_name, tracked.branch) as acquired:
+            parent_head, _, _ = cp_driver.sync_plan(ctx, tracked, acquired.path)
+            if parent_head == tracked.managed_base_commit:
+                ctx.db.clear_operation(tracked.repo_name)
+                child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
+                parent_label = selectors.selector_for(
+                    tracked.parent_repo_name, tracked.parent_branch
+                )
+                return (
+                    f"Nothing to sync for {child_label}.\n"
+                    f"Parent {parent_label} is unchanged at {fmt.short(parent_head)}."
+                )
+            ensure_syncable(acquired.path)
+            logs: list[str] = []
+            cp_driver.prepare_local_operation(
+                ctx, tracked, op_type="local_sync", slot_path=acquired.path, logs=logs
+            )
+            return cp_driver.run_until_pause_or_finish(
+                ctx,
+                tracked.repo_name,
+                cp_driver.DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops),
+                logs=logs,
+            )
+    except BaseException:
+        # The slot is already handled by the context manager above; we
+        # just need to clear the OperationState so a stale row doesn't
+        # block the next stacker invocation in this repo.
+        if ctx.db.get_operation(tracked.repo_name):
+            ctx.db.clear_operation(tracked.repo_name)
         raise
-    parent_head, _, _ = cp_driver.sync_plan(ctx, tracked, acquired.path)
-    if parent_head == tracked.managed_base_commit:
-        ctx.db.clear_operation(tracked.repo_name)
-        worktree.release_if_owned(ctx, acquired)
-        child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
-        parent_label = selectors.selector_for(
-            tracked.parent_repo_name, tracked.parent_branch
-        )
-        return (
-            f"Nothing to sync for {child_label}.\n"
-            f"Parent {parent_label} is unchanged at {fmt.short(parent_head)}."
-        )
-    try:
-        ensure_syncable(acquired.path)
-    except git.GitError:
-        ctx.db.clear_operation(tracked.repo_name)
-        worktree.release_if_owned(ctx, acquired)
-        raise
-    logs: list[str] = []
-    cp_driver.prepare_local_operation(
-        ctx, tracked, op_type="local_sync", slot_path=acquired.path, logs=logs
-    )
-    return cp_driver.run_until_pause_or_finish(
-        ctx,
-        tracked.repo_name,
-        cp_driver.DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops),
-        logs=logs,
-    )
 
 
 def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:

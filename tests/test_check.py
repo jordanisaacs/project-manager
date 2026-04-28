@@ -109,11 +109,44 @@ def test_attach_after_detach_round_trips_clean(pm_env: Paths) -> None:
 
 
 def test_ops_owned_slot_is_classified(pm_env: Paths) -> None:
-    _mk_pool(pm_env, "foo", ["a"])
+    """A stacker ops claim mid-cherry-pick reports OPS_OWNED and survives --fix.
+
+    `CHERRY_PICK_HEAD` is the canonical "paused, resumable" signal — a
+    `pm stacker continue` is on the user's roadmap, so we mustn't release.
+    """
+    [slot_obj] = git_pool(pm_env, "foo", n=1)
     pooldb = PoolDB(pm_env.pool_db())
-    pooldb.claim("foo", "a", OWNER_STACKER_OPS)
+    pooldb.claim(slot_obj.repo, slot_obj.uuid, OWNER_STACKER_OPS)
+    # Mark the worktree as resumable: a real `CHERRY_PICK_HEAD` under the
+    # slot's per-worktree git dir. Linked worktrees keep their git dir
+    # under `.git/worktrees/<uuid>/` in the main repo, with a `gitdir:`
+    # pointer in the slot's `.git` file — resolve through it.
+    git_dir = slot_obj.path / ".git"
+    if git_dir.is_file():
+        gitdir_line = git_dir.read_text().splitlines()[0]
+        real_git_dir = (slot_obj.path / gitdir_line.removeprefix("gitdir: ").strip()).resolve()
+    else:
+        real_git_dir = git_dir
+    (real_git_dir / "CHERRY_PICK_HEAD").write_text("0" * 40 + "\n")
 
     findings = check.check(pm_env)
     assert _kinds(findings) == [check.Kind.OPS_OWNED]
     assert check.fix(pm_env, findings) == 0
-    assert pooldb.get_owner("foo", "a") == OWNER_STACKER_OPS
+    assert pooldb.get_owner(slot_obj.repo, slot_obj.uuid) == OWNER_STACKER_OPS
+
+
+def test_stale_ops_slot_is_classified_and_fixed(pm_env: Paths) -> None:
+    """A stacker ops claim on a clean worktree is a leaked claim.
+
+    Common shape: a previous `pm stacker push` finished cleanly but
+    didn't release (pre-fix behavior). `pm check --fix` must hand the
+    slot back to the pool.
+    """
+    [slot_obj] = git_pool(pm_env, "foo", n=1)
+    pooldb = PoolDB(pm_env.pool_db())
+    pooldb.claim(slot_obj.repo, slot_obj.uuid, OWNER_STACKER_OPS)
+
+    findings = check.check(pm_env)
+    assert _kinds(findings) == [check.Kind.STALE_OPS]
+    assert check.fix(pm_env, findings) == 1
+    assert pooldb.get_owner(slot_obj.repo, slot_obj.uuid) is None

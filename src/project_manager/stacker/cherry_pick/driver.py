@@ -98,39 +98,63 @@ def run_until_pause_or_finish(
         logs = []
     op = ctx.db.get_operation(repo_name)
     assert op
-    while True:
-        if op.branch:
-            if handle is None:
-                slot_path = worktree.require_checked_out(ctx, repo_name, op.branch)
-                handle = DriveHandle(
-                    slot_path=slot_path,
-                    acquired_ops=worktree.existing_ops_slot(ctx, op, slot_path),
+    # Outer try/finally: a `KeyboardInterrupt` (or any unexpected raise)
+    # mid-loop must still hand the in-flight slot back to the pool when
+    # the worktree is clean. Without it, cancelling a downstream_sync
+    # leaves the just-checked-out branch claimed as `stacker|ops`,
+    # blocking the next stacker op until manual recovery.
+    try:
+        while True:
+            if op.branch:
+                if handle is None:
+                    slot_path = worktree.require_checked_out(ctx, repo_name, op.branch)
+                    handle = DriveHandle(
+                        slot_path=slot_path,
+                        acquired_ops=worktree.existing_ops_slot(ctx, op, slot_path),
+                    )
+                result = drive_local(
+                    ctx, op, slot_path=handle.slot_path, continuing=continuing, logs=logs
                 )
-            result = drive_local(
-                ctx, op, slot_path=handle.slot_path, continuing=continuing, logs=logs
-            )
-            continuing = False
-            if result is not None:
-                if handle.acquired_ops is not None:
-                    ops_slot.release(PoolDB(ctx.paths.pool_db()), handle.acquired_ops)
-                return fmt.finish(ctx, logs, result)
-            op = ctx.db.get_operation(repo_name)
-            assert op
-            handle = None
-            continue
-        single_op_done = _SINGLE_OP_DONE.get(op.op_type)
-        if single_op_done is not None:
-            ctx.db.clear_operation(repo_name)
-            return fmt.finish(ctx, logs, single_op_done)
-        if op.op_type == "downstream_sync":
-            if op.current_index >= len(op.queue):
+                continuing = False
+                if result is not None:
+                    _release_handle_if_clean(ctx, handle)
+                    handle = None
+                    return fmt.finish(ctx, logs, result)
+                op = ctx.db.get_operation(repo_name)
+                assert op
+                handle = None
+                continue
+            single_op_done = _SINGLE_OP_DONE.get(op.op_type)
+            if single_op_done is not None:
                 ctx.db.clear_operation(repo_name)
-                return fmt.finish(ctx, logs, "Sync complete.")
-            handle = advance_downstream(ctx, repo_name, op, logs)
-            op = ctx.db.get_operation(repo_name)
-            assert op
-            continue
-        raise git.GitError(f"Unknown operation type {op.op_type}.")
+                return fmt.finish(ctx, logs, single_op_done)
+            if op.op_type == "downstream_sync":
+                if op.current_index >= len(op.queue):
+                    ctx.db.clear_operation(repo_name)
+                    return fmt.finish(ctx, logs, "Sync complete.")
+                handle = advance_downstream(ctx, repo_name, op, logs)
+                op = ctx.db.get_operation(repo_name)
+                assert op
+                continue
+            raise git.GitError(f"Unknown operation type {op.op_type}.")
+    finally:
+        _release_handle_if_clean(ctx, handle)
+
+
+def _release_handle_if_clean(ctx: StackerCtx, handle: DriveHandle | None) -> None:
+    """Hand `handle.acquired_ops` back to the pool when safe.
+
+    The cherry-pick driver carries the active slot in the handle. We
+    release it the same way `slot.release_if_clean` releases a fresh
+    `AcquiredSlot`: skip when no claim is held, hold when the worktree
+    has resumable state (uncommitted changes / `CHERRY_PICK_HEAD`),
+    otherwise detach + release.
+    """
+    if handle is None or handle.acquired_ops is None:
+        return
+    if git.has_resumable_state(handle.slot_path):
+        return
+    ops_slot.release(PoolDB(ctx.paths.pool_db()), handle.acquired_ops)
 
 
 def advance_downstream(
@@ -152,25 +176,33 @@ def advance_downstream(
             f"{selectors.selector_for(repo_name, next_branch)}"
         )
     acquired = worktree.acquire(ctx, repo_name, next_branch)
-    parent_head, _, _ = sync_plan(ctx, tracked, acquired.path)
-    if parent_head == tracked.managed_base_commit:
-        child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
-        parent_label = selectors.selector_for(
-            tracked.parent_repo_name, tracked.parent_branch
+    # Bridge the acquire → DriveHandle handoff: an interrupt or raise
+    # between here and `return DriveHandle(...)` would orphan the
+    # just-claimed slot since the caller's outer finally only sees
+    # `handle = advance_downstream(...)` after this returns.
+    try:
+        parent_head, _, _ = sync_plan(ctx, tracked, acquired.path)
+        if parent_head == tracked.managed_base_commit:
+            child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
+            parent_label = selectors.selector_for(
+                tracked.parent_repo_name, tracked.parent_branch
+            )
+            fmt.record(
+                ctx,
+                logs,
+                f"Skipping {child_label}; "
+                f"parent {parent_label} is unchanged at {fmt.short(parent_head)}",
+            )
+            op.current_index += 1
+            ctx.db.put_operation(op)
+            worktree.release_if_clean(ctx, acquired)
+            return None
+        prepare_local_operation(
+            ctx, tracked, op_type="downstream_sync", slot_path=acquired.path, logs=logs
         )
-        fmt.record(
-            ctx,
-            logs,
-            f"Skipping {child_label}; "
-            f"parent {parent_label} is unchanged at {fmt.short(parent_head)}",
-        )
-        op.current_index += 1
-        ctx.db.put_operation(op)
-        worktree.release_if_owned(ctx, acquired)
-        return None
-    prepare_local_operation(
-        ctx, tracked, op_type="downstream_sync", slot_path=acquired.path, logs=logs
-    )
+    except BaseException:
+        worktree.release_if_clean(ctx, acquired)
+        raise
     return DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops)
 
 

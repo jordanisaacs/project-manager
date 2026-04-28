@@ -51,41 +51,37 @@ def absorb(ctx: StackerCtx, target: SelectorTarget) -> str:
         child_label = selectors.selector_for(repo_name, child_branch)
         parent_label = selectors.selector_for(repo_name, parent_branch)
         return f"Nothing to absorb from {child_label} into {parent_label}."
-    acquired = worktree.acquire(ctx, repo_name, parent_branch)
-    try:
+    with worktree.acquired_for_op(ctx, repo_name, parent_branch) as acquired:
         ensure_syncable(acquired.path)
-    except git.GitError:
-        worktree.release_if_owned(ctx, acquired)
-        raise
-    parent_slot_head = git.rev_parse(acquired.path, "HEAD")
-    ctx.db.put_operation(
-        OperationState(
-            repo_name=repo_name,
-            op_type="local_absorb",
-            status="running",
-            # op.branch = the branch that's checked out in the slot (parent);
-            # op.parent_branch carries the source child so failure messages
-            # and `pm stacker abort` can render both sides of the absorb.
-            branch=parent_branch,
-            parent_branch=child_branch,
-            start_head=parent_slot_head,
-            target_parent_head=parent_slot_head,
-            commit_list=commit_list,
-            next_commit_index=0,
+        parent_slot_head = git.rev_parse(acquired.path, "HEAD")
+        ctx.db.put_operation(
+            OperationState(
+                repo_name=repo_name,
+                op_type="local_absorb",
+                status="running",
+                # op.branch = the branch that's checked out in the slot (parent);
+                # op.parent_branch carries the source child so failure messages
+                # and `pm stacker abort` can render both sides of the absorb.
+                branch=parent_branch,
+                parent_branch=child_branch,
+                start_head=parent_slot_head,
+                target_parent_head=parent_slot_head,
+                commit_list=commit_list,
+                next_commit_index=0,
+            )
         )
-    )
-    logs: list[str] = []
-    fmt.record(
-        ctx,
-        logs,
-        f"Absorbing {len(commit_list)} commit(s) from "
-        f"{selectors.selector_for(repo_name, child_branch)} into "
-        f"{selectors.selector_for(repo_name, parent_branch)} "
-        f"({fmt.short(parent_slot_head)})",
-    )
-    return cp_driver.run_until_pause_or_finish(
-        ctx,
-        repo_name,
-        cp_driver.DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops),
-        logs=logs,
-    )
+        logs: list[str] = []
+        fmt.record(
+            ctx,
+            logs,
+            f"Absorbing {len(commit_list)} commit(s) from "
+            f"{selectors.selector_for(repo_name, child_branch)} into "
+            f"{selectors.selector_for(repo_name, parent_branch)} "
+            f"({fmt.short(parent_slot_head)})",
+        )
+        return cp_driver.run_until_pause_or_finish(
+            ctx,
+            repo_name,
+            cp_driver.DriveHandle(slot_path=acquired.path, acquired_ops=acquired.ops),
+            logs=logs,
+        )

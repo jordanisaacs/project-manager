@@ -226,6 +226,32 @@ def has_tracked_changes(path: Path) -> bool:
     return bool(out.strip())
 
 
+def detach_head(path: Path) -> None:
+    """`git checkout --detach HEAD` — drop the slot's branch attachment.
+
+    Single point of truth for the "this slot is no longer bound to a
+    branch" action. Callers handle the dirty-check themselves and only
+    invoke this once they've decided the working state is OK to discard
+    (or has nothing to discard). Used by:
+      - `ops_slot.release` (return slot to pool with detached HEAD).
+      - `stacker.ops.remove` (free the branch ref so `git branch -D` works).
+      - `pm check --fix` for stale stacker-ops claims.
+    """
+    git(path, "checkout", "--detach", "HEAD")
+
+
+def has_resumable_state(path: Path) -> bool:
+    """True if the worktree has work that detach-HEAD would lose.
+
+    Tracked-file modifications (staged or unstaged) and an in-progress
+    cherry-pick (CHERRY_PICK_HEAD) both represent uncommitted resolution
+    work — releasing the slot under either would discard it. This is
+    the predicate every "release the slot when safe" call site consults
+    before handing the slot back to the pool.
+    """
+    return has_tracked_changes(path) or cherry_pick_in_progress(path)
+
+
 def cherry_pick_in_progress(path: Path) -> bool:
     cherry_pick_head = git(path, "rev-parse", "--git-path", "CHERRY_PICK_HEAD").stdout.strip()
     # `--git-path` returns a path relative to the repo working tree when

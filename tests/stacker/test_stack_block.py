@@ -71,6 +71,7 @@ def _build_ctx(mode: PRMode, service: StackerService) -> tuple[_StackRender, Tra
         pr_map=pr_map,
         config=_config(mode),
         current_repo=gh.RepoInfo(name_with_owner="acme/widgets", owner="acme", name="widgets"),
+        live_heads={},
     )
     return ctx, child
 
