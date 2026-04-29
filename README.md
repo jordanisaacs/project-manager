@@ -47,13 +47,16 @@ pm stacker log [<branch>]
 pm stacker continue | abort                     # resume/cancel paused op
 pm stacker config [--list | --unset] [<key> [<value>]]   # pr.mode, pr.trunk, pr.target-repo
 
-pm cd <project> [<wt>]                    # print project (or worktree) path; wrap with `cd "$(pm cd …)"`
+pm cd <project> [<wt>]                    # cd into project (or worktree); needs integrations/pm-cd.zsh
+pm cd --print <project> [<wt>]            # print path instead — wrap with `cd "$(pm cd --print …)"`
 pm check [--fix]                          # invariant scan across pool + projects
 ```
 
 ## Shell integration
 
 Source `integrations/pm-git-guard.zsh` from `~/.zshrc` to block `git pull` / `git rebase` on stacker-tracked branches (fail-open outside pm slots, detached HEAD, or non-repos).
+
+Source `integrations/pm-cd.zsh` from `~/.zshrc` to make `pm cd <project> [<wt>]` an actual directory change (the python program can only print, since `cd` is a shell builtin). `pm cd --print …` opts out for scripting.
 
 For tab completion (zsh), add the `integrations` dir to `$fpath` before `compinit`:
 

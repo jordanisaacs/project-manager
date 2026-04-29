@@ -23,6 +23,17 @@ def test_cd_project_only_prints_project_dir(
     assert capsys.readouterr().out.strip() == str(pm_env.project("demo"))
 
 
+def test_cd_print_flag_is_accepted(
+    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # `--print` is consumed by the shell wrapper, but must still parse
+    # cleanly when the wrapper isn't sourced (or when scripts call it).
+    git_pool(pm_env, "foo", n=1)
+    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    assert main(["cd", "--print", "demo"]) == 0
+    assert capsys.readouterr().out.strip() == str(pm_env.project("demo"))
+
+
 def test_cd_project_and_wt_prints_forward_symlink(
     pm_env: Paths, capsys: pytest.CaptureFixture[str],
 ) -> None:

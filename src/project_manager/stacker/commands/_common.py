@@ -22,16 +22,16 @@ from project_manager.stacker.service import StackerService
 # Re-exported so existing `_common.resolve_repo(...)` call sites and tests
 # keep working; canonical definitions live in `cli._params`.
 __all__ = [
-    "service",
-    "stderr_progress",
+    "emit",
+    "resolve_branch",
+    "resolve_on_spec",
     "resolve_repo",
     "resolve_repo_optional",
-    "resolve_branch",
-    "target",
-    "resolve_on_spec",
     "scope_of",
     "scope_spec",
-    "emit",
+    "service",
+    "stderr_progress",
+    "target",
 ]
 
 

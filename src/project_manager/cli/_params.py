@@ -98,13 +98,13 @@ def parse_repo_list(value: str | None) -> list[str] | None:
 
 __all__ = [
     "ProjectArg",
-    "RepoArg",
-    "RepoOptionalArg",
-    "RepoListArg",
     "ProjectFlag",
+    "RepoArg",
     "RepoFlag",
+    "RepoListArg",
+    "RepoOptionalArg",
+    "parse_repo_list",
     "resolve_project",
     "resolve_repo",
     "resolve_repo_optional",
-    "parse_repo_list",
 ]

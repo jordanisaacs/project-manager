@@ -128,13 +128,13 @@ class StackerScope:
 
 
 __all__ = [
-    "root",
-    "fail",
     "ProjectFlag",
-    "RepoFlag",
-    "WtSelection",
-    "selected_wts",
     "ProjectOrAllScope",
-    "resolve_project_scope",
+    "RepoFlag",
     "StackerScope",
+    "WtSelection",
+    "fail",
+    "resolve_project_scope",
+    "root",
+    "selected_wts",
 ]

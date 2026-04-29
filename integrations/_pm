@@ -679,6 +679,7 @@ _pm() {
             '2:wt:_pm_wt_for_cd' \
             '--project[--project]:project:_pm_projects' \
             '--wt[--wt]:wt:_pm_wt_for_cd' \
+            '--print[print path instead of cd]' \
             '--help[Display this message and exit.]' \
             '-h[Display this message and exit.]' \
             '--version[Display application version.]'
