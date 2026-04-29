@@ -1,0 +1,11 @@
+{
+  "name": "pm",
+  "version": "0.1.0",
+  "description": "pm CLI workflow — projects, pooled worktree slots, and cherry-pick-based stacked PRs",
+  "author": {
+    "name": "Jordan Isaacs",
+    "email": "jordan.isaacs@databricks.com"
+  },
+  "keywords": ["pm", "project-manager", "worktree", "stacked-prs", "cherry-pick", "workflow"],
+  "skills": ["./skills/pm-workflow", "./skills/pm-stacker-workflow"]
+}
