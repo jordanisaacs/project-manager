@@ -125,3 +125,4 @@ class OperationState:
     commit_list: list[str] = field(default_factory=list)
     next_commit_index: int = 0
     error_message: str | None = None
+    hard: bool = False

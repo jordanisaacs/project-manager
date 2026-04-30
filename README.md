@@ -36,7 +36,7 @@ pm pool ls [<repo>]                       # slots with claim status
 pm pool add <repo>                        # mint a slot
 
 pm stacker create <branch> [--on current|parent|<branch>] [--copy <b>] [--replace] [--no-checkout]
-pm stacker sync [<branch>] [-c|-a] [--skip-ancestors] [--skip-descendants] [--from <b>] [--continue | --abort]
+pm stacker sync [<branch>] [-c|-a] [--skip-ancestors] [--skip-descendants] [--from <b>] [--hard] [--continue | --abort]
 pm stacker push [<branch>] [-c|-a] [--only] [--skip-ancestors] [--skip-descendants] [--publish|--draft] [--create-pr true|false]
 pm stacker ls [<branch>] [-c|-a] [--details none|status|status-counts|all] [--json]
 pm stacker remove [<branch>] [--keep-branch] [--parent] [--force]

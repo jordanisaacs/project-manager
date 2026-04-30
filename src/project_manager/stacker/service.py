@@ -180,9 +180,10 @@ class StackerService:
     # --- sync / push / repair ---
 
     def sync(
-        self, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE
+        self, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE,
+        *, hard: bool = False,
     ) -> str:
-        return sync_ops.sync(self._ctx, target, spec)
+        return sync_ops.sync(self._ctx, target, spec, hard=hard)
 
     def absorb(self, target: SelectorTarget) -> str:
         return absorb_ops.absorb(self._ctx, target)

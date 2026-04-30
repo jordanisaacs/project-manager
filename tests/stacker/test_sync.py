@@ -254,3 +254,132 @@ def test_sync_from_branch_rejects_out_of_scope(
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
     with pytest.raises(stacker_git.GitError, match="--from"):
         service.sync(target, ScopeSpec(scope="current", from_branch="nonexistent"))
+
+
+# --- --hard flag and parent-rewrite detection -------------------------------
+
+
+def _rewrite_main(repo_path: Path, before: str, content: str, message: str) -> str:
+    """Reset main to `before` and lay down a fresh commit. Returns its sha.
+
+    Simulates a non-fast-forward parent rewrite: the previous tip is no
+    longer reachable from main.
+    """
+    stacker_git.git(repo_path, "reset", "--hard", before)
+    return commit_file(repo_path, "shared.txt", content, message)
+
+
+def test_sync_hard_replays_after_rewrite(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """--hard replays exactly the child's own commits after a parent rewrite."""
+    repo_name, repo_path = stacker_repo
+    feature_slot = three_slots[0]
+    main_before = stacker_git.rev_parse(repo_path, "HEAD")
+    commit_file(repo_path, "shared.txt", "main v1\n", "main: v1")
+    _initialize(service, repo_name, feature_slot, "feature-hard")
+    commit_file(feature_slot.path, "feat.txt", "feat\n", "feat: own commit")
+
+    service.sync(SelectorTarget(repo_name=repo_name, branch="feature-hard"))
+
+    # Rewrite main with a non-conflicting change so the cherry-pick of the
+    # child's own commit applies cleanly.
+    main_v1_prime = _rewrite_main(repo_path, main_before, "main prime\n", "main: v1'")
+
+    result = service.sync(
+        SelectorTarget(repo_name=repo_name, branch="feature-hard"), hard=True,
+    )
+    assert "Sync complete." in result
+    tracked = service.db.get_branch(repo_name, "feature-hard")
+    assert tracked is not None
+    assert tracked.managed_base_commit == main_v1_prime
+    assert tracked.last_clean_head is not None
+    # Branch HEAD should be `main_v1_prime + feat commit` — verify by walking
+    # one parent back from the head.
+    head_parent = stacker_git.rev_parse(feature_slot.path, "HEAD~1")
+    assert head_parent == main_v1_prime
+
+
+def test_sync_hard_equivalent_to_default_on_clean_advance(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """When the parent is fast-forwarded, --hard and default produce the same outcome."""
+    repo_name, repo_path = stacker_repo
+    feature_slot = three_slots[0]
+    _initialize(service, repo_name, feature_slot, "feature-eq")
+    commit_file(feature_slot.path, "feat.txt", "feat\n", "feat: own commit")
+    new_main = _advance_main(repo_path)
+
+    result = service.sync(
+        SelectorTarget(repo_name=repo_name, branch="feature-eq"), hard=True,
+    )
+    assert "Sync complete." in result
+    tracked = service.db.get_branch(repo_name, "feature-eq")
+    assert tracked is not None
+    assert tracked.managed_base_commit == new_main
+
+
+def test_sync_hard_continue_persists(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """A paused --hard sync resumes via plain `continue` — flag survives in the DB."""
+    repo_name, repo_path = stacker_repo
+    feature_slot = three_slots[0]
+    main_before = stacker_git.rev_parse(repo_path, "HEAD")
+    commit_file(repo_path, "shared.txt", "main v1\n", "main: v1")
+    _initialize(service, repo_name, feature_slot, "feature-pause")
+    # Child touches shared.txt — cherry-pick onto rewritten main will conflict.
+    commit_file(feature_slot.path, "shared.txt", "child v1\n", "feat: shared")
+
+    service.sync(SelectorTarget(repo_name=repo_name, branch="feature-pause"))
+
+    # Rewrite main with a conflicting change on shared.txt.
+    _rewrite_main(repo_path, main_before, "main prime\n", "main: v1'")
+
+    paused = service.sync(
+        SelectorTarget(repo_name=repo_name, branch="feature-pause"), hard=True,
+    )
+    assert "paused" in paused.lower()
+    op = service.db.get_operation(repo_name)
+    assert op is not None
+    assert op.hard is True
+
+    # Resolve by taking the child's version.
+    (feature_slot.path / "shared.txt").write_text("child v1\n")
+    stacker_git.git(feature_slot.path, "add", "shared.txt")
+
+    finished = service.continue_operation(repo_name)
+    assert "Sync complete." in finished
+    assert service.db.get_operation(repo_name) is None
+
+
+def test_sync_hard_downstream_propagates(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """--hard applies to every branch in a multi-branch (downstream_sync) walk."""
+    main_before = stacker_git.rev_parse(tracked_stack.repo_path, "HEAD")
+    commit_file(tracked_stack.repo_path, "shared.txt", "main v1\n", "main: v1")
+
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="d")
+    service.sync(target)
+
+    # Rewrite main non-conflictingly.
+    new_main_prime = _rewrite_main(
+        tracked_stack.repo_path, main_before, "main prime\n", "main: v1'",
+    )
+
+    result = service.sync(target, hard=True)
+    assert "Sync complete." in result
+
+    # All branches should be re-rooted on the rewritten main, which means
+    # `a`'s managed_base now equals new_main_prime.
+    a = service.db.get_branch(tracked_stack.repo_name, "a")
+    assert a is not None
+    assert a.managed_base_commit == new_main_prime

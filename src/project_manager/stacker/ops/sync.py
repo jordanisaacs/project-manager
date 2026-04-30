@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
 
 def sync(
-    ctx: StackerCtx, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE
+    ctx: StackerCtx, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE,
+    *, hard: bool = False,
 ) -> str:
     """Cherry-pick a set of tracked branches onto their parents.
 
@@ -41,7 +42,7 @@ def sync(
     if not resolved:
         return "No tracked branches to sync."
     if len(resolved) == 1:
-        return _sync_one(ctx, resolved[0])
+        return _sync_one(ctx, resolved[0], hard=hard)
     ctx.db.put_operation(
         OperationState(
             repo_name=target.repo_name,
@@ -50,12 +51,13 @@ def sync(
             root_branch=resolved[0].branch,
             queue=[b.branch for b in resolved],
             current_index=0,
+            hard=hard,
         )
     )
     return cp_driver.run_until_pause_or_finish(ctx, target.repo_name, logs=[])
 
 
-def _sync_one(ctx: StackerCtx, tracked: TrackedBranch) -> str:
+def _sync_one(ctx: StackerCtx, tracked: TrackedBranch, *, hard: bool = False) -> str:
     """Single-branch sync path: local_sync op with up-to-date short-circuit."""
     ctx.db.put_operation(
         OperationState(
@@ -64,6 +66,7 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch) -> str:
             status="running",
             branch=tracked.branch,
             parent_branch=tracked.parent_branch,
+            hard=hard,
         )
     )
     # The context manager releases the slot iff the worktree is clean on
@@ -72,7 +75,7 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch) -> str:
     # sees `CHERRY_PICK_HEAD`) so `pm stacker continue` can resume.
     try:
         with worktree.acquired_for_op(ctx, tracked.repo_name, tracked.branch) as acquired:
-            parent_head, _, _ = cp_driver.sync_plan(ctx, tracked, acquired.path)
+            parent_head, _, _ = cp_driver.sync_plan(ctx, tracked, acquired.path, hard=hard)
             if parent_head == tracked.managed_base_commit:
                 ctx.db.clear_operation(tracked.repo_name)
                 child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
@@ -86,7 +89,8 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch) -> str:
             ensure_syncable(acquired.path)
             logs: list[str] = []
             cp_driver.prepare_local_operation(
-                ctx, tracked, op_type="local_sync", slot_path=acquired.path, logs=logs
+                ctx, tracked, op_type="local_sync", slot_path=acquired.path,
+                logs=logs, hard=hard,
             )
             return cp_driver.run_until_pause_or_finish(
                 ctx, tracked.repo_name, acquired, logs=logs,

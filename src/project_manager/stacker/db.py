@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS operations (
     commit_list_json   TEXT,
     next_commit_index  INTEGER NOT NULL DEFAULT 0,
     error_message      TEXT,
+    hard               INTEGER NOT NULL DEFAULT 0,
     updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -77,6 +78,7 @@ class StackerDB:
     def connect(self) -> Iterator[sqlite3.Connection]:
         with sqlite_db.transaction(self.db_path, schema=_SCHEMA, row_factory=sqlite3.Row) as conn:
             _migrate_pr_url_to_pr_state(conn)
+            _migrate_operations_add_hard(conn)
             yield conn
 
     def upsert_branch(self, tracked: TrackedBranch) -> None:
@@ -196,8 +198,8 @@ class StackerDB:
                 INSERT INTO operations (
                     repo_name, op_type, status, branch, parent_branch, root_branch,
                     queue_json, current_index, start_head, target_parent_head,
-                    commit_list_json, next_commit_index, error_message, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    commit_list_json, next_commit_index, error_message, hard, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(repo_name) DO UPDATE SET
                     op_type = excluded.op_type,
                     status = excluded.status,
@@ -211,6 +213,7 @@ class StackerDB:
                     commit_list_json = excluded.commit_list_json,
                     next_commit_index = excluded.next_commit_index,
                     error_message = excluded.error_message,
+                    hard = excluded.hard,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -227,6 +230,7 @@ class StackerDB:
                     json.dumps(op.commit_list),
                     op.next_commit_index,
                     op.error_message,
+                    int(op.hard),
                 ),
             )
 
@@ -379,6 +383,13 @@ def _migrate_pr_url_to_pr_state(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE tracked_branches DROP COLUMN pr_url")
 
 
+def _migrate_operations_add_hard(conn: sqlite3.Connection) -> None:
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(operations)")}
+    if "hard" in cols:
+        return
+    conn.execute("ALTER TABLE operations ADD COLUMN hard INTEGER NOT NULL DEFAULT 0")
+
+
 def _row_to_operation(row: sqlite3.Row) -> OperationState:
     return OperationState(
         repo_name=row["repo_name"],
@@ -394,6 +405,7 @@ def _row_to_operation(row: sqlite3.Row) -> OperationState:
         commit_list=json.loads(row["commit_list_json"]) if row["commit_list_json"] else [],
         next_commit_index=row["next_commit_index"],
         error_message=row["error_message"],
+        hard=bool(row["hard"]),
     )
 
 

@@ -63,6 +63,7 @@ PRs are cached per branch in pm's database — `pm stacker ls` shows them withou
 | Command | Description |
 |---|---|
 | `pm stacker sync [--branch <b>] [--all] [--from <b>] [--skip-ancestors\|--skip-descendants]` | Cherry-pick the branch (and lineage by default) onto its parent |
+| `pm stacker sync --hard` | Cherry-pick exactly the commits added since last sync (`<managed_base>..HEAD`). Use when the parent was rewritten in place and patch-id dedup can't see the duplicate. |
 | `pm stacker sync --continue` | Resume after resolving a cherry-pick conflict |
 | `pm stacker sync --abort` | Roll back the in-progress sync |
 | `pm stacker push [--branch <b>] [--all] [--only] [--draft\|--publish] [--create-pr {true\|false}]` | Force-push and create/update GitHub PRs. By default leaf=published, others=draft. |

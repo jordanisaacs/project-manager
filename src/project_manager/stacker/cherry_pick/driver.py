@@ -28,27 +28,38 @@ _SINGLE_OP_DONE: dict[str, str] = {
 
 
 def sync_plan(
-    ctx: StackerCtx, tracked: TrackedBranch, slot_path: Path
+    ctx: StackerCtx, tracked: TrackedBranch, slot_path: Path,
+    *, hard: bool = False,
 ) -> tuple[str, str, list[str]]:
     repo_path = ctx.paths.repo(tracked.parent_repo_name)
     parent_head = git.rev_parse(repo_path, tracked.parent_branch)
     start_head = git.rev_parse(slot_path, "HEAD")
-    # Drop commits whose patch is already on the parent (mirrors `git rebase`'s
-    # default). Keeps absorb→sync flows conflict-free and makes the parent the
-    # source of truth whenever both sides carry the same logical change.
-    commit_list = git.rev_list_picking(slot_path, parent_head, start_head)
+    if hard:
+        # Pure replay: cherry-pick exactly the commits the child added on top
+        # of its recorded base. Bypasses the patch-id walk, which can't see
+        # that a parent rewritten in-place is "the same change" as the child's
+        # now-stale duplicate (different diffs → different patch-ids).
+        commit_list = git.rev_list(
+            slot_path, f"{tracked.managed_base_commit}..{start_head}"
+        )
+    else:
+        # Drop commits whose patch is already on the parent (mirrors `git rebase`'s
+        # default). Keeps absorb→sync flows conflict-free and makes the parent the
+        # source of truth whenever both sides carry the same logical change.
+        commit_list = git.rev_list_picking(slot_path, parent_head, start_head)
     return parent_head, start_head, commit_list
 
 
-def prepare_local_operation(
+def prepare_local_operation(  # noqa: PLR0913 — internal helper, kwargs only
     ctx: StackerCtx,
     tracked: TrackedBranch,
     *,
     op_type: str,
     slot_path: Path,
     logs: list[str],
+    hard: bool = False,
 ) -> OperationState:
-    parent_head, start_head, commit_list = sync_plan(ctx, tracked, slot_path)
+    parent_head, start_head, commit_list = sync_plan(ctx, tracked, slot_path, hard=hard)
     op = ctx.db.get_operation(tracked.repo_name)
     if op is None:
         op = OperationState(
@@ -61,6 +72,7 @@ def prepare_local_operation(
     op.target_parent_head = parent_head
     op.commit_list = commit_list
     op.next_commit_index = 0
+    op.hard = hard
     ctx.db.put_operation(op)
     fmt.record(
         ctx,
@@ -184,7 +196,7 @@ def advance_downstream(
     # would orphan the just-claimed slot, since the caller's outer
     # finally only sees the new slot after this returns.
     try:
-        parent_head, _, _ = sync_plan(ctx, tracked, acquired.path)
+        parent_head, _, _ = sync_plan(ctx, tracked, acquired.path, hard=op.hard)
         if parent_head == tracked.managed_base_commit:
             child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
             parent_label = selectors.selector_for(
@@ -201,7 +213,8 @@ def advance_downstream(
             worktree.release_if_clean(ctx, acquired)
             return None
         prepare_local_operation(
-            ctx, tracked, op_type="downstream_sync", slot_path=acquired.path, logs=logs
+            ctx, tracked, op_type="downstream_sync", slot_path=acquired.path,
+            logs=logs, hard=op.hard,
         )
     except BaseException:
         worktree.release_if_clean(ctx, acquired)
