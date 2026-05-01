@@ -47,18 +47,16 @@ exactly the requested sections."
              "--json")
    cb :tag 'create))
 
-(defun pm--project-delete (name repos cb)
+(defun pm--project-delete (name cb)
   (pm--run-async
-   (pm--strs "project" "delete" name
-             (and repos (list "--repos" repos))
-             "--json")
+   (pm--strs "project" "delete" name "--json")
    cb :tag 'delete))
 
 ;;;; project wt
 
 (defun pm--wt-create (name spec cb)
   (pm--run-async
-   (pm--strs "project" "wt" "create" name "--wt" spec "--json")
+   (pm--strs "project" "wt" "create" spec "--project" name "--json")
    cb :tag 'wt-create))
 
 (defun pm--wt-attach (name wts all no-branch cb)

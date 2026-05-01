@@ -126,7 +126,7 @@
   (when (pm--maybe-confirm
          (format "Really delete pm project %s and all its worktrees? " name))
     (pm--project-delete
-     name nil
+     name
      (lambda (_)
        (pm--forget-container
         (file-name-as-directory (expand-file-name name pm-projects-dir)))
