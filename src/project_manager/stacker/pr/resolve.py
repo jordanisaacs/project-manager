@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from project_manager.stacker import gh, git, locate, selectors
@@ -61,14 +62,16 @@ def head_ref_for_branch(
     return remote_branch
 
 
-def first_commit_text(ctx: StackerCtx, tracked: TrackedBranch) -> tuple[str, str]:
+def first_commit_text(
+    ctx: StackerCtx, tracked: TrackedBranch
+) -> tuple[str, str, Path]:
     path = require_checked_out(ctx, tracked.repo_name, tracked.branch)
     title, body = git.first_commit_title_and_body(
         path, f"{tracked.managed_base_commit}..HEAD"
     )
     if not title:
         title = tracked.branch
-    return title, body
+    return title, body, path
 
 
 def pr_base_for_current_branch(

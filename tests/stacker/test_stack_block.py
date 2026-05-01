@@ -113,8 +113,6 @@ def test_repo_pr_block_includes_files_link(
         "[[Files changed](https://github.com/acme/widgets/pull/X/files/abc..def?node=feat-b)]"
         in block
     )
-    # Preamble pulls the current branch's files URL to the top.
-    assert (
-        "Use this [link](https://github.com/acme/widgets/pull/X/files/abc..def?node=feat-b)"
-        " to review" in block
-    )
+    # Intro preamble is intentionally dropped from the gitstack-format block;
+    # per-branch [[Files changed]] links already give reviewers per-branch diffs.
+    assert "review incremental changes" not in block

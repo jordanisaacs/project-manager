@@ -24,6 +24,7 @@ from .resolve import (
     target_repo_slug,
 )
 from .stack_block import _StackRender, body_file, render_stack_block
+from .template import inject_body_into_template, load_pr_template
 
 if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
@@ -55,7 +56,7 @@ def create_or_update_current_pr(
     target_repo = target_repo_slug(config)
     remote_branch = remote_branch_name(ctx, tracked)
     head_repo = head_repo_for_branch(ctx, tracked)
-    title, first_body = first_commit_text(ctx, tracked)
+    title, first_body, worktree_path = first_commit_text(ctx, tracked)
     base = pr_base_for_current_branch(ctx, tracked, config, current_repo)
     existing = find_open_pr(ctx, tracked, config, current_repo)
     head = head_ref_for_branch(config, current_repo, remote_branch)
@@ -76,7 +77,18 @@ def create_or_update_current_pr(
         pr_url = existing.url
     else:
         fmt.record(ctx, logs, f"Creating PR for {label}")
-        body = compose_body_with_block(first_body, "")
+        # Template-injection happens at create time only; on re-push the
+        # update branch above keeps `EditPRRequest.body` unset, so the
+        # template-filled body the user has since edited in the GitHub
+        # UI survives. Mirrors universe gitstack `inject_body_into_template`
+        # at universe/ci/gitstack/src/commands/push.rs:935-958.
+        template = load_pr_template(worktree_path)
+        body_seed = (
+            inject_body_into_template(first_body, template)
+            if template is not None
+            else first_body
+        )
+        body = compose_body_with_block(body_seed, "")
         with body_file(body) as file_path:
             pr_url = ctx.pr_backend.create_pr(
                 gh.CreatePRRequest(

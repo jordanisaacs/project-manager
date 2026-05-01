@@ -139,6 +139,12 @@ def record_pr(ctx: StackerCtx, tracked: TrackedBranch, pr: gh.PullRequest) -> No
 
 
 def strip_managed_block(body: str) -> str:
+    """Remove the `<!-- stacker:begin/end -->`-wrapped managed block.
+
+    HTML-comment markers are our authoritative boundary — they're
+    invisible in rendered markdown and cannot collide with user content
+    the way a `## 🥞` heading or `---------` rule could.
+    """
     return re.sub(
         r"\n?<!-- stacker:begin -->.*?<!-- stacker:end -->\n?",
         "\n",
@@ -148,10 +154,16 @@ def strip_managed_block(body: str) -> str:
 
 
 def compose_body_with_block(body: str, block: str) -> str:
+    """Combine the managed block (already marker-wrapped) with user body.
+
+    Block leads, user content follows: matches the gitstack-format
+    layout ReviewStack's parser expects (header at the top, `---------`
+    separator before the commit message body).
+    """
     cleaned = strip_managed_block(body).strip()
-    if block:
-        return f"{cleaned}\n\n{block}" if cleaned else block
-    return cleaned
+    if not block:
+        return cleaned
+    return f"{block}\n\n{cleaned}" if cleaned else block
 
 
 def pr_base_body(pr: gh.PullRequest) -> str:

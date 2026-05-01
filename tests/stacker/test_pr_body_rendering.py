@@ -25,6 +25,7 @@ from project_manager.stacker.models import (
 from project_manager.stacker.ops import worktree as ops_worktree
 from project_manager.stacker.service import StackerService
 
+from .conftest import commit_file
 from .fakes import RecordingPRBackend
 
 
@@ -552,3 +553,141 @@ def test_head_repo_set_when_upstream_is_distinct_fork(
     service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
     for request, _body in backend.created:
         assert request.head_repo == "acme/widgets"
+
+
+def _seed_pr_template(repo_path: Path, content: str) -> None:
+    """Commit `.github/PULL_REQUEST_TEMPLATE.md` to main so slot worktrees inherit it.
+
+    `_build_branch` does `git checkout -b <branch> <main_head>` in each
+    slot, which updates the slot's working tree to match `main` — so the
+    template lands in every slot before pushes call `load_pr_template`.
+    """
+    commit_file(repo_path, ".github/PULL_REQUEST_TEMPLATE.md", content, "add PR template")
+
+
+def _user_section(body: str) -> str:
+    """Slice everything after the managed block end marker."""
+    marker = "<!-- stacker:end -->"
+    idx = body.index(marker)
+    return body[idx + len(marker) :].lstrip("\n")
+
+
+def _final_body_for(backend: RecordingPRBackend, branch: str) -> str:
+    """Last body the backend wrote for `branch` (after refresh appends the block)."""
+    pr_number = next(
+        pr.number for (_repo, head), pr in backend.prs_by_head.items() if head == branch
+    )
+    for req, body in reversed(backend.edited):
+        if req.number == pr_number and body is not None:
+            return body
+    raise AssertionError(f"no body-bearing edit_pr for {branch}")
+
+
+def test_create_pr_uses_template_when_present(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_name, repo_path = stacker_repo
+    _seed_pr_template(repo_path, "## Summary\n\n## Test plan\n")
+    _two_branch_stack(service, stacker_repo, three_slots, monkeypatch)
+    _set_config(service, repo_name, "repo-pr")
+
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
+
+    for branch, expected_extra in (("feature-a", "Extra body for A."), ("feature-b", "Extra body for B.")):
+        body = _final_body_for(backend, branch)
+        user = _user_section(body)
+        assert "## Summary" in user
+        assert "## Test plan" in user
+        assert expected_extra in user
+        # Commit body sits between the two template headers.
+        assert user.index("## Summary") < user.index(expected_extra) < user.index("## Test plan")
+
+
+def test_create_pr_no_template_unchanged_user_section(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backwards-compat guard: no template → user content is just the commit body."""
+    repo_name, _repo_path = stacker_repo
+    _two_branch_stack(service, stacker_repo, three_slots, monkeypatch)
+    _set_config(service, repo_name, "repo-pr")
+
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
+
+    body_a = _final_body_for(backend, "feature-a")
+    assert _user_section(body_a) == "Extra body for A."
+
+
+def test_create_pr_template_without_headers_prepends_commit_body(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_name, repo_path = stacker_repo
+    _seed_pr_template(repo_path, "Boilerplate prose.\n")
+    _two_branch_stack(service, stacker_repo, three_slots, monkeypatch)
+    _set_config(service, repo_name, "repo-pr")
+
+    service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
+
+    body_a = _final_body_for(backend, "feature-a")
+    user = _user_section(body_a)
+    assert user.startswith("Extra body for A.")
+    assert "Boilerplate prose." in user
+
+
+def test_second_push_preserves_user_edits_to_template_filled_body(
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Universe PR #1859413 regression — extended for templates.
+
+    With template support seeding the initial body, the user editing it
+    in the GitHub UI must still survive re-push. Guard: re-push must
+    emit exactly one body-bearing edit_pr per branch (the stack-block
+    refresh), and the user's edits below the managed block survive.
+    """
+    repo_name, repo_path = stacker_repo
+    _seed_pr_template(repo_path, "## Summary\n\n## Test plan\n")
+    _two_branch_stack(service, stacker_repo, three_slots, monkeypatch)
+    _set_config(service, repo_name, "repo-pr")
+    target = SelectorTarget(repo_name=repo_name, branch="feature-b")
+
+    service.push(target, PushOptions(draft=True))
+
+    # User edits the body in the GitHub UI to fill in template sections.
+    user_body = (
+        "## Summary\n\nFilled in by the human, must not be clobbered.\n\n"
+        "## Test plan\n\nTested in dev.\n"
+    )
+    key = (backend.default_repo.name_with_owner, "feature-b")
+    backend.prs_by_head[key] = replace(backend.prs_by_head[key], body=user_body)
+    edits_before_second_push = len(backend.edited)
+
+    service.push(target, PushOptions(draft=True))
+
+    second_push_edits = backend.edited[edits_before_second_push:]
+    update_with_body = [
+        req for req, body in second_push_edits if body is not None and req.number == 2
+    ]
+    assert len(update_with_body) == 1, (
+        "create_or_update_current_pr must not re-write body for an existing PR"
+    )
+    final_b = next(
+        body for req, body in reversed(backend.edited) if req.number == 2 and body is not None
+    )
+    assert "Filled in by the human, must not be clobbered." in final_b
+    assert "<!-- stacker:begin -->" in final_b
+    assert "<!-- stacker:end -->" in final_b

@@ -15,6 +15,15 @@ if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
 
 
+# Format constants must match ReviewStack's gitstack parser at
+# universe/js/packages/internal-tools/src/devportal/experimental/reviewstack/
+# vendor/osscopy/stackFormat/parsers/gitstackParser.ts:23-50: header is
+# matched as a substring on a line; footer is the first line whose strip()
+# starts with at least nine dashes.
+STACK_HEADER = "## 🥞 Stacked PR"
+STACK_SEPARATOR = "---------"
+
+
 @dataclass(frozen=True)
 class _StackRender:
     """Shared context threaded through stack-block rendering recursion."""
@@ -35,24 +44,26 @@ def render_stack_block(
     render_ctx: _StackRender,
     current_node: TrackedBranch,
 ) -> str:
-    """Render the stack block embedded in a PR body.
+    """Render the gitstack-format leading block of a PR body.
 
-    One-line preamble pointing reviewers at the current branch's files
-    view, followed by an indented tree. Each branch renders as
-    `[branch](pr) [[Files changed](files)]` with `[MERGED]` appended
-    for landed PRs; the current branch's name is bolded inside the link.
+    Layout matches ReviewStack's gitstack parser: a `## 🥞 Stacked PR`
+    header, an indented branch tree, then a `---------` separator that
+    `compose_body_with_block` uses to splice in the user content. Each
+    branch renders as `[branch](pr) [[Files changed](files)]` with
+    `[MERGED]`/`[CLOSED]` appended for landed/abandoned PRs; the current
+    branch's name is bolded inside the link.
+
+    Files-changed links are still gated to `repo-pr` mode — in pr-pr
+    mode GitHub's own base-chain already gives reviewers the per-branch
+    diff.
     """
-    lines = ["<!-- stacker:begin -->", "## Stacker", ""]
-    # Preamble + Files-changed links only make sense when every PR bases
-    # on trunk (repo-pr). In pr-pr mode GitHub's own base-chain already
-    # gives reviewers the per-branch diff.
-    if render_ctx.config.mode == "repo-pr":
-        preamble = _files_url(current_node, render_ctx)
-        if preamble is not None:
-            lines.append(
-                f"Use this [link]({preamble}) to review incremental changes."
-            )
-            lines.append("")
+    # Wrap the gitstack-format content in HTML-comment markers. The markers
+    # are our authoritative managed-block boundary — `strip_managed_block`
+    # parses them — because they're invisible in rendered markdown and
+    # cannot collide with user content the way a `## 🥞` heading or
+    # `---------` rule could. The inner header + separator are what
+    # ReviewStack's gitstack parser keys off.
+    lines = ["<!-- stacker:begin -->", STACK_HEADER, ""]
     component_keys = {node.branch for node in render_ctx.component}
     roots = [
         node for node in render_ctx.component if node.parent_branch not in component_keys
@@ -61,6 +72,8 @@ def render_stack_block(
         if index:
             lines.append("")
         lines.extend(_render_stack_lines(render_ctx, root, current_node, prefix=""))
+    lines.append("")
+    lines.append(STACK_SEPARATOR)
     lines.append("<!-- stacker:end -->")
     return "\n".join(lines)
 
