@@ -283,6 +283,43 @@ the buffer's own pm context."
       (should (string= (file-name-as-directory scope)
                        (file-name-as-directory (concat root "beta")))))))
 
+(ert-deftest pm-test--agent-launch-dispatch-scope-is-current-project ()
+  "Inside project A, `pm-agent-launch-dispatch' scope resolves to A."
+  (pm-test--with-fixture root
+    (let* ((default-directory (concat root "alpha/a/"))
+           (scope (pm-test--capture-dispatch-scope
+                   (call-interactively #'pm-agent-launch-dispatch))))
+      (should scope)
+      (should (string= (pm--container-name scope) "alpha")))))
+
+(ert-deftest pm-test--agent-launch-dispatch-honors-override ()
+  "`pm-agent-launch-dispatch' must honor `project-current-directory-override'.
+This is the path used by `project-switch-project' to communicate the
+just-picked project to its post-switch command (`?a' under
+`project-switch-commands')."
+  (pm-test--with-fixture root
+    (let* ((default-directory "/tmp/")
+           (project-current-directory-override
+            (concat root "beta/"))
+           (scope (pm-test--capture-dispatch-scope
+                   (call-interactively #'pm-agent-launch-dispatch))))
+      (should scope)
+      (should (string= (file-name-as-directory scope)
+                       (file-name-as-directory (concat root "beta")))))))
+
+(ert-deftest pm-test--agent-launch-dispatch-prefix-arg-prompts ()
+  "Prefix arg forces a prompt even from inside a pm tree."
+  (pm-test--with-fixture root
+    (cl-letf (((symbol-function 'pm--read-project)
+               (lambda (&rest _) "beta")))
+      (let* ((default-directory (concat root "alpha/a/"))
+             (scope (pm-test--capture-dispatch-scope
+                     (let ((current-prefix-arg '(4)))
+                       (call-interactively #'pm-agent-launch-dispatch)))))
+        (should scope)
+        (should (string= (file-name-as-directory scope)
+                         (file-name-as-directory (concat root "beta"))))))))
+
 (ert-deftest pm-test--project-dispatch-suffix-survives-let-unwind ()
   "Regression: scope persists after the entry function's locals unwind.
 
@@ -373,6 +410,37 @@ buffer-level value and only :scope can carry the answer."
       (should (equal (pm-agent--build-argv "codex" "xyz" "beta")
                      '("pm" "agent" "codex" "--project" "beta"
                        "resume" "xyz")))))
+
+  (ert-deftest pm-test--agent-build-argv-fresh-launch-omits-resume ()
+    "A nil session-id builds a fresh-launch argv with no resume bits."
+    (let ((pm-executable "pm"))
+      (should (equal (pm-agent--build-argv "claude" nil "alpha")
+                     '("pm" "agent" "claude" "--project" "alpha")))
+      (should (equal (pm-agent--build-argv "codex" nil "beta")
+                     '("pm" "agent" "codex" "--project" "beta")))
+      (should (equal (pm-agent--build-argv "cursor" nil "gamma")
+                     '("pm" "agent" "cursor" "--project" "gamma")))))
+
+  (ert-deftest pm-test--agent-launch-routes-through-dispatcher ()
+    "`pm-agent-launch' funcalls `pm-agent-dispatch-function' with a
+fresh-launch plist (session-id nil) and the configured argv/cwd."
+    (let* (captured
+           (pm-agent-dispatch-function (lambda (plist) (setq captured plist)))
+           (pm-projects-dir (file-name-as-directory (make-temp-file "pm-d-" t)))
+           (pm-executable "pm"))
+      (unwind-protect
+          (progn
+            (make-directory (concat pm-projects-dir "alpha/") t)
+            (pm-agent-launch "claude" "alpha")
+            (should captured)
+            (should (equal (plist-get captured :agent) "claude"))
+            (should (null (plist-get captured :session-id)))
+            (should (equal (plist-get captured :project) "alpha"))
+            (should (equal (plist-get captured :argv)
+                           '("pm" "agent" "claude" "--project" "alpha")))
+            (should (string-prefix-p pm-projects-dir
+                                     (plist-get captured :cwd))))
+        (delete-directory pm-projects-dir t))))
 
   (ert-deftest pm-test--agent-dispatch-default-stages-to-kill-ring ()
     "With `pm-agent-dispatch-function' nil, the command goes to the kill-ring."

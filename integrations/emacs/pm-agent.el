@@ -2,15 +2,17 @@
 
 ;;; Commentary:
 
-;; A magit-section buffer for `pm agent ls'.  RET on a session row
-;; resumes the chosen agent via a customizable dispatch function
-;; (`pm-agent-dispatch-function').  The dispatcher receives a plist
-;; describing what to launch:
+;; A magit-section buffer for `pm agent ls', plus a thin
+;; `pm-agent-launch' entry point for fresh `pm agent <name>'
+;; invocations.  RET on a session row resumes; `pm-agent-launch'
+;; spawns a new session.  Both flow through one customizable
+;; dispatch function (`pm-agent-dispatch-function'), which receives
+;; a plist describing what to launch:
 ;;
 ;;   (:argv ("pm" "agent" "claude" "--project" "kms" "--resume" "<id>")
 ;;    :cwd  "/home/.../.projects/kms/"
 ;;    :agent      "claude"
-;;    :session-id "..."
+;;    :session-id "..."   ; nil for a fresh launch
 ;;    :project    "kms")
 ;;
 ;; Three opt-in dispatchers ship with this file:
@@ -72,7 +74,12 @@ emulator."
 ;;;; Dispatch implementation
 
 (defun pm-agent--build-argv (agent session-id project)
-  "Build the argv list to resume SESSION-ID in AGENT, scoped to PROJECT.
+  "Build the argv list for AGENT scoped to PROJECT.
+
+When SESSION-ID is non-nil, builds a resume invocation; when nil,
+builds a fresh-launch invocation (`pm agent AGENT --project
+PROJECT', no resume bits).  The fresh-launch form is the entry
+point for `pm-agent-launch'.
 
 Mirrors the per-agent resume invocation form in
 `src/project_manager/agent/run.py' (`_RESUME_PREFIX'):
@@ -80,12 +87,13 @@ Mirrors the per-agent resume invocation form in
   codex         → `resume <id>'"
   (let* ((bin (or (and (boundp 'pm-executable) pm-executable) "pm"))
          (resume-prefix
-          (pcase agent
-            ("codex" '("resume"))
-            (_       '("--resume")))))
+          (and session-id
+               (pcase agent
+                 ("codex" '("resume"))
+                 (_       '("--resume"))))))
     (append (list bin "agent" agent "--project" project)
             resume-prefix
-            (list session-id))))
+            (and session-id (list session-id)))))
 
 (defun pm-agent--cwd (project)
   "Resolve PROJECT's container path on disk."
@@ -315,6 +323,25 @@ concatenates every group's `sessions' list."
              :project    (alist-get 'project row))))))
 
 ;;;; Entry points
+
+;;;###autoload
+(defun pm-agent-launch (agent &optional project)
+  "Launch a fresh AGENT session in pm PROJECT.
+
+AGENT is one of \"claude\", \"codex\", \"cursor\" (the string keys
+expected by `pm agent <name>').  PROJECT is the pm project
+(container) name; nil prompts for one.
+
+Routes through `pm-agent-dispatch-function' just like
+`pm-agent-list-act-at-point' does for resumes — same dispatcher
+choice (term / vterm / ghostel / custom) drives both fresh launches
+and resumes."
+  (interactive
+   (list (completing-read "Agent: " '("claude" "codex" "cursor") nil t)
+         (pm--read-project "In project: ")))
+  (let ((proj (or project (pm--read-project "In project: "))))
+    (pm-agent--dispatch
+     (list :agent agent :session-id nil :project proj))))
 
 ;;;###autoload
 (defun pm-agent-list (&optional project all)

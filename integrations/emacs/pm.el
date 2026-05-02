@@ -72,6 +72,7 @@ containers with many large worktrees)."
 ;; pool / repo) only load when the user actually opens that buffer.
 (autoload 'pm-dispatch "pm-transient" nil t)
 (autoload 'pm-project-dispatch "pm-transient" nil t)
+(autoload 'pm-agent-launch-dispatch "pm-transient" nil t)
 (autoload 'pm-project-create "pm-ui" nil t)
 (autoload 'pm-project-delete "pm-ui" nil t)
 (autoload 'pm-project-switch "pm-ui" nil t)
@@ -87,6 +88,7 @@ containers with many large worktrees)."
 (autoload 'pm-repo-list "pm-repo" nil t)
 (autoload 'pm-agent-list "pm-agent" nil t)
 (autoload 'pm-agent-list-current-project "pm-agent" nil t)
+(autoload 'pm-agent-launch "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-term "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-vterm "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-ghostel "pm-agent" nil t)

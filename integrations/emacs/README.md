@@ -22,13 +22,17 @@ Emacs config pointing at the directory:
 ```elisp
 (use-package pm
   :load-path "~/.repos/project-manager/integrations/emacs/"
-  :commands (pm-dispatch pm-project-dispatch pm-refresh
-             pm--project-finder pm-jump-parent pm-jump-sibling)
+  :commands (pm-dispatch pm-project-dispatch pm-agent-launch-dispatch
+             pm-refresh pm--project-finder pm-jump-parent pm-jump-sibling)
   :init
   (with-eval-after-load 'project
     (add-hook 'project-find-functions #'pm--project-finder)
     (add-to-list 'project-switch-commands
-                 '(pm-project-dispatch "PM" ?P) t))
+                 '(pm-project-dispatch "PM" ?P) t)
+    ;; `?a' after `C-x p p <project>': launch a fresh agent in the
+    ;; just-picked project (claude / codex / cursor).
+    (add-to-list 'project-switch-commands
+                 '(pm-agent-launch-dispatch "Agent" ?a) t))
   (global-set-key (kbd "C-x p P") #'pm-dispatch)
   (global-set-key (kbd "C-x p .") #'pm-project-dispatch)
   (add-hook 'after-init-hook
@@ -41,18 +45,24 @@ Adjust `:load-path` if the repo lives elsewhere.
 
 ### `C-x p P` — global pm
 
-| Group   | Key | Command                                                 |
-| ------- | --- | ------------------------------------------------------- |
-| Create  | `c` | new project                                             |
-|         | `+` | mint a pool slot                                        |
-| Inspect | `l` | list projects (magit-section)                           |
-|         | `o` | list pool slots                                         |
-|         | `R` | list canonical repos                                    |
-|         | `a` | list recent agent sessions                              |
-| Switch  | `p` | switch to a project                                     |
-| System  | `g` | refresh                                                 |
-|         | `F` | pull all canonical repos                                |
-| Project | `.` | enter `pm-project-dispatch` (only shown in a pm tree)   |
+Grouped by noun (Project / Pool / Repos / Agent), so every action
+against a given resource sits in one column. The Agent group's `r`
+enters the agent-launch sub-dispatch (claude / codex / cursor); since
+there's no bound project at the global level, it prompts.
+
+| Group   | Key | Command                                               |
+| ------- | --- | ----------------------------------------------------- |
+| Project | `c` | create                                                |
+|         | `p` | switch                                                |
+|         | `l` | list (magit-section)                                  |
+| Pool    | `+` | mint a slot                                           |
+|         | `o` | list                                                  |
+| Repos   | `F` | pull all                                              |
+|         | `R` | list                                                  |
+| Agent   | `r` | run → (sub-dispatch: claude / codex / cursor)         |
+|         | `a` | recent sessions across projects                       |
+| System  | `g` | refresh                                               |
+| Project | `.` | enter `pm-project-dispatch` (only shown in a pm tree) |
 
 ### `C-x p .` — current pm project
 
@@ -61,22 +71,38 @@ worktree). If invoked outside any pm tree, prompts for a project and
 re-enters bound to it. Use a prefix arg (`C-u C-x p .`) to force a
 prompt even when in a pm tree.
 
-| Group     | Key  | Toggle / Command                          |
-| --------- | ---- | ----------------------------------------- |
-| Arguments | `-A` | `--all` (batch wt ops)                    |
-|           | `-n` | `--no-branch` (attach skips branch restore) |
-|           | `-d` | `--dry-run` (detach simulation)           |
-| Inspect   | `s`  | status                                    |
-|           | `a`  | sessions for this project                 |
-| Worktrees | `n`  | new                                       |
-|           | `a`  | attach                                    |
-|           | `D`  | detach                                    |
-|           | `X`  | delete worktree                           |
-| Navigate  | `p`  | parent (when inside a worktree)           |
-|           | `j`  | sibling (when ≥ 1 sibling exists)         |
-| Danger    | `K`  | delete project                            |
-| System    | `g`  | refresh                                   |
-|           | `<`  | back to global pm                         |
+| Group     | Key  | Toggle / Command                              |
+| --------- | ---- | --------------------------------------------- |
+| Arguments | `-A` | `--all` (batch wt ops)                        |
+|           | `-n` | `--no-branch` (attach skips branch restore)   |
+|           | `-d` | `--dry-run` (detach simulation)               |
+| Inspect   | `s`  | status                                        |
+| Worktrees | `n`  | new                                           |
+|           | `a`  | attach                                        |
+|           | `D`  | detach                                        |
+|           | `X`  | delete worktree                               |
+| Navigate  | `p`  | parent (when inside a worktree)               |
+|           | `j`  | sibling (when ≥ 1 sibling exists)             |
+| Agent     | `r`  | run → (sub-dispatch: claude / codex / cursor) |
+|           | `l`  | sessions for this project                     |
+| System    | `g`  | refresh                                       |
+|           | `<`  | back to global pm                             |
+| Danger    | `K`  | delete project                                |
+
+### Agent-launch sub-dispatch
+
+Reachable as `r` from either parent transient and as
+`pm-agent-launch-dispatch` standalone (designed to bind under
+`project-switch-commands`, e.g. `?a`). The sub-dispatch is fresh-launch
+only — to resume a session, use `l` from the project transient (or
+`a` from the global one) to open `*pm-agent-ls*` and `RET` on a row.
+
+| Key | Command |
+| --- | ------- |
+| `c` | claude  |
+| `o` | codex   |
+| `u` | cursor  |
+| `<` | back to project dispatch |
 
 The `[Navigate]` group hides at the container level (no parent /
 sibling there). After `j` lands you in a sibling worktree, use the
@@ -128,13 +154,15 @@ for a project; double-prefix forces `--all`.
 `q` quit. Project-list adds `s` (status) and `D` (delete); repo-list's
 `RET` pulls the repo at point.
 
-### Resuming agent sessions from Emacs
+### Launching and resuming agent sessions from Emacs
 
-`RET` on a session row calls `pm-agent-dispatch-function`. Default is
-`nil`, which stages the resume command on the kill-ring and prints a
-hint — safe out of the box.
+Both the fresh-launch transient verbs (`C-x p P` → `C`/`O`/`U`,
+`C-x p .` → `c`/`o`/`u`) and `RET` on a session row in `*pm-agent-ls*`
+flow through `pm-agent-dispatch-function`. Default is `nil`, which
+stages the command on the kill-ring and prints a hint — safe out of
+the box.
 
-Two opt-in dispatchers ship with the package:
+Three opt-in dispatchers ship with the package:
 
 ```elisp
 ;; Built-in `term-mode' (no extra deps)
@@ -142,10 +170,16 @@ Two opt-in dispatchers ship with the package:
 
 ;; vterm (if you have it)
 (setq pm-agent-dispatch-function #'pm-agent-dispatch-vterm)
+
+;; ghostel (if you have it)
+(setq pm-agent-dispatch-function #'pm-agent-dispatch-ghostel)
 ```
 
 Or write your own — the function receives a plist with `:argv`,
-`:cwd`, `:agent`, `:session-id`, `:project`.
+`:cwd`, `:agent`, `:session-id` (nil for a fresh launch), `:project`.
+
+`M-x pm-agent-launch` is also available standalone — prompts for an
+agent and project and runs the same dispatcher.
 
 ### CLI extensions
 
