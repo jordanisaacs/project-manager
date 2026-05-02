@@ -232,14 +232,24 @@ def build_sections_table(
     last_section_idx = len(materialized) - 1
     flat_idx = 0
     for section_idx, (title, rows) in enumerate(materialized):
+        is_group_boundary_section = section_idx < last_section_idx
+        if not rows:
+            # Empty group still emits a row so the title is visible (e.g.
+            # a project with no attached worktrees). Synthetic rows aren't
+            # selectable, so flat_idx isn't bumped — keeps the picker's
+            # flat_rows derivation in tui.pick aligned with this index.
+            t.add_row(
+                Text(title, style=group.style),
+                *(Text("") for _ in columns),
+                end_section=is_group_boundary_section,
+            )
+            continue
         last_row_idx = len(rows) - 1
         for i, r in enumerate(rows):
             # end_section on the last row of each group (except the final
             # group) draws a horizontal rule between groups, matching the
             # header rule emitted by `box.HORIZONTALS`.
-            is_group_boundary = (
-                i == last_row_idx and section_idx < last_section_idx
-            )
+            is_group_boundary = i == last_row_idx and is_group_boundary_section
             is_selected = flat_idx == selected_flat_idx
             t.add_row(
                 Text(

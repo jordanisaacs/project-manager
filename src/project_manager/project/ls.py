@@ -57,9 +57,20 @@ COLUMNS: list[Column] = [
 ]
 
 
-def sections(rows: list["ProjectRow"]) -> list[Section]:
-    """Group project rows by project name for hierarchical display."""
+def sections(
+    rows: list["ProjectRow"],
+    projects: list[str] | None = None,
+) -> list[Section]:
+    """Group project rows by project name for hierarchical display.
+
+    PROJECTS, when given, seeds the grouping with every known project so
+    that ones with zero attached worktrees still appear as empty sections
+    instead of being dropped.
+    """
     by_project: dict[str, list[ProjectRow]] = {}
+    if projects is not None:
+        for p in projects:
+            by_project[p] = []
     for row in rows:
         by_project.setdefault(row.project, []).append(row)
     return [Section(title=p, rows=rs) for p, rs in sorted(by_project.items())]

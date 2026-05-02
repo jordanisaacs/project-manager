@@ -88,7 +88,7 @@
 
 ;;;###autoload
 (defun pm-project-create ()
-  "Create a new pm project, attaching one or more worktrees."
+  "Create a new pm project, optionally attaching one or more worktrees."
   (interactive)
   (let ((name (read-string "New project name: ")))
     (when (string-empty-p name) (user-error "Aborted"))
@@ -97,27 +97,30 @@
      (lambda (repos)
        (let* ((repo-names (mapcar (lambda (r) (alist-get 'repo r)) repos))
               (chosen (completing-read-multiple
-                       "Worktrees (pick repos, comma-sep): "
-                       repo-names nil t)))
-         (when (null chosen)
-           (user-error "Aborted: at least one worktree required"))
-         (let ((spec (pm--build-spec chosen)))
-           (pm--project-create
-            name spec
-            (lambda (rows)
-              (let ((container (file-name-as-directory
-                                (expand-file-name name pm-projects-dir))))
-                (pm-refresh
-                 (lambda (_)
-                   (let ((aliases (mapcar (lambda (r) (alist-get 'wt r)) rows)))
-                     (message "pm: created %s [%s]"
-                              name (mapconcat #'identity aliases ", "))
-                     (when (and aliases
-                                (y-or-n-p
-                                 (format "Switch into %s/%s? "
-                                         name (car aliases))))
-                       (project-switch-project
-                        (expand-file-name (car aliases) container)))))))))))))))
+                       "Worktrees (pick repos, comma-sep; RET = none): "
+                       repo-names nil t))
+              (spec (and chosen (pm--build-spec chosen))))
+         (pm--project-create
+          name spec
+          (lambda (rows)
+            (let ((container (file-name-as-directory
+                              (expand-file-name name pm-projects-dir))))
+              (pm-refresh
+               (lambda (_)
+                 (let ((aliases (mapcar (lambda (r) (alist-get 'wt r)) rows)))
+                   (if aliases
+                       (progn
+                         (message "pm: created %s [%s]"
+                                  name (mapconcat #'identity aliases ", "))
+                         (when (y-or-n-p
+                                (format "Switch into %s/%s? "
+                                        name (car aliases)))
+                           (project-switch-project
+                            (expand-file-name (car aliases) container))))
+                     (progn
+                       (message "pm: created %s (no worktrees)" name)
+                       (when (y-or-n-p (format "Switch into %s? " name))
+                         (project-switch-project container)))))))))))))))
 
 ;;;###autoload
 (defun pm-project-delete (name)
