@@ -36,7 +36,8 @@
 
 \\{pm-repo-mode-map}"
   (setq-local revert-buffer-function
-              (lambda (&rest _) (pm-repo-refresh))))
+              (lambda (&rest _) (pm-repo-refresh)))
+  (pm-section-setup-margin))
 
 (defun pm-repo--render ()
   (let ((inhibit-read-only t)
@@ -45,8 +46,9 @@
     (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-repos nil)
-      (magit-insert-heading
-        (propertize (format "Repos (%d)" (length rows)) 'face 'bold))
+      ;; Root has no heading — see pm-status for the rationale.
+      (insert (propertize (format "Repos (%d)" (length rows)) 'face 'bold))
+      (insert "\n")
       (let* ((header '("Repo" "Branch" "Dirty" "Ahead" "Behind" "Submods"))
              (cell-rows (cons header (mapcar #'pm-repo--cells rows)))
              (widths (pm-table-widths cell-rows)))
@@ -58,6 +60,7 @@
             (insert (pm-table-row (pm-repo--cells row) widths))
             (insert "\n")))))
     (pm-table-cover-root-section)
+    (pm-table-show-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 
@@ -103,7 +106,8 @@
         (erase-buffer)
         (insert "Loading…\n"))
       (pm-repo-refresh))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf)
+    (pm-section-set-window-margin)))
 
 (provide 'pm-repo)
 

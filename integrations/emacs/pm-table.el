@@ -71,6 +71,45 @@ across refreshes."
           (setq out (append out (list (cons k (list r))))))))
     out))
 
+;;;; Left-margin allocation for visibility indicators
+
+;; `magit-section-visibility-indicators' in (CHAR . CHAR) form renders
+;; the indicator into the left margin, but `magit-section-mode' itself
+;; doesn't allocate one — full magit does it via `magit-set-buffer-margins'
+;; in `magit-setup-buffer-hook' (see magit-margin.el). pm only depends on
+;; magit-section, so it mirrors `magit-set-window-margins' here.
+;;
+;; Each pm-*-mode calls `pm-section-setup-margin' from its mode body.
+;; Each entry point (`pm-project-status', etc.) also calls
+;; `pm-section-set-window-margin' after `pop-to-buffer' so the window's
+;; margin is in place before redisplay paints the section indicators.
+
+(declare-function magit-section-visibility-indicator "magit-section" ())
+
+(defun pm-section-set-window-margin (&optional window)
+  "Set WINDOW's left margin to match the active section visibility indicator.
+Mirrors `magit-set-window-margins' (magit-margin.el): width 1 when the
+indicator is a character (the form that renders in the left margin),
+otherwise the existing left margin is preserved."
+  (when (or window (setq window (get-buffer-window)))
+    (with-selected-window window
+      (set-window-margins
+       nil
+       (if (and (fboundp 'magit-section-visibility-indicator)
+                (characterp (car (magit-section-visibility-indicator))))
+           1
+         (car (window-margins)))
+       (cdr (window-margins))))))
+
+(defun pm-section-setup-margin ()
+  "Apply `pm-section-set-window-margin' to all windows showing this buffer.
+Also adds it to the buffer-local `window-configuration-change-hook' so
+future windows that display the buffer get the margin too."
+  (dolist (window (get-buffer-window-list nil nil 0))
+    (pm-section-set-window-margin window))
+  (add-hook 'window-configuration-change-hook
+            #'pm-section-set-window-margin nil t))
+
 ;;;; Section state reset
 
 (defvar magit-section-pre-command-section)
@@ -99,6 +138,21 @@ stale objects can produce a nil and trip the hook with
     (setq magit-section-highlighted-sections nil))
   (when (boundp 'magit-section-focused-sections)
     (setq magit-section-focused-sections nil)))
+
+(declare-function magit-section-show "magit-section" (section))
+
+(defun pm-table-show-root-section ()
+  "Walk from `magit-root-section' to populate visibility-indicator overlays.
+
+The `magit-insert-section' macro builds section objects but does not
+create their visibility-indicator overlays. Those overlays are made by
+`magit-section-maybe-update-visibility-indicator', which only runs from
+`magit-section-show' / `magit-section-hide'. Magit triggers it once per
+refresh by calling `(magit-section-show magit-root-section)' (see
+`magit-refresh-buffer' in magit-mode.el); pm mirrors that here."
+  (when (and (boundp 'magit-root-section) magit-root-section)
+    (let ((magit-section-cache-visibility nil))
+      (magit-section-show magit-root-section))))
 
 (defun pm-table-cover-root-section ()
   "Stamp `magit-section' on every char in the root section's region.

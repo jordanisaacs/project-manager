@@ -49,7 +49,8 @@
 
 \\{pm-list-mode-map}"
   (setq-local revert-buffer-function
-              (lambda (&rest _) (pm-list-refresh))))
+              (lambda (&rest _) (pm-list-refresh)))
+  (pm-section-setup-margin))
 
 (defun pm-list--render ()
   (let ((inhibit-read-only t)
@@ -58,8 +59,9 @@
     (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-list nil)
-      (magit-insert-heading
-        (propertize (format "pm projects (%d)" (length rows)) 'face 'bold))
+      ;; Root has no heading — see pm-status for the rationale.
+      (insert (propertize (format "pm projects (%d)" (length rows)) 'face 'bold))
+      (insert "\n")
       (let* ((all-cells (mapcan #'pm-list--row-cells rows))
              (header '("Worktree" "Repo" "Branch" "Status"))
              (cell-rows (cons header all-cells))
@@ -82,6 +84,7 @@
                     (insert (pm-table-row cells widths))
                     (insert "\n")))))))))
     (pm-table-cover-root-section)
+    (pm-table-show-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 
@@ -168,7 +171,8 @@
         (erase-buffer)
         (insert "Loading…\n"))
       (pm-list-refresh))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf)
+    (pm-section-set-window-margin)))
 
 (provide 'pm-list)
 

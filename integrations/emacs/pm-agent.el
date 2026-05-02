@@ -207,7 +207,8 @@ all-projects view.  Used by `pm-agent-list-refresh'.")
 
 \\{pm-agent-list-mode-map}"
   (setq-local revert-buffer-function
-              (lambda (&rest _) (pm-agent-list-refresh))))
+              (lambda (&rest _) (pm-agent-list-refresh)))
+  (pm-section-setup-margin))
 
 (defun pm-agent-list--render ()
   "Populate the current buffer from `pm-agent-list--data'.
@@ -221,9 +222,10 @@ magit-section's post-command hook."
     (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-agent-list nil)
-      (magit-insert-heading
-        (propertize (format "Recent agent sessions (%d)" (length rows))
-                    'face 'bold))
+      ;; Root has no heading — see pm-status for the rationale.
+      (insert (propertize (format "Recent agent sessions (%d)" (length rows))
+                          'face 'bold))
+      (insert "\n")
       (let* ((groups (pm-agent-list--group-by-project rows))
              (cell-rows
               (cons '("Agent" "Session" "Title" "Last Active")
@@ -249,6 +251,7 @@ magit-section's post-command hook."
                     (insert after)
                     (insert "\n")))))))))
     (pm-table-cover-root-section)
+    (pm-table-show-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 
@@ -336,7 +339,8 @@ project to scope to."
         (erase-buffer)
         (insert "Loading…\n"))
       (pm-agent-list-refresh))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf)
+    (pm-section-set-window-margin)))
 
 ;;;###autoload
 (defun pm-agent-list-current-project ()

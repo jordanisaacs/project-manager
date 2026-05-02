@@ -38,7 +38,8 @@
 
 \\{pm-pool-mode-map}"
   (setq-local revert-buffer-function
-              (lambda (&rest _) (pm-pool-refresh))))
+              (lambda (&rest _) (pm-pool-refresh)))
+  (pm-section-setup-margin))
 
 (defun pm-pool--render ()
   (let ((inhibit-read-only t)
@@ -47,11 +48,12 @@
     (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-pool nil)
-      (magit-insert-heading
-        (propertize (format "Pool slots (%d repo%s)"
-                            (length groups)
-                            (if (= 1 (length groups)) "" "s"))
-                    'face 'bold))
+      ;; Root has no heading — see pm-status for the rationale.
+      (insert (propertize (format "Pool slots (%d repo%s)"
+                                  (length groups)
+                                  (if (= 1 (length groups)) "" "s"))
+                          'face 'bold))
+      (insert "\n")
       (let* ((all-cells
               (mapcan
                (lambda (group)
@@ -74,6 +76,7 @@
                   (insert (pm-table-row cells widths))
                   (insert "\n"))))))))
     (pm-table-cover-root-section)
+    (pm-table-show-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 
@@ -142,7 +145,8 @@ in `dired'."
         (erase-buffer)
         (insert "Loading…\n"))
       (pm-pool-refresh))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf)
+    (pm-section-set-window-margin)))
 
 (provide 'pm-pool)
 

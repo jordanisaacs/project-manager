@@ -65,7 +65,8 @@ Updated by full and per-section refreshes; renderers read from here.")
 
 \\{pm-status-mode-map}"
   (setq-local revert-buffer-function
-              (lambda (&rest _) (pm-status-refresh))))
+              (lambda (&rest _) (pm-status-refresh)))
+  (pm-section-setup-margin))
 
 ;;;; Section renderers
 
@@ -216,14 +217,17 @@ before re-rendering, mirroring `magit-refresh-buffer'."
     (pm-table-reset-section-state)
     (erase-buffer)
     (magit-insert-section (pm-status pm-status--project)
-      (magit-insert-heading
-        (propertize (format "pm: %s" pm-status--project) 'face 'bold))
-      (insert "\n")
+      ;; Root has no heading (mirrors `magit-status-refresh-buffer'): an
+      ;; unset `content' slot keeps `magit-section-content-p' nil so no
+      ;; visibility indicator appears for the buffer-level banner.
+      (insert (propertize (format "pm: %s" pm-status--project) 'face 'bold))
+      (insert "\n\n")
       (pm-status--insert-worktrees)
       (pm-status--insert-prs)
       (pm-status--insert-stacker)
       (pm-status--insert-sessions))
     (pm-table-cover-root-section)
+    (pm-table-show-root-section)
     (goto-char (point-min))
     (forward-line (1- line))))
 
@@ -335,7 +339,8 @@ before re-rendering, mirroring `magit-refresh-buffer'."
         (erase-buffer)
         (insert (format "pm: %s\n\nLoading…\n" name)))
       (pm-status-refresh))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf)
+    (pm-section-set-window-margin)))
 
 (provide 'pm-status)
 
