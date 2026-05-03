@@ -141,6 +141,7 @@ in `dired'."
     (with-current-buffer buf
       (pm-pool-mode)
       (setq pm-pool--repo (and repo (not (string-empty-p repo)) repo))
+      (setq default-directory (pm-global-default-directory))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert "Loading…\n"))

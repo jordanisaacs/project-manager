@@ -167,6 +167,7 @@
   (let ((buf (get-buffer-create "*pm-list*")))
     (with-current-buffer buf
       (pm-list-mode)
+      (setq default-directory (pm-global-default-directory))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert "Loading…\n"))

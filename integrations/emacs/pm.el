@@ -63,6 +63,28 @@ containers with many large worktrees)."
   :type 'boolean
   :group 'pm)
 
+;;;###autoload
+(defcustom pm-manager-project nil
+  "Project name used as `default-directory' for global pm buffers.
+Applies to `pm-list', `pm-pool', `pm-repo-list', and `pm-agent-list'
+in its all-projects view — none of which are bound to a single
+project but still benefit from a sensible cwd (e.g. so a transient
+opened from the buffer scopes to your usual workspace).
+When nil, those buffers fall back to the user's home directory."
+  :type '(choice (const :tag "Home directory" nil) string)
+  :group 'pm)
+
+;;;###autoload
+(defun pm-global-default-directory ()
+  "Resolve `default-directory' for non-project-scoped pm buffers.
+Returns `pm-manager-project's container under `pm-projects-dir'
+when set, else the user's home directory."
+  (file-name-as-directory
+   (expand-file-name
+    (if pm-manager-project
+        (expand-file-name pm-manager-project pm-projects-dir)
+      "~"))))
+
 (require 'pm-process)
 (require 'pm-project)
 (require 'pm-commands)

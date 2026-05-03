@@ -102,6 +102,7 @@
     (with-current-buffer buf
       (pm-repo-mode)
       (setq pm-repo--offline offline)
+      (setq default-directory (pm-global-default-directory))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert "Loading…\n"))

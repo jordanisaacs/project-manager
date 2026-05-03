@@ -362,6 +362,10 @@ project to scope to."
     (with-current-buffer buf
       (pm-agent-list-mode)
       (setq pm-agent-list--scope (cons project (and all t)))
+      (setq default-directory
+            (if project
+                (pm-agent--cwd project)
+              (pm-global-default-directory)))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert "Loading…\n"))

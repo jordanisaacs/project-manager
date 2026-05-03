@@ -331,10 +331,13 @@ before re-rendering, mirroring `magit-refresh-buffer'."
 (defun pm-project-status (name)
   "Show `pm project status NAME' in a magit-style buffer."
   (interactive (list (pm--read-project "Status of: ")))
-  (let ((buf (get-buffer-create (format "*pm-status: %s*" name))))
+  (let ((buf (get-buffer-create (format "*pm-status: %s*" name)))
+        (container (file-name-as-directory
+                    (expand-file-name name pm-projects-dir))))
     (with-current-buffer buf
       (pm-status-mode)
       (setq pm-status--project name)
+      (setq default-directory container)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (format "pm: %s\n\nLoading…\n" name)))
