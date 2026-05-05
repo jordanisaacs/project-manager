@@ -177,7 +177,11 @@ The argv is shell-quoted and forwarded via `ghostel-paste-string'
 when it contains spaces or quotes), then a Return key is sent to
 execute it.  Bracketed paste falls back to a raw write before the
 shell has set DECSET 2004; either way the shell receives the
-argv as a single command line."
+argv as a single command line.
+
+A fresh ghostel buffer is always allocated (via `generate-new-buffer'
+under the hood); repeated launches of the same agent/project get
+`<2>', `<3>', ... suffixes rather than pasting into a live session."
   (unless (require 'ghostel nil t)
     (user-error "ghostel not installed; pick another `pm-agent-dispatch-function'"))
   (let* ((argv    (plist-get plist :argv))
@@ -186,7 +190,10 @@ argv as a single command line."
          (project (plist-get plist :project))
          (default-directory cwd)
          (ghostel-buffer-name (format "*pm-agent: %s/%s*" project agent))
-         (buf (ghostel)))
+         ;; Non-numeric, non-nil prefix arg → ghostel branches to
+         ;; `generate-new-buffer', so we never paste into an existing
+         ;; agent session by reusing its buffer name.
+         (buf (ghostel t)))
     (with-current-buffer buf
       (ghostel-paste-string (mapconcat #'shell-quote-argument argv " "))
       (ghostel-send-key "return"))))
