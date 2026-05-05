@@ -40,8 +40,11 @@ gate transient suffixes during mutating ops.")
   (get-buffer-create (format " *pm-out: %s*" verb)))
 
 (defun pm--err-buffer (verb)
-  "Return (or create) the stderr buffer for VERB."
-  (get-buffer-create (format "*pm: %s*" verb)))
+  "Return (or create) the stderr buffer for VERB.
+The leading space hides the buffer from `list-buffers'; Emacs writes
+a `Process … stderr finished' trailer on exit even when no stderr
+was emitted, and there is no need to expose that to the user."
+  (get-buffer-create (format " *pm-err: %s*" verb)))
 
 (defun pm--surface-error (verb err-buf exit-code)
   "Surface a non-zero pm result for VERB from ERR-BUF with EXIT-CODE."

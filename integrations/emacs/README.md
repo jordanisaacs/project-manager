@@ -113,7 +113,8 @@ Suffix descriptions live-update as you toggle infix args, so e.g. with
 worktree prompt.
 
 Every `pm` invocation is async; non-zero exits surface via
-`display-warning` and a kept `*pm: <verb>*` buffer for inspection.
+`display-warning` and a kept ` *pm-err: <verb>*` buffer (hidden from
+`list-buffers` by its leading space; reachable via `M-x switch-to-buffer`).
 
 ### Buffers
 
