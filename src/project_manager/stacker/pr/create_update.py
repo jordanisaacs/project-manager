@@ -65,12 +65,22 @@ def create_or_update_current_pr(
         # Don't ship a body — refresh_component_pr_bodies() runs next and
         # rewrites only the managed stacker block, preserving any edits
         # the user has made to the surrounding PR description.
+        #
+        # Title gets the same treatment: only sync when the live title
+        # still matches the bottom-commit subject pm computes. A
+        # divergence means either a manual GitHub-UI edit *or* an
+        # amended bottom commit whose subject hasn't been propagated
+        # yet — we can't tell which from cache, so we never clobber.
+        # To pick up a new subject after amending, re-set the title
+        # once with `gh pr edit --title <subject>`; subsequent pushes
+        # will keep it in sync.
         fmt.record(ctx, logs, f"Updating PR #{existing.number} for {label}")
+        synced_title = title if existing.title == title else None
         ctx.pr_backend.edit_pr(
             gh.EditPRRequest(
                 repo=target_repo,
                 number=existing.number,
-                title=title,
+                title=synced_title,
                 base=base,
             )
         )

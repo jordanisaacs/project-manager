@@ -8,6 +8,7 @@ import pytest
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import OwnerKind, PoolDB
+from project_manager.stacker import gh
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import (
@@ -329,5 +330,88 @@ def test_push_empty_scope_when_target_has_no_lineage(
     target = SelectorTarget(repo_name=repo_name, branch="ghost")
     with pytest.raises(stacker_git.GitError, match="not tracked"):
         svc.push(target)
+
+
+def _seed_existing_pr(  # noqa: PLR0913 (test helper — explicit args read better than a dataclass here)
+    backend: RecordingPRBackend,
+    push_service: StackerService,
+    repo_name: str,
+    branch: str,
+    *,
+    title: str,
+    number: int = 42,
+) -> gh.PullRequest:
+    pr = gh.PullRequest(
+        number=number,
+        url=f"https://github.com/acme/widgets/pull/{number}",
+        title=title,
+        body="",
+        head_ref_name=branch,
+        base_ref_name="main",
+        state="OPEN",
+        is_draft=False,
+    )
+    backend.prs_by_head[("acme/widgets", branch)] = pr
+    push_service.db.upsert_pr_state(
+        PRState(
+            repo_name=repo_name,
+            branch=branch,
+            pr_url=pr.url,
+            pr_number=pr.number,
+            state="OPEN",
+        ),
+    )
+    return pr
+
+
+def test_push_preserves_manual_title_edit(
+    push_service: StackerService,
+    backend: RecordingPRBackend,
+    tracked_stack: TrackedStack,
+) -> None:
+    """A user-edited PR title must not be clobbered by subsequent pushes.
+
+    Reproduces the bug where every `pm stacker push` reset the PR title
+    to the bottom-commit subject, fighting any rewrite the user made via
+    `gh pr edit --title` (or via the GitHub UI).
+    """
+    _seed_existing_pr(
+        backend,
+        push_service,
+        tracked_stack.repo_name,
+        "a",
+        title="[cplane/api] feat: rewritten by hand",
+    )
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="a")
+    push_service.push(target, PushOptions(scope=ScopeSpec(only=True)))
+    title_syncs = [
+        req for req, _body in backend.edited if req.title is not None
+    ]
+    assert title_syncs == [], (
+        f"manually-edited title should be preserved, got title_syncs={title_syncs}"
+    )
+
+
+def test_push_resyncs_title_when_existing_matches_bottom_subject(
+    push_service: StackerService,
+    backend: RecordingPRBackend,
+    tracked_stack: TrackedStack,
+) -> None:
+    """Idempotent path: if the live title still matches the bottom-commit
+    subject, pm passes the title through (a no-op for GitHub but a useful
+    signal for tools layered on top of `EditPRRequest`)."""
+    _seed_existing_pr(
+        backend,
+        push_service,
+        tracked_stack.repo_name,
+        "a",
+        title="a: first commit",  # matches the tracked_stack commit subject
+    )
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="a")
+    push_service.push(target, PushOptions(scope=ScopeSpec(only=True)))
+    title_syncs = [
+        req.title for req, _body in backend.edited if req.title is not None
+    ]
+    assert title_syncs == ["a: first commit"]
 
 
