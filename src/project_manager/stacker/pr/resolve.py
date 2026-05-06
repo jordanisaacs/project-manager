@@ -95,4 +95,13 @@ def pr_base_for_current_branch(
     parent_pr = find_open_pr(ctx, parent_tracked, config, current_repo)
     if not parent_pr:
         raise git.GitError(f"Direct parent {parent_label} must already have an open PR.")
-    return remote_branch_name(ctx, parent_tracked)
+    # Use the gh-supplied head ref instead of `remote_branch_name`, which
+    # reads worktree-local `branch.<name>.merge` config and so requires the
+    # parent to be checked out in a pm slot. During `pm stacker push` the
+    # parent's slot is already released by the time we resolve a child's
+    # base, and pools with fewer slots than tracked branches always trip it.
+    if not parent_pr.head_ref_name:
+        raise git.GitError(
+            f"Direct parent {parent_label} has an open PR but no head ref."
+        )
+    return parent_pr.head_ref_name
