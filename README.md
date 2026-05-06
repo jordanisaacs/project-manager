@@ -76,6 +76,4 @@ granularity only.
 
 ## Acknowledgements
 
-- `pool/worktree.py` ports Rodrigo Gomes' `wt` init logic (submodule `--reference`, CLAUDE copy, `init.sh`).
-- The stacker layer is adapted from Rodrigo Gomes' standalone `stacker` (cherry-pick sync model, paused-op / continue-abort state machine, `guard no-rebase` hook).
-- PR caching, stack-block rendering, and the per-PR "Files changed" view mirror universe `ci/gitstack`'s `StackItem` model.
+The stacker layer is adapted from Rodrigo Gomes' standalone `stacker` — cherry-pick sync model, paused-op / continue-abort state machine, `guard no-rebase` hook.
