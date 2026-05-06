@@ -170,9 +170,9 @@ async def _check_fetch_needed(
 
 
 # Matches remote URLs pinned to github.com (any scheme / any SSH user,
-# including the `org-NNNN@github.com:` form Databricks hands out for SSO).
-# Captures owner + repo name; tolerates an optional `.git` suffix and
-# trailing slash.
+# including the `org-NNNN@github.com:` SSO-style form some hosts hand
+# out). Captures owner + repo name; tolerates an optional `.git` suffix
+# and trailing slash.
 _GITHUB_REMOTE_RE = re.compile(
     r"""^
     (?:

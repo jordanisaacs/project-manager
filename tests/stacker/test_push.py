@@ -51,7 +51,7 @@ def push_service(
     svc.db.set_config(tracked_stack.repo_name, "pr.mode", "repo-pr")
     svc.db.set_config(tracked_stack.repo_name, "pr.trunk", "main")
     _configure_upstreams(tracked_stack)
-    # `git pp --force` is a Databricks alias; stub out the push itself.
+    # `git pp --force` is a user push alias; stub out the push itself.
     monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
     return svc
 

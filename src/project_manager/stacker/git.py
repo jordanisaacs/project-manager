@@ -67,11 +67,10 @@ def current_branch(path: Path) -> str:
 def upstream_branch(path: Path) -> str | None:
     """Return `<remote>/<remote-branch-name>` for the current branch.
 
-    Reads `branch.<current>.remote` + `.merge` from git config directly —
-    same as universe gitstack's `remote_branch_for_branch()`. Trusts the
-    config written by `git push -u` / `git branch --set-upstream-to` and
-    does not require `@{upstream}` to resolve against a fetched
-    remote-tracking ref.
+    Reads `branch.<current>.remote` + `.merge` from git config directly.
+    Trusts the config written by `git push -u` / `git branch
+    --set-upstream-to` and does not require `@{upstream}` to resolve
+    against a fetched remote-tracking ref.
     """
     remote = upstream_remote_name(path)
     remote_branch = upstream_branch_name(path)
@@ -120,8 +119,8 @@ def parse_github_slug(url: str) -> str | None:
     """Extract `owner/repo` from a git remote URL.
 
     Handles SSH (`git@github.com:org/repo.git`), HTTPS
-    (`https://github.com/org/repo.git`), and the custom SSH form Databricks
-    uses (`org-NNNNN@github.com:org/repo.git`). Returns None on no match.
+    (`https://github.com/org/repo.git`), and the SSO-style SSH form
+    (`org-NNNNN@github.com:org/repo.git`). Returns None on no match.
     """
     match = _GITHUB_SLUG_RE.search(url)
     return f"{match.group(1)}/{match.group(2)}" if match else None

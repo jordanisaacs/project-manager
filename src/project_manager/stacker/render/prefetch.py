@@ -2,7 +2,7 @@
 
 Today's render loop calls `build_node_status` per node, which fires ~9 git
 subprocesses in series — `has_tracked_changes` alone costs 3 fsmonitor
-queries. On a pool with a few universe worktrees that serial chain
+queries. On a pool with a few large-monorepo worktrees that serial chain
 dominates wall time for `pm stacker ls`. This module precomputes every
 per-repo and per-node fact concurrently (bounded by
 `[concurrency].limit`) and delivers them to the renderer as a

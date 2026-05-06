@@ -18,9 +18,9 @@ def push_remote_slug(ctx: StackerCtx, repo_name: str) -> str:
 def head_repo_for_branch(ctx: StackerCtx, tracked: TrackedBranch) -> str | None:
     """Return the `owner/name` slug of the repo the branch is pushed to.
 
-    Detects cross-repo same-owner fork setups (like
-    databricks-eng/universe-dev → databricks-eng/universe), which
-    `gh pr create` cannot handle (cli/cli#10093). Returns None when the
+    Detects cross-repo same-owner fork setups (e.g.
+    acme/widgets-dev → acme/widgets), which `gh pr create` cannot
+    handle (cli/cli#10093). Returns None when the
     upstream isn't set, the remote URL can't be parsed, or we're in a
     test fixture without a real git remote — callers fall back to the
     default `gh pr create` path.

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Claim-release pool of git worktrees bound to named projects via symlinks."
 readme = "README.md"
 authors = [
-    { name = "Jordan Isaacs", email = "jordan.isaacs@databricks.com" }
+    { name = "Jordan Isaacs", email = "jordan@snowytrees.dev" }
 ]
 requires-python = ">=3.11"
 dependencies = [

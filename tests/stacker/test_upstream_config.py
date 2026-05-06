@@ -1,9 +1,8 @@
 """Upstream helpers read `branch.<X>.remote` / `.merge` from git config.
 
-Stacker deliberately matches universe gitstack's
-`remote_branch_for_branch()` semantics: trust the config written by
-`git push -u` / `git branch --set-upstream-to`. No `@{upstream}`
-rev-parse, no dependency on a materialized remote-tracking ref.
+The contract: trust the config written by `git push -u` /
+`git branch --set-upstream-to`. No `@{upstream}` rev-parse, no
+dependency on a materialized remote-tracking ref.
 """
 from __future__ import annotations
 

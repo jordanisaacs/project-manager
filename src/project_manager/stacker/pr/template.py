@@ -1,10 +1,9 @@
 """GitHub PR template discovery and commit-body injection.
 
-Mirrors universe gitstack's template handling
-(`universe/ci/gitstack/src/commands/push.rs:935-958`): on PR creation, load
-the repo's `.github/PULL_REQUEST_TEMPLATE.md` from the worktree and inject
-the first commit's body into the template's first `## ` section, so a
-`## Summary` heading auto-fills with the commit body.
+On PR creation, load the repo's `.github/PULL_REQUEST_TEMPLATE.md` from
+the worktree and inject the first commit's body into the template's
+first `## ` section, so a `## Summary` heading auto-fills with the
+commit body.
 
 Future work (deliberately out of scope for v1): root-level
 `PULL_REQUEST_TEMPLATE.md`, `docs/PULL_REQUEST_TEMPLATE.md`, and the
@@ -68,10 +67,12 @@ def inject_body_into_template(commit_body: str, template: str) -> str:
         ),
         len(lines),
     )
-    out = (
-        lines[: first_header + 1]
-        + ["", commit_body, ""]
-        + lines[first_header + 1 : next_header]
-        + lines[next_header:]
-    )
+    out = [
+        *lines[: first_header + 1],
+        "",
+        commit_body,
+        "",
+        *lines[first_header + 1 : next_header],
+        *lines[next_header:],
+    ]
     return "\n".join(out)

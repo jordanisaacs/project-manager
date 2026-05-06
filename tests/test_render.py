@@ -191,8 +191,8 @@ def test_emit_sections_json_uses_jsonshape_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     secs = [
-        Section(title="runtime", rows=[_Row("a", 1)]),
-        Section(title="universe", rows=[_Row("b", 2)]),
+        Section(title="backend", rows=[_Row("a", 1)]),
+        Section(title="frontend", rows=[_Row("b", 2)]),
     ]
     out = _capture(
         monkeypatch,
@@ -203,8 +203,8 @@ def test_emit_sections_json_uses_jsonshape_keys(
     )
     payload = json.loads(out)
     assert payload == [
-        {"repo": "runtime",  "slots": [{"name": "a", "count": 1}]},
-        {"repo": "universe", "slots": [{"name": "b", "count": 2}]},
+        {"repo": "backend",  "slots": [{"name": "a", "count": 1}]},
+        {"repo": "frontend", "slots": [{"name": "b", "count": 2}]},
     ]
 
 

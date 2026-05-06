@@ -19,13 +19,13 @@ from .fakes import RecordingPRBackend
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
-        ("git@github.com:databricks-eng/universe.git", "databricks-eng/universe"),
-        ("git@github.com:databricks-eng/universe-dev.git", "databricks-eng/universe-dev"),
-        ("https://github.com/databricks-eng/universe.git", "databricks-eng/universe"),
-        ("https://github.com/databricks-eng/universe", "databricks-eng/universe"),
+        ("git@github.com:acme/widgets.git", "acme/widgets"),
+        ("git@github.com:acme/widgets-dev.git", "acme/widgets-dev"),
+        ("https://github.com/acme/widgets.git", "acme/widgets"),
+        ("https://github.com/acme/widgets", "acme/widgets"),
         ("https://github.com/org/repo/", "org/repo"),
-        # Databricks SSH-over-org form:
-        ("org-145372899@github.com:databricks-eng/universe.git", "databricks-eng/universe"),
+        # SSH-over-org form (some SSO setups):
+        ("org-100@github.com:acme/widgets.git", "acme/widgets"),
     ],
 )
 def test_parse_github_slug_handles_common_url_forms(

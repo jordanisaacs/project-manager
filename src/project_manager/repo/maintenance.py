@@ -12,7 +12,7 @@ Per target (canonical repo + every pool slot):
     `pm stacker ls` / `git status` calls don't pay the initial-crawl cost.
 
 Intended to run on a timer. No subprocess timeout: watchman's initial
-crawl on a universe-scale worktree can legitimately take minutes, and
+crawl on a large-monorepo worktree can legitimately take minutes, and
 a wedged timer run is visible in the next invocation's output, whereas
 a spurious timeout would just discard the work done so far.
 """

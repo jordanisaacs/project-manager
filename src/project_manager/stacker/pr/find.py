@@ -74,8 +74,8 @@ def find_pr(
     if not remote_branch:
         return None
     # GraphQL search (not `gh pr list`): REST list misses cross-fork
-    # same-owner PRs and was the source of the universe regression
-    # where PR A was invisible to PR B's body rendering.
+    # same-owner PRs, which would render one stacked PR invisible to
+    # another's body-rendering pass.
     query = f"repo:{target_repo} head:{remote_branch} is:pr is:open"
     prs = ctx.pr_backend.search_prs(query)
     if not prs:

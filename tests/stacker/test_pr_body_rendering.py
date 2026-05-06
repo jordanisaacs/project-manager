@@ -58,8 +58,7 @@ def _build_branch(
 def _setup_fake_upstream(slot_path: Path, branch: str) -> None:
     """Configure `branch.<X>.remote/merge` as `git push -u` would.
 
-    Stacker reads these config keys directly (mirroring universe
-    gitstack's `remote_branch_for_branch()`), so no real push or
+    Stacker reads these config keys directly, so no real push or
     remote-tracking ref is needed.
     """
     stacker_git.git(
@@ -126,7 +125,7 @@ def _two_branch_stack(
         )
     )
 
-    # pp uses `git pp --force` (a databricks alias not in test env) — stub.
+    # pp uses `git pp --force` (user push alias not in test env) — stub.
     monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
     return repo_name, "feature-b", slot_a, slot_b
 
@@ -140,7 +139,7 @@ def test_pr_body_has_actual_commit_message_not_file_path(
 ) -> None:
     """Regression: graphql/REST paths must send file content, never `@path`.
 
-    Real universe runs showed both PR bodies contained the literal string
+    A prior incident saw both PR bodies contain the literal string
     `@/tmp/tmpXXXXX` because we passed `body=@file` to `gh api graphql`
     which only substitutes file refs on REST, not on graphql variables.
     """
@@ -193,8 +192,8 @@ def test_refreshed_stack_block_links_both_prs_even_when_list_is_empty(
 ) -> None:
     """Regression: PR A's link must be present in PR B's stack block.
 
-    Real universe PR #1845321 showed the ancestor rendered as a bare
-    branch name because `gh pr list` hadn't indexed the just-created PR A.
+    A prior incident saw the ancestor rendered as a bare branch name
+    because `gh pr list` hadn't indexed the just-created PR A.
     Fix: preload the PRs we just created into _refresh_component_pr_bodies.
     """
     repo_name, _leaf, _a_slot, _b_slot = _two_branch_stack(
@@ -220,11 +219,10 @@ def test_refreshed_stack_block_links_both_prs_even_when_list_is_empty(
     body_a = final_body_for_number[1]
     body_b = final_body_for_number[2]
 
-    # Both stack blocks must contain links to both PRs. The universe
-    # regression we're guarding against was the ancestor line rendered as
-    # a bare branch name with no PR link — catching each branch linked to
-    # its PR URL (via the `[branch](pr-url)` form universe uses) proves the
-    # race is closed.
+    # Both stack blocks must contain links to both PRs. The regression
+    # we're guarding against was the ancestor line rendered as a bare
+    # branch name with no PR link — catching each branch linked to its
+    # PR URL (via the `[branch](pr-url)` form) proves the race is closed.
     for label, body in [("PR A", body_a), ("PR B", body_b)]:
         assert "](https://github.com/acme/widgets/pull/1)" in body, f"{label} missing link to PR A"
         assert "](https://github.com/acme/widgets/pull/2)" in body, f"{label} missing link to PR B"
@@ -249,8 +247,7 @@ def test_repo_pr_includes_compare_url_in_block(
 
     final = {r.number: b for (r, b) in backend.edited if b is not None}
     body_b = final[2]
-    # Files-changed URL format: <pr-url>/files/<base>..<head>
-    # (matches universe gitstack's <pr>/files/<parent>..<head>).
+    # Files-changed URL format: <pr-url>/files/<base>..<head>.
     assert "/pull/2/files/" in body_b
     assert "[[Files changed](" in body_b
 
@@ -265,11 +262,11 @@ def test_repo_pr_files_url_uses_current_head_after_local_commit(
     """Regression: `Files changed` head SHA must reflect the pushed HEAD,
     not the stale `last_clean_head` written at init time.
 
-    Real universe PRs (#1845320, #1845321) rendered
-    `/files/<sha>..<sha>` — an empty diff — because after `pm stacker init`
-    seeded `last_clean_head = parent_head`, a follow-up local commit
-    advanced HEAD but `pm stacker pp` never refreshed `last_clean_head`
-    in the DB before rendering the stack block.
+    A prior incident saw two PRs render `/files/<sha>..<sha>` — an empty
+    diff — because after `pm stacker init` seeded
+    `last_clean_head = parent_head`, a follow-up local commit advanced
+    HEAD but `pm stacker pp` never refreshed `last_clean_head` in the
+    DB before rendering the stack block.
     """
     repo_name, _leaf, _slot_a, slot_b = _two_branch_stack(
         service,
@@ -318,12 +315,11 @@ def test_repo_pr_root_branch_files_link_omits_range(
     """Regression: branches whose parent is the trunk must render
     `<pr>/files` (no range) — the base SHA is a trunk commit that lives
     outside the PR's commit graph, so GitHub 404s a `/files/<base>..<head>`
-    URL. Mirrors universe gitstack's `get_diff_link`, which suppresses
-    the range when `parent == default_branch`.
+    URL. Suppress the range form when `parent == default_branch`.
 
-    Real universe PR #1845320 (stack/stacker-test-a, parent=master)
-    surfaced this: GitHub returned 404 even after we fixed the head SHA
-    staleness — the URL itself was structurally wrong for a root branch.
+    A prior incident on a root-of-stack branch surfaced this: GitHub
+    returned 404 even after we fixed the head SHA staleness — the URL
+    itself was structurally wrong for a root branch.
     """
     repo_name, _leaf, _slot_a, _slot_b = _two_branch_stack(
         service,
@@ -389,7 +385,7 @@ def test_second_push_preserves_user_edits_to_pr_body(
     """Regression: editing the PR description and re-running `pm stacker push`
     must not overwrite the user's prose with the first-commit body.
 
-    Real universe PR #1859413 hit this: the user filled in the repo's
+    A prior incident saw the user fill in the repo's
     PULL_REQUEST_TEMPLATE.md sections, then a follow-up `pm stacker push`
     silently reset the body to the first commit message.
     """
@@ -454,8 +450,8 @@ def test_push_from_middle_branch_links_focus_pr_in_stack_blocks(
 ) -> None:
     """Pushing from a non-leaf focus must link the focus's own PR everywhere.
 
-    Real universe trigger: a 3-branch stack pushed from the middle wrote
-    the leaf's PR URL into every line referencing the middle branch. The
+    A prior incident: a 3-branch stack pushed from the middle wrote the
+    leaf's PR URL into every line referencing the middle branch. The
     fix is that `record_pr` (called per-iteration inside
     `create_or_update_current_pr`) keeps the cache fresh, so a later
     `pr_map_for_component` lookup resolves each branch to its own PR
@@ -652,7 +648,7 @@ def test_second_push_preserves_user_edits_to_template_filled_body(
     three_slots: list[slot_mod.Slot],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Universe PR #1859413 regression — extended for templates.
+    """User-edit-survives-push regression — extended for templates.
 
     With template support seeding the initial body, the user editing it
     in the GitHub UI must still survive re-push. Guard: re-push must

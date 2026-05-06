@@ -15,11 +15,8 @@ if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
 
 
-# Format constants must match ReviewStack's gitstack parser at
-# universe/js/packages/internal-tools/src/devportal/experimental/reviewstack/
-# vendor/osscopy/stackFormat/parsers/gitstackParser.ts:23-50: header is
-# matched as a substring on a line; footer is the first line whose strip()
-# starts with at least nine dashes.
+# Format constants: header is matched as a substring on a line, footer
+# is the first line whose strip() starts with at least nine dashes.
 STACK_HEADER = "## 🥞 Stacked PR"
 STACK_SEPARATOR = "---------"
 
@@ -122,7 +119,7 @@ def _files_url(node: TrackedBranch, render_ctx: _StackRender) -> str | None:
     part of the child's repo-pr commit list) but not for branches whose
     parent is the trunk. For root-of-stack branches the base SHA is a
     trunk commit outside the PR graph, so GitHub 404s; we emit
-    `<pr>/files` instead, mirroring universe gitstack's `get_diff_link`.
+    `<pr>/files` instead, suppressing the range form in that case.
     A merged parent collapses to the same case (its commits land on
     trunk and the parent ref is gone). Head SHA prefers the live branch
     ref via `render_ctx.live_heads`, falling back to the `last_clean_head`

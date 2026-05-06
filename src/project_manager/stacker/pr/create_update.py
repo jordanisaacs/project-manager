@@ -90,8 +90,7 @@ def create_or_update_current_pr(
         # Template-injection happens at create time only; on re-push the
         # update branch above keeps `EditPRRequest.body` unset, so the
         # template-filled body the user has since edited in the GitHub
-        # UI survives. Mirrors universe gitstack `inject_body_into_template`
-        # at universe/ci/gitstack/src/commands/push.rs:935-958.
+        # UI survives.
         template = load_pr_template(worktree_path)
         body_seed = (
             inject_body_into_template(first_body, template)

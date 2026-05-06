@@ -15,7 +15,7 @@ Reference for using the `pm` CLI to manage named projects, pooled worktree slots
 ## Mental Model
 
 - A **project** is a named folder under `~/.projects/<name>/` containing symlinks to git worktrees plus a small `.pm.db`. Think of it as a labelled bag of checkouts you can `cd` into.
-- A **worktree** (`wt`) is a named symlink inside a project (e.g. `universe`, `runtime`) pointing at a real git checkout.
+- A **worktree** (`wt`) is a named symlink inside a project (e.g. `frontend`, `backend`) pointing at a real git checkout.
 - A **slot** is the actual checkout, stored under `~/.worktrees/<repo>/<uuid>/`. Slots are pooled and stay warm across project switches — users never type the UUID, they only ever name the worktree.
 - A **repo** is the canonical clone under `~/.repos/<name>/`. Slots are spawned from it.
 
@@ -25,7 +25,7 @@ When you detach a worktree the symlink disappears but the slot stays in the pool
 
 1. **Always pass `--json` when reading state.** `pm project ls`, `pm project status`, `pm pool ls`, `pm repo ls`, `pm agent ls`, `pm check`, and the `pm project wt` plan-output commands all support `--json`. Use it for any inspection — the human-readable output uses tree/table rendering meant for terminals.
 2. **Don't edit symlinks under `~/.projects/<name>/` by hand.** Always go through `pm project wt create | attach | detach | delete`. Hand-edits desync the project's `.pm.db` and the pool.
-3. **Don't `git init` or commit inside a project directory.** Projects are not git repos; they're folders of symlinks. Run git commands inside the worktree (e.g. `~/.projects/foo/universe/`), not the project root.
+3. **Don't `git init` or commit inside a project directory.** Projects are not git repos; they're folders of symlinks. Run git commands inside the worktree (e.g. `~/.projects/foo/frontend/`), not the project root.
 4. **`pm cd` only works if the zsh wrapper is sourced.** It needs `source <pm install>/integrations/pm-cd.zsh` in the user's zshrc. Without the wrapper, `pm cd` prints help. Use `pm cd --print <proj> [<wt>]` if you just need the path for scripting.
 5. **Use `pm check --fix` to repair drift**, never manual surgery on symlinks or the pool db.
 6. **Don't create projects or worktrees** unless the user asked. `pm project create` and `pm project wt create` are durable, user-visible state.
@@ -89,19 +89,19 @@ When you detach a worktree the symlink disappears but the slot stays in the pool
 ### Starting a new project
 
 ```bash
-pm project create my-feature --wt universe,runtime
+pm project create my-feature --wt frontend,backend
 pm cd my-feature                  # land in ~/.projects/my-feature
 pm project status my-feature --json
 ```
 
-`--wt universe,runtime` claims a slot per repo. To name worktrees explicitly: `--wt main:universe,svc:runtime`.
+`--wt frontend,backend` claims a slot per repo. To name worktrees explicitly: `--wt main:frontend,svc:backend`.
 
 ### Switching projects / worktrees
 
 ```bash
 pm project ls --json              # inspect first
 pm cd other-project               # to project root
-pm cd other-project universe      # straight to a specific worktree
+pm cd other-project frontend      # straight to a specific worktree
 ```
 
 `pm cd` without arguments isn't valid — always pass at least the project name.
@@ -109,17 +109,17 @@ pm cd other-project universe      # straight to a specific worktree
 ### Adding a worktree to an existing project
 
 ```bash
-pm project wt create universe -p my-feature
+pm project wt create frontend -p my-feature
 # Inferred project from cwd:
-cd ~/.projects/my-feature && pm project wt create runtime
+cd ~/.projects/my-feature && pm project wt create backend
 ```
 
 ### Detach / re-attach (parking a slot without losing the branch)
 
 ```bash
-pm project wt detach -p my-feature --wt universe       # symlink gone, slot warm in pool
-pm pool ls universe --json                             # confirm slot is FREE
-pm project wt attach -p my-feature --wt universe       # reclaim same slot if free
+pm project wt detach -p my-feature --wt frontend       # symlink gone, slot warm in pool
+pm pool ls frontend --json                             # confirm slot is FREE
+pm project wt attach -p my-feature --wt frontend       # reclaim same slot if free
 ```
 
 Detach preserves the branch (saved in `.pm.db`); attach restores it.
@@ -173,7 +173,7 @@ pm stacker ls --json     # see the pm-stacker-workflow skill
 | Footgun | What happens | Right move |
 |---|---|---|
 | Editing symlinks under `~/.projects/<n>/` by hand | Project `.pm.db` and pool drift | `pm project wt {attach,detach,delete}`, then `pm check --fix` |
-| `git init` or committing inside a project root | The project becomes a broken pseudo-repo | Run git inside the worktree (e.g. `~/.projects/p/universe/`), never the project root |
+| `git init` or committing inside a project root | The project becomes a broken pseudo-repo | Run git inside the worktree (e.g. `~/.projects/p/frontend/`), never the project root |
 | Detach refuses with "uncommitted changes" or "in-progress operation" | Slot has dirty state or a paused stacker op | Resolve in the worktree first (commit/stash, or `pm stacker continue`/`abort`) |
 | `pm cd` prints help instead of cd'ing | The zsh wrapper isn't sourced | Source `<install>/integrations/pm-cd.zsh` in zshrc; or use `pm cd --print` for the path |
 | `PoolExhaustedError` on create/attach | No free slots for that repo and the pool can't grow on demand | `pm pool add <repo>` to mint a slot, or `pm project wt detach` an unused worktree to free one |
@@ -188,7 +188,7 @@ pm stacker ls --json     # see the pm-stacker-workflow skill
   {
     "project": "my-feature",
     "worktrees": [
-      {"project": "my-feature", "wt": "universe", "repo": "universe",
+      {"project": "my-feature", "wt": "frontend", "repo": "frontend",
        "branch": "stack/foo", "status": "attached"}
     ]
   }

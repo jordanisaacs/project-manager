@@ -1,10 +1,9 @@
 """Tests for the `pr_state` cache.
 
-Mirrors universe gitstack's `StackItem.pr` model: the URL (and state) of
-a created PR is persisted for the branch and re-used on subsequent runs
-instead of re-searching GitHub. Lives in the `pr_state` table rather
-than on `tracked_branches` so PR metadata stays orthogonal to stack
-state.
+The URL (and state) of a created PR is persisted for the branch and
+re-used on subsequent runs instead of re-searching GitHub. Lives in
+the `pr_state` table rather than on `tracked_branches` so PR metadata
+stays orthogonal to stack state.
 """
 from __future__ import annotations
 

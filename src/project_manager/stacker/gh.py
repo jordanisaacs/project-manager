@@ -38,8 +38,8 @@ class CreatePRRequest:
     body_file: Path
     draft: bool
     # When `head_repo` is set and differs from `repo`, the PR is created via
-    # GraphQL so that cross-repo same-owner forks (e.g. databricks-eng/universe
-    # ← databricks-eng/universe-dev) work. `gh pr create` cannot do this:
+    # GraphQL so that cross-repo same-owner forks (e.g. acme/widgets ←
+    # acme/widgets-dev) work. `gh pr create` cannot do this:
     # https://github.com/cli/cli/issues/10093
     head_repo: str | None = None
 
@@ -105,9 +105,8 @@ def create_pr(request: CreatePRRequest) -> str:
 def _create_pr_rest(request: CreatePRRequest) -> str:
     """Create a cross-fork same-owner PR via the REST API.
 
-    Matches how universe's `ci/gitstack` does it (octocrab: `pulls.create(...)
-    .head_repo(repo)`): the REST field `head_repo` is what `gh pr create`
-    never exposes. Pass it and GitHub resolves the head branch on that repo.
+    The REST field `head_repo` is what `gh pr create` never exposes —
+    pass it directly and GitHub resolves the head branch on that repo.
     """
     assert request.head_repo is not None
     cmd = [
@@ -144,9 +143,8 @@ def parse_pr_url(url: str) -> tuple[str, str, int] | None:
 def search_prs(query: str) -> list[PullRequest]:
     """Search PRs via the GitHub GraphQL `search` endpoint.
 
-    Same path universe gitstack uses (`octocrab_client.rs:171-225`):
-    `gh pr list --search` is REST-backed and misses cross-fork same-owner
-    PRs; GraphQL search does not. Query format mirrors universe's:
+    `gh pr list --search` is REST-backed and misses cross-fork
+    same-owner PRs; GraphQL search does not. Query format:
     `repo:{owner}/{repo} head:{branch} is:pr is:open`.
     """
     graphql_query = (
@@ -183,11 +181,10 @@ def _graphql_pr(node: dict) -> PullRequest:
 def view_pr(url: str) -> PullRequest | None:
     """Fetch the current state of a PR by URL. None if the PR can't be found.
 
-    Stacker caches PR URLs on `tracked_branches` (mirroring universe
-    gitstack's `StackItem.pr`) and calls this on subsequent runs instead
-    of re-running a search. Uses REST `GET /repos/{o}/{r}/pulls/{n}` so
-    the fetch is a single round-trip by known ID — no dependency on
-    GitHub's search index propagation.
+    Stacker caches PR URLs on `tracked_branches` and calls this on
+    subsequent runs instead of re-running a search. Uses REST
+    `GET /repos/{o}/{r}/pulls/{n}` so the fetch is a single round-trip
+    by known ID — no dependency on GitHub's search index propagation.
     """
     parsed = parse_pr_url(url)
     if parsed is None:

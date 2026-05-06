@@ -116,7 +116,7 @@ master                                    (untracked root)
 ### Start a new stack
 
 ```bash
-cd ~/.projects/my-proj/universe       # land in a pm worktree
+cd ~/.projects/my-proj/frontend       # land in a pm worktree
 pm stacker ls --json                  # see what's already tracked
 pm stacker create --branch stack/feature-a --on master
 # ... edit code ...
@@ -242,19 +242,19 @@ Each branch entry includes the fields needed to plan an action:
   "current_branch": "stack/feature-b",
   "branches": [
     {
-      "repo_name": "universe",
+      "repo_name": "frontend",
       "branch": "stack/feature-a",
-      "parent_repo_name": "universe",
+      "parent_repo_name": "frontend",
       "parent_branch": "master",
       "is_root": true,
-      "pr_url": "https://github.com/databricks-eng/universe/pull/12345",
+      "pr_url": "https://github.com/acme/frontend/pull/12345",
       "merged": false,
       "status": "synced",
       "needs_sync": false,
       "ahead_of_remote": 0,
       "commit_count": 1,
       "children": [
-        {"repo_name": "universe", "branch": "stack/feature-b", ...}
+        {"repo_name": "frontend", "branch": "stack/feature-b", ...}
       ]
     }
   ]
