@@ -749,6 +749,53 @@ Scope must be `(<chosen> . nil)' so the CLI runs with `--project
       (should (equal captured-scope (cons "alpha" nil)))
       (should (equal captured-args (list "alpha" nil nil)))))
 
+  (ert-deftest pm-test--project-dispatch-sessions-uses-bound-project ()
+    "`l' (\"sessions\") in `pm--project-dispatch-menu' must list sessions
+for the project the transient was set up with (`(transient-scope)'),
+not whatever project happens to contain `default-directory'.
+
+Repro of the live symptom \"project-scoped agent session list won't
+use that project (sometimes)\":
+
+  1. user is in a buffer under project alpha.
+  2. opens `pm-project-dispatch' with a prefix arg, picks beta.
+     The transient is set up with `:scope' = beta's path.
+  3. presses `l' to list beta's sessions.
+
+The current wiring `(\"l\" \"sessions\" pm-agent-list-current-project)'
+in `pm--project-dispatch-menu' ignores the bound project:
+`pm-agent-list-current-project' looks at `pm-status--project' and
+`(pm--container-of default-directory)', neither of which carries
+the transient scope.  In step 3 it sees alpha (the original
+buffer's container) and silently lists alpha's sessions.
+
+Every other project-dispatch suffix (status, wt-create, wt-attach,
+agent-launch, …) already reads `(pm--ds-container-name)' /
+`(transient-scope)' for exactly this reason — see the comment
+\"The bound project travels through the transient via `:scope'…\"
+at the top of `pm-transient.el'.  This suffix was the one
+oversight."
+    (pm-test--with-fixture root
+      (let ((captured-project 'unset)
+            (default-directory (concat root "alpha/a/"))
+            (beta-path (file-name-as-directory (concat root "beta"))))
+        (cl-letf (((symbol-function 'pm--agent-ls)
+                   (lambda (project _all _limit cb)
+                     (setq captured-project project)
+                     (funcall cb '())))
+                  ((symbol-function 'pop-to-buffer) #'identity)
+                  ((symbol-function 'pm-section-set-window-margin) #'ignore)
+                  ((symbol-function 'transient-scope)
+                   (lambda (&optional _) beta-path))
+                  ((symbol-function 'pm--read-project)
+                   (lambda (&rest _)
+                     (error "must not prompt — scope is bound to beta"))))
+          (unwind-protect
+              (call-interactively #'pm-agent-list-current-project)
+            (when-let ((buf (get-buffer "*pm-agent-ls*")))
+              (kill-buffer buf))))
+        (should (equal captured-project "beta")))))
+
   (ert-deftest pm-test--agent-list-render-shows-rows-after-refresh ()
     "The agent-list buffer must show session rows after refresh.
 

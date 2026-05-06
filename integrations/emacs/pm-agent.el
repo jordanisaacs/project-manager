@@ -382,17 +382,29 @@ project to scope to."
 
 ;;;###autoload
 (defun pm-agent-list-current-project ()
-  "Open `pm-agent-list' scoped to the current pm project."
+  "Open `pm-agent-list' scoped to the current pm project.
+
+\"Current\" is resolved in priority order:
+  1. The transient scope (`(transient-scope)') — so this also
+     works as a `pm-project-dispatch' suffix.  By the time a
+     suffix runs, `default-directory' has reverted to the
+     original buffer (potentially a different project, or none),
+     so the bound project must come from the transient prefix.
+  2. `pm-status--project' — set in `*pm-status: <name>*' buffers.
+  3. The pm container that owns `default-directory'.
+  4. A prompt, when none of the above identify a project."
   (interactive)
-  (let ((name
-         (cond
-          ((bound-and-true-p pm-status--project) pm-status--project)
-          ((pm--container-of default-directory)
-           (file-name-nondirectory
-            (directory-file-name
-             (pm--container-of default-directory))))
-          (t (pm--read-project "Sessions for: ")))))
-    (pm-agent-list name nil)))
+  (cl-flet ((container-name (path)
+              (when-let ((c (and path (pm--container-of path))))
+                (file-name-nondirectory (directory-file-name c)))))
+    (let ((name
+           (or (container-name (and (fboundp 'transient-scope)
+                                    (transient-scope)))
+               (and (bound-and-true-p pm-status--project)
+                    pm-status--project)
+               (container-name default-directory)
+               (pm--read-project "Sessions for: "))))
+      (pm-agent-list name nil))))
 
 (provide 'pm-agent)
 
