@@ -28,26 +28,27 @@ def ancestor_chain(ctx: StackerCtx, tracked: TrackedBranch) -> list[TrackedBranc
 
 
 def lineage(ctx: StackerCtx, tracked: TrackedBranch) -> list[TrackedBranch]:
-    """Return tracked ancestors root-first + `tracked` + descendants toposorted.
+    """Return the full connected component containing `tracked`, parent-before-child.
+
+    Walks up through tracked parents to the topmost-tracked ancestor
+    (the first one whose parent is untracked, typically trunk), then
+    toposorts the entire subtree under that root. In a linear stack
+    that's the same as `ancestors + tracked + descendants_of_tracked`;
+    in a multi-arm stack the result also includes every sibling/cousin
+    arm reachable through any tracked edge.
 
     Used as the `-c`/`--current` scope for sync/push/ls and as the
-    component for PR-body rendering. Ancestors stop at the first
-    untracked parent (matching `ancestor_chain`'s termination).
+    component for PR-body rendering — every consumer wants the whole
+    stack, not just the spine through the target. (`--only` is the
+    escape hatch for "this branch only.")
     """
-    ancestors: list[TrackedBranch] = []
-    current = tracked
+    root = tracked
     while True:
-        parent = ctx.db.get_branch(current.parent_repo_name, current.parent_branch)
+        parent = ctx.db.get_branch(root.parent_repo_name, root.parent_branch)
         if not parent:
             break
-        ancestors.append(parent)
-        current = parent
-    ancestors.reverse()
-    return [
-        *ancestors,
-        tracked,
-        *toposorted_descendants(ctx, tracked.repo_name, tracked.branch),
-    ]
+        root = parent
+    return [root, *toposorted_descendants(ctx, root.repo_name, root.branch)]
 
 
 def toposorted_all(ctx: StackerCtx, repo_name: str) -> list[TrackedBranch]:
@@ -108,10 +109,14 @@ def resolve_scope(
     """Resolve scope flags into an ordered branch list.
 
     Order is parent-before-child, safe to sync/push sequentially:
-    `lineage` for scope="current", `toposorted_all` for scope="all".
-    `only` short-circuits to just the target. `skip_ancestors` /
-    `skip_descendants` trim the walk. `from_branch` drops entries
-    before that branch in the resolved list.
+    `lineage` (the full connected component) for scope="current",
+    `toposorted_all` for scope="all". `only` short-circuits to just
+    the target. `skip_ancestors` / `skip_descendants` are applied
+    *structurally* — using the ancestor chain and descendant subtree
+    of target — so a multi-arm component still drops the correct
+    branches even though target sits between sibling arms in the
+    toposort. `from_branch` drops entries before that branch in the
+    resolved list.
     """
     if spec.only:
         tracked = require_tracked(
@@ -126,11 +131,20 @@ def resolve_scope(
     target = require_tracked(
         ctx, SelectorTarget(repo_name=repo_name, branch=target_branch)
     )
-    lineage_list = lineage(ctx, target)
-    target_index = next(i for i, b in enumerate(lineage_list) if b.branch == target.branch)
-    start = target_index if spec.skip_ancestors else 0
-    end = target_index + 1 if spec.skip_descendants else len(lineage_list)
-    resolved = lineage_list[start:end]
+    component = lineage(ctx, target)
+    drop: set[str] = set()
+    if spec.skip_ancestors:
+        # ancestor_chain returns root → … → target inclusive; drop
+        # everything before target (target itself stays in the walk).
+        drop.update(
+            b.branch for b in ancestor_chain(ctx, target) if b.branch != target.branch
+        )
+    if spec.skip_descendants:
+        drop.update(
+            b.branch
+            for b in toposorted_descendants(ctx, target.repo_name, target.branch)
+        )
+    resolved = [b for b in component if b.branch not in drop]
     if spec.from_branch:
         resolved = _drop_until(resolved, spec.from_branch)
     return resolved

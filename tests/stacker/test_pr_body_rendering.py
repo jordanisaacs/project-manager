@@ -13,12 +13,14 @@ from pathlib import Path
 import pytest
 
 from project_manager.paths import Paths
+from project_manager.pool import add as add_mod
 from project_manager.pool import slot as slot_mod
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker.db import StackerDB
 from project_manager.stacker.models import (
     ParentLocator,
     PushOptions,
+    ScopeSpec,
     SelectorTarget,
     WorktreeInit,
 )
@@ -687,3 +689,168 @@ def test_second_push_preserves_user_edits_to_template_filled_body(
     assert "Filled in by the human, must not be clobbered." in final_b
     assert "<!-- stacker:begin -->" in final_b
     assert "<!-- stacker:end -->" in final_b
+
+
+def _build_multi_arm_stack(
+    pm_env: Paths,
+    service: StackerService,
+    stacker_repo: tuple[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> str:
+    """Build a 5-branch multi-arm stack and return the repo name.
+
+    Shape:
+
+        main
+          └── feature-a
+               ├── feature-b1
+               │    └── feature-c1
+               └── feature-b2
+                    └── feature-c2
+    """
+    repo_name, repo_path = stacker_repo
+    slots = [add_mod.add(pm_env, repo_name) for _ in range(5)]
+    slot_a, slot_b1, slot_c1, slot_b2, slot_c2 = slots
+
+    _build_branch(repo_path, slot_a.path, "feature-a", "main", ("A\n", "A: first"))
+    _setup_fake_upstream(slot_a.path, "feature-a")
+    service.init_adopt_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=slot_a.path,
+            branch="feature-a",
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
+    )
+
+    for branch, parent, slot, content in (
+        ("feature-b1", "feature-a", slot_b1, ("B1\n", "B1: arm-1 mid")),
+        ("feature-c1", "feature-b1", slot_c1, ("C1\n", "C1: arm-1 leaf")),
+        ("feature-b2", "feature-a", slot_b2, ("B2\n", "B2: arm-2 mid")),
+        ("feature-c2", "feature-b2", slot_c2, ("C2\n", "C2: arm-2 leaf")),
+    ):
+        _build_branch(repo_path, slot.path, branch, parent, content)
+        _setup_fake_upstream(slot.path, branch)
+        service.init_adopt_branch(
+            WorktreeInit(
+                repo_name=repo_name,
+                worktree_path=slot.path,
+                branch=branch,
+                parent=ParentLocator(repo_name=repo_name, branch=parent),
+            )
+        )
+
+    monkeypatch.setattr(ops_worktree, "run_single_pp", lambda *_a, **_kw: True)
+    _set_config(service, repo_name, "repo-pr")
+    return repo_name
+
+
+def test_push_from_one_arm_pushes_full_multi_arm_stack(
+    pm_env: Paths,
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default-scope push from one arm must push every branch in the component.
+
+    `pm stacker push <branch>` (no `--only`) currently resolves scope to
+    `lineage(target)` — ancestors → target → descendants-of-target —
+    so a push from `feature-c1` walks `[feature-a, feature-b1, feature-c1]`
+    and never touches the b2/c2 arm. The user-visible effect: PRs for the
+    sibling arm don't exist after the push, and the description tree on
+    the b1 arm's PRs silently omits the b2/c2 work that's already been
+    landed locally.
+
+    Expected: a default push of any branch in a multi-arm stack pushes
+    the entire connected component. `--only` is the escape hatch for
+    "just this branch."
+    """
+    repo_name = _build_multi_arm_stack(pm_env, service, stacker_repo, monkeypatch)
+
+    service.push(
+        SelectorTarget(repo_name=repo_name, branch="feature-c1"),
+        PushOptions(draft=True),
+    )
+
+    pushed_branches = {request.head.rsplit(":", 1)[-1] for request, _ in backend.created}
+    expected = {"feature-a", "feature-b1", "feature-c1", "feature-b2", "feature-c2"}
+    assert pushed_branches == expected, (
+        f"default push from feature-c1 should create PRs for the full "
+        f"multi-arm stack {expected}, but only created PRs for {pushed_branches}; "
+        f"the b2/c2 arm was left behind because lineage(feature-c1) doesn't "
+        f"include sibling arms"
+    )
+
+
+def test_push_only_from_one_arm_skips_other_arms(
+    pm_env: Paths,
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`--only` is the escape hatch — single-branch push must not fan out.
+
+    Companion to `test_push_from_one_arm_pushes_full_multi_arm_stack`:
+    expanding default-scope push to walk the full multi-arm component
+    must not regress `--only`'s contract of touching exactly one branch.
+    """
+    repo_name = _build_multi_arm_stack(pm_env, service, stacker_repo, monkeypatch)
+
+    service.push(
+        SelectorTarget(repo_name=repo_name, branch="feature-c1"),
+        PushOptions(draft=True, scope=ScopeSpec(only=True)),
+    )
+
+    pushed_branches = {request.head.rsplit(":", 1)[-1] for request, _ in backend.created}
+    assert pushed_branches == {"feature-c1"}, (
+        f"--only push from feature-c1 must push only feature-c1, "
+        f"got {pushed_branches}"
+    )
+
+
+def test_push_from_one_arm_renders_full_tree_in_stack_block(
+    pm_env: Paths,
+    service: StackerService,
+    backend: RecordingPRBackend,
+    stacker_repo: tuple[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every PR body's stack block must link to every branch in the component.
+
+    Once default-scope push covers the full multi-arm stack, the
+    rendering step also has to walk the component (not just
+    `lineage(target)`) so each PR's description tree shows all five
+    branches linked to their PRs. Otherwise the b2/c2 nodes either
+    drop out entirely or render as bare branch names with no PR link.
+    """
+    repo_name = _build_multi_arm_stack(pm_env, service, stacker_repo, monkeypatch)
+
+    service.push(
+        SelectorTarget(repo_name=repo_name, branch="feature-c1"),
+        PushOptions(draft=True),
+    )
+
+    final = {req.number: body for (req, body) in backend.edited if body is not None}
+    pr_numbers_by_branch = {
+        head: pr.number for (_repo, head), pr in backend.prs_by_head.items()
+    }
+    expected_branches = (
+        "feature-a", "feature-b1", "feature-c1", "feature-b2", "feature-c2",
+    )
+    for branch in expected_branches:
+        assert branch in pr_numbers_by_branch, (
+            f"expected a PR for {branch} after default-scope multi-arm push"
+        )
+
+    for branch in expected_branches:
+        pr_number = pr_numbers_by_branch[branch]
+        body = final.get(pr_number)
+        assert body is not None, f"PR #{pr_number} ({branch}) was not refreshed"
+        for other in expected_branches:
+            link = f"](https://github.com/acme/widgets/pull/{pr_numbers_by_branch[other]})"
+            assert link in body, (
+                f"PR #{pr_number} ({branch}) stack block missing link to "
+                f"{other} (expected substring {link!r}); body:\n{body}"
+            )

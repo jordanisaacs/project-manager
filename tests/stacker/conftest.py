@@ -103,15 +103,16 @@ class TrackedStack:
     commits: dict[str, str]
 
 
-@pytest.fixture
-def tracked_stack(
+def _build_chain(
     pm_env: Paths,
     stacker_repo: tuple[str, Path],
+    chain: list[tuple[str, str]],
+    project_label: str,
 ) -> TrackedStack:
+    """Init each `(branch, parent)` in `chain` order in its own claimed slot."""
     repo_name, repo_path = stacker_repo
     service = StackerService(StackerDB(pm_env.stacker_db()), pm_env)
     pooldb = PoolDB(pm_env.pool_db())
-    chain = [("a", "main"), ("b", "a"), ("c", "b"), ("d", "c")]
     slots: dict[str, slot_mod.Slot] = {}
     commits: dict[str, str] = {}
     for branch, parent in chain:
@@ -120,7 +121,7 @@ def tracked_stack(
         # fixture want production-accurate ownership so ops_slot.claim cannot
         # grab a slot that already has a branch checked out.
         pooldb.claim(
-            repo_name, slot.uuid, Owner(OwnerKind.PROJECT, "tracked-stack"),
+            repo_name, slot.uuid, Owner(OwnerKind.PROJECT, project_label),
         )
         slots[branch] = slot
         service.init_new_branch(
@@ -139,4 +140,49 @@ def tracked_stack(
         repo_path=repo_path,
         slots=slots,
         commits=commits,
+    )
+
+
+@pytest.fixture
+def tracked_stack(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+) -> TrackedStack:
+    return _build_chain(
+        pm_env,
+        stacker_repo,
+        [("a", "main"), ("b", "a"), ("c", "b"), ("d", "c")],
+        "tracked-stack",
+    )
+
+
+@pytest.fixture
+def multi_arm_stack(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+) -> TrackedStack:
+    """Five-branch multi-arm stack:
+
+        main
+          └── a
+               ├── b1
+               │    └── c1
+               └── b2
+                    └── c2
+
+    Use as a starting shape for tests that need to exercise default-scope
+    walks across sibling arms (push, sync, ls all default to "current"
+    scope, which must cover the whole connected component).
+    """
+    return _build_chain(
+        pm_env,
+        stacker_repo,
+        [
+            ("a", "main"),
+            ("b1", "a"),
+            ("c1", "b1"),
+            ("b2", "a"),
+            ("c2", "b2"),
+        ],
+        "multi-arm-stack",
     )

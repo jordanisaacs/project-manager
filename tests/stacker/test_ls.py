@@ -38,6 +38,28 @@ def test_ls_current_scope_narrows_to_lineage(
         assert name in out
 
 
+def test_ls_current_scope_includes_full_multi_arm_component(
+    multi_arm_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`ls --scope current` from one arm must show every branch in the component.
+
+    Tree: `main → a → {b1 → c1; b2 → c2}`. Running `ls -c` from `c1`
+    must list both arms — `b2` and `c2` are siblings/cousins of the
+    spine, not unrelated branches. Currently they're hidden because
+    `lineage(c1)` only walks ancestors plus descendants-of-c1, so the
+    "current stack" view drops half the work the user has in flight.
+    """
+    out = service.ls_text(
+        multi_arm_stack.repo_name,
+        LsOptions(target_branch="c1", scope="current"),
+    )
+    for name in ("a", "b1", "c1", "b2", "c2"):
+        assert name in out, (
+            f"`ls -c` from c1 should include {name}; got:\n{out}"
+        )
+
+
 def test_ls_details_none_strips_suffixes(
     tracked_stack: TrackedStack,
     service: StackerService,

@@ -256,6 +256,58 @@ def test_sync_from_branch_rejects_out_of_scope(
         service.sync(target, ScopeSpec(scope="current", from_branch="nonexistent"))
 
 
+def test_sync_default_scope_walks_full_multi_arm_component(
+    multi_arm_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """Default-scope sync from one arm must walk every branch in the component.
+
+    Tree: `main → a → {b1 → c1; b2 → c2}`. Advancing main forces every
+    branch to need a cherry-pick onto its parent's new tip. Sync from
+    `c1` must cascade through the whole component so b2 and c2 also
+    catch up — currently they're left behind because `lineage(c1)`
+    skips sibling arms.
+    """
+    repo_name = multi_arm_stack.repo_name
+    new_main = commit_file(
+        multi_arm_stack.repo_path, "shared.txt", "v\n", "main: advance",
+    )
+
+    result = service.sync(SelectorTarget(repo_name=repo_name, branch="c1"))
+    assert "Sync complete." in result, result
+
+    a = service.db.get_branch(repo_name, "a")
+    assert a is not None
+    assert a.managed_base_commit == new_main, (
+        f"a.managed_base should advance to new main {new_main[:8]}, "
+        f"got {a.managed_base_commit[:8]}"
+    )
+    a_head = stacker_git.rev_parse(multi_arm_stack.slots["a"].path, "a")
+
+    for branch, parent_head in (
+        ("b1", a_head),
+        ("b2", a_head),
+    ):
+        row = service.db.get_branch(repo_name, branch)
+        assert row is not None
+        assert row.managed_base_commit == parent_head, (
+            f"{branch}.managed_base should advance to new {row.parent_branch} tip "
+            f"{parent_head[:8]}, got {row.managed_base_commit[:8]} — "
+            f"sibling arm was left out of the default-scope sync"
+        )
+
+    for branch, parent in (("c1", "b1"), ("c2", "b2")):
+        parent_head = stacker_git.rev_parse(
+            multi_arm_stack.slots[parent].path, parent,
+        )
+        row = service.db.get_branch(repo_name, branch)
+        assert row is not None
+        assert row.managed_base_commit == parent_head, (
+            f"{branch}.managed_base should advance to new {parent} tip "
+            f"{parent_head[:8]}, got {row.managed_base_commit[:8]}"
+        )
+
+
 # --- --hard flag and parent-rewrite detection -------------------------------
 
 
