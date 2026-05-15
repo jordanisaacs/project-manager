@@ -22,9 +22,14 @@ if TYPE_CHECKING:
 
 
 IconKind = Literal[
-    "local_only", "no_pr", "pr_open", "merged",
-    "pr_draft", "pr_approved",
-    "pr_open_comments", "pr_approved_comments",
+    "local_only",
+    "no_pr",
+    "pr_open",
+    "merged",
+    "pr_draft",
+    "pr_approved",
+    "pr_open_comments",
+    "pr_approved_comments",
 ]
 
 _SYMBOL: dict[IconKind, str] = {
@@ -44,7 +49,7 @@ _ICON_COLOR: dict[IconKind, str | None] = {
     "local_only": None,
     "no_pr": None,
     "pr_open": None,
-    "merged": None,                 # merged styled via dim/strike, not fg
+    "merged": None,  # merged styled via dim/strike, not fg
     "pr_draft": None,
     "pr_open_comments": "red",
     "pr_approved": "green",
@@ -63,10 +68,16 @@ _ICON_MEANING: dict[IconKind, str] = {
 }
 
 _OFFLINE_ICONS: tuple[IconKind, ...] = (
-    "local_only", "no_pr", "pr_open", "merged",
+    "local_only",
+    "no_pr",
+    "pr_open",
+    "merged",
 )
 _ONLINE_ICONS: tuple[IconKind, ...] = (
-    "pr_draft", "pr_open_comments", "pr_approved", "pr_approved_comments",
+    "pr_draft",
+    "pr_open_comments",
+    "pr_approved",
+    "pr_approved_comments",
 )
 
 
@@ -432,8 +443,7 @@ def ensure_syncable(path: Path) -> None:
         )
     if git.cherry_pick_in_progress(path):
         raise git.GitError(
-            f"Cherry-pick already in progress in {path}. Resolve it before starting "
-            "another sync."
+            f"Cherry-pick already in progress in {path}. Resolve it before starting another sync."
         )
 
 
@@ -449,15 +459,12 @@ def render_legend(render_opts: RenderOptions) -> str:
     lines: list[str] = ["Legend:"]
     if render_opts.icons:
         lines.append(
-            "  Icons:   " + "  ".join(
-                _legend_icon(kind, render_opts) for kind in _OFFLINE_ICONS
-            ),
+            "  Icons:   " + "  ".join(_legend_icon(kind, render_opts) for kind in _OFFLINE_ICONS),
         )
         if render_opts.online:
             lines.append(
-                "  Online:  " + "  ".join(
-                    _legend_icon(kind, render_opts) for kind in _ONLINE_ICONS
-                ),
+                "  Online:  "
+                + "  ".join(_legend_icon(kind, render_opts) for kind in _ONLINE_ICONS),
             )
     lines.append("  Group:   (!) needs sync   (N↑) N unpushed   (!N↑) both")
     lines.append("  Suffix:  [LOCAL]  [REMOTE]  [<url>]  [MERGED]  [dirty]")

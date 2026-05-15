@@ -28,9 +28,7 @@ from .fakes import RecordingPRBackend
         ("org-100@github.com:acme/widgets.git", "acme/widgets"),
     ],
 )
-def test_parse_github_slug_handles_common_url_forms(
-    url: str, expected: str
-) -> None:
+def test_parse_github_slug_handles_common_url_forms(url: str, expected: str) -> None:
     assert parse_github_slug(url) == expected
 
 
@@ -53,7 +51,9 @@ def test_head_repo_derives_slug_from_branch_upstream(
     scenario), `_head_repo_for_branch` returns that fork's slug."""
     repo_name, _ = stacker_repo
     service = StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=RecordingPRBackend(),
     )
     slot = three_slots[0]
     tracked = service.init_new_branch(
@@ -67,12 +67,18 @@ def test_head_repo_derives_slug_from_branch_upstream(
 
     # Config-only setup — stacker reads branch.X.remote/merge directly.
     stacker_git.git(
-        slot.path, "remote", "add", "forkremote",
+        slot.path,
+        "remote",
+        "add",
+        "forkremote",
         "git@github.com:acme/widgets-dev.git",
     )
     stacker_git.git(slot.path, "config", "branch.feature-fork.remote", "forkremote")
     stacker_git.git(
-        slot.path, "config", "branch.feature-fork.merge", "refs/heads/feature-fork",
+        slot.path,
+        "config",
+        "branch.feature-fork.merge",
+        "refs/heads/feature-fork",
     )
 
     assert head_repo_for_branch(service.ctx, tracked) == "acme/widgets-dev"
@@ -85,7 +91,9 @@ def test_head_repo_returns_none_when_no_upstream(
 ) -> None:
     repo_name, _ = stacker_repo
     service = StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=RecordingPRBackend(),
     )
     tracked = service.init_new_branch(
         WorktreeInit(

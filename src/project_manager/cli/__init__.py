@@ -5,6 +5,7 @@ side effects. `main()` is the console-script target; it funnels
 `ProjectError` / `CommandError` (the two error types commands raise) into
 the standard `pm: <msg>` stderr line and exit code 2.
 """
+
 import sys
 
 from project_manager.agent.cli import agent_app as _agent_app  # noqa: F401

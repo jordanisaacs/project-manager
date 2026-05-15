@@ -50,9 +50,7 @@ def test_acquire_checks_out_branch_and_release_detaches(
 
     ops_slot.release(pooldb, acquired)
     assert pooldb.get_owner(acquired.repo, acquired.uuid) is None
-    head_result = stacker_git.git(
-        acquired.path, "symbolic-ref", "-q", "HEAD", check=False
-    )
+    head_result = stacker_git.git(acquired.path, "symbolic-ref", "-q", "HEAD", check=False)
     assert head_result.returncode != 0  # detached
 
 
@@ -93,7 +91,9 @@ def test_acquire_releases_claim_when_checkout_interrupted(
     real_git = stacker_git.git
 
     def _interrupt_checkout(
-        path: Path, *args: str, check: bool = True,
+        path: Path,
+        *args: str,
+        check: bool = True,
     ) -> object:
         if args[:1] == ("checkout",):
             raise KeyboardInterrupt
@@ -184,9 +184,7 @@ def test_claim_waits_for_stacker_slot_to_release(
         pm_env,
         pooldb,
         repo_name,
-        wait=ops_slot.WaitOptions(
-            timeout_s=5.0, poll_interval_s=0.05, progress=notices.append
-        ),
+        wait=ops_slot.WaitOptions(timeout_s=5.0, poll_interval_s=0.05, progress=notices.append),
     )
     assert claimed.uuid == held.uuid
     assert any("Waiting" in n for n in notices)

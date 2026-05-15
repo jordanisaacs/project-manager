@@ -48,9 +48,7 @@ def cleanliness_blocker(slot_path: Path) -> str | None:
     if git.has_tracked_changes(slot_path):
         return "has uncommitted changes; commit or discard them before detaching"
     if git.has_untracked_files(slot_path):
-        return (
-            "has untracked files; commit, remove, or gitignore them before detaching"
-        )
+        return "has untracked files; commit, remove, or gitignore them before detaching"
     return None
 
 
@@ -65,7 +63,9 @@ def park_to_default(slot_path: Path, main_repo: Path) -> None:
 
 
 def _branch_in_use_elsewhere(
-    main_repo: Path, branch: str, except_path: Path,
+    main_repo: Path,
+    branch: str,
+    except_path: Path,
 ) -> Path | None:
     except_resolved = except_path.resolve()
     for info in git.worktree_list(main_repo):

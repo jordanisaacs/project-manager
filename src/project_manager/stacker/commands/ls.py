@@ -1,4 +1,5 @@
 """`pm stacker ls`."""
+
 from typing import Annotated, Literal
 
 from cyclopts import Parameter

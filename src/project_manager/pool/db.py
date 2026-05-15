@@ -72,8 +72,7 @@ class PoolDB:
     def get_owner(self, repo: str, uuid: str) -> Owner | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT owner_kind, owner_id FROM slot_ownership "
-                "WHERE repo = ? AND uuid = ?",
+                "SELECT owner_kind, owner_id FROM slot_ownership WHERE repo = ? AND uuid = ?",
                 (repo, uuid),
             ).fetchone()
         if row is None:
@@ -83,9 +82,7 @@ class PoolDB:
     def is_free(self, repo: str, uuid: str) -> bool:
         return self.get_owner(repo, uuid) is None
 
-    def list_owned(
-        self, repo: str | None = None
-    ) -> list[tuple[str, str, Owner]]:
+    def list_owned(self, repo: str | None = None) -> list[tuple[str, str, Owner]]:
         query = "SELECT repo, uuid, owner_kind, owner_id FROM slot_ownership"
         params: tuple[str, ...] = ()
         if repo is not None:

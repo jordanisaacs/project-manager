@@ -47,9 +47,7 @@ def ls(paths: Paths, repo: str | None) -> list[PoolRow]:
     else:
         if not paths.worktrees.is_dir():
             return []
-        repos = sorted(
-            entry.name for entry in paths.worktrees.iterdir() if entry.is_dir()
-        )
+        repos = sorted(entry.name for entry in paths.worktrees.iterdir() if entry.is_dir())
 
     pooldb = PoolDB(paths.pool_db())
     rows: list[PoolRow] = []

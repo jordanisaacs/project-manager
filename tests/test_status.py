@@ -107,9 +107,7 @@ def test_status_is_scoped_to_one_project(pm_env: Paths) -> None:
     alpha = status_mod.status(pm_env, "alpha")
     beta = status_mod.status(pm_env, "beta")
     assert any(r.finding.kind == check_mod.Kind.ORPHAN_OWNER for r in alpha.worktrees)
-    assert all(
-        r.finding.kind != check_mod.Kind.ORPHAN_OWNER for r in beta.worktrees
-    )
+    assert all(r.finding.kind != check_mod.Kind.ORPHAN_OWNER for r in beta.worktrees)
 
 
 def test_status_orphan_owner_row_has_no_wt(pm_env: Paths) -> None:

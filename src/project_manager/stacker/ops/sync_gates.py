@@ -21,6 +21,7 @@ performs the reset-to-parent when the merged-PR check returned
 driver can call them without re-introducing the
 ops/sync ↔ cherry_pick/driver import cycle.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -107,7 +108,10 @@ def merged_collapse_action(
         return None
     parent_tree = git.tree_of(repo_path, parent_tip)
     merged_tree = git.merge_tree_write_tree(
-        repo_path, tracked.managed_base_commit, parent_tip, branch_head,
+        repo_path,
+        tracked.managed_base_commit,
+        parent_tip,
+        branch_head,
     )
     squash_present = merged_tree is not None and merged_tree == parent_tree
     if squash_present or allow_drop_merge:
@@ -140,7 +144,10 @@ def run_branch_gates(
     if err is not None and not options.allow_drop_parent_modifications:
         raise git.GitError(err)
     err = merged_collapse_action(
-        ctx, tracked, slot_path, allow_drop_merge=options.allow_drop_merge,
+        ctx,
+        tracked,
+        slot_path,
+        allow_drop_merge=options.allow_drop_merge,
     )
     if isinstance(err, str) and err != "collapse":
         raise git.GitError(err)
@@ -162,7 +169,10 @@ def collapse_if_merged(
     already raised.
     """
     decision = merged_collapse_action(
-        ctx, tracked, slot_path, allow_drop_merge=allow_drop_merge,
+        ctx,
+        tracked,
+        slot_path,
+        allow_drop_merge=allow_drop_merge,
     )
     if decision != "collapse":
         return None
@@ -181,10 +191,5 @@ def collapse_if_merged(
         )
     )
     child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
-    parent_label = selectors.selector_for(
-        tracked.parent_repo_name, tracked.parent_branch
-    )
-    return (
-        f"Collapsed {child_label} to {parent_label} at "
-        f"{fmt.short(parent_tip)} (merged PR)."
-    )
+    parent_label = selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)
+    return f"Collapsed {child_label} to {parent_label} at {fmt.short(parent_tip)} (merged PR)."

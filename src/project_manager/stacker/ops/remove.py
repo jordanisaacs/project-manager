@@ -49,9 +49,7 @@ def remove(
     return "Removed:\n  " + "\n  ".join(removed)
 
 
-def _remove_one(
-    ctx: StackerCtx, tracked: TrackedBranch, *, keep_branch: bool
-) -> None:
+def _remove_one(ctx: StackerCtx, tracked: TrackedBranch, *, keep_branch: bool) -> None:
     """Untrack `tracked`, reparent children, optionally delete the git branch."""
     for child in ctx.db.get_children(tracked.repo_name, tracked.branch):
         ctx.db.upsert_branch(

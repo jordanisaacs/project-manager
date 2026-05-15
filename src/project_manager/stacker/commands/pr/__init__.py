@@ -1,4 +1,5 @@
 """`pm stacker pr` — sub-app for inspecting/repairing the cached PR association."""
+
 from cyclopts import App
 
 from project_manager.stacker.commands import stacker_app

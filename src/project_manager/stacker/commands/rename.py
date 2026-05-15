@@ -1,4 +1,5 @@
 """`pm stacker rename`."""
+
 from project_manager import config
 from project_manager.cli._shared import RepoFlag
 
@@ -13,6 +14,4 @@ def rename(new_name: str, *, branch: str | None = None, flag: RepoFlag = RepoFla
     """
     paths = config.load()
     svc = _common.service(paths)
-    return _common.emit(
-        svc.rename(_common.target(flag.repo, branch, paths), new_name)
-    )
+    return _common.emit(svc.rename(_common.target(flag.repo, branch, paths), new_name))

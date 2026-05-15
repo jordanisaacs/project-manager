@@ -1,4 +1,5 @@
 """`pm project wt detach`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter

@@ -89,9 +89,7 @@ def toposorted_all(ctx: StackerCtx, repo_name: str) -> list[TrackedBranch]:
     return ordered
 
 
-def toposorted_descendants(
-    ctx: StackerCtx, repo_name: str, branch: str
-) -> list[TrackedBranch]:
+def toposorted_descendants(ctx: StackerCtx, repo_name: str, branch: str) -> list[TrackedBranch]:
     ordered: list[TrackedBranch] = []
 
     def walk(parent_branch: str) -> None:
@@ -104,7 +102,10 @@ def toposorted_descendants(
 
 
 def resolve_scope(
-    ctx: StackerCtx, repo_name: str, target_branch: str, spec: ScopeSpec,
+    ctx: StackerCtx,
+    repo_name: str,
+    target_branch: str,
+    spec: ScopeSpec,
 ) -> list[TrackedBranch]:
     """Resolve scope flags into an ordered branch list.
 
@@ -119,31 +120,22 @@ def resolve_scope(
     resolved list.
     """
     if spec.only:
-        tracked = require_tracked(
-            ctx, SelectorTarget(repo_name=repo_name, branch=target_branch)
-        )
+        tracked = require_tracked(ctx, SelectorTarget(repo_name=repo_name, branch=target_branch))
         return [tracked]
     if spec.scope == "all":
         resolved = toposorted_all(ctx, repo_name)
         if spec.from_branch:
             resolved = _drop_until(resolved, spec.from_branch)
         return resolved
-    target = require_tracked(
-        ctx, SelectorTarget(repo_name=repo_name, branch=target_branch)
-    )
+    target = require_tracked(ctx, SelectorTarget(repo_name=repo_name, branch=target_branch))
     component = lineage(ctx, target)
     drop: set[str] = set()
     if spec.skip_ancestors:
         # ancestor_chain returns root → … → target inclusive; drop
         # everything before target (target itself stays in the walk).
-        drop.update(
-            b.branch for b in ancestor_chain(ctx, target) if b.branch != target.branch
-        )
+        drop.update(b.branch for b in ancestor_chain(ctx, target) if b.branch != target.branch)
     if spec.skip_descendants:
-        drop.update(
-            b.branch
-            for b in toposorted_descendants(ctx, target.repo_name, target.branch)
-        )
+        drop.update(b.branch for b in toposorted_descendants(ctx, target.repo_name, target.branch))
     resolved = [b for b in component if b.branch not in drop]
     if spec.from_branch:
         resolved = _drop_until(resolved, spec.from_branch)

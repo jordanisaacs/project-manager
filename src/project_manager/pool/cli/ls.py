@@ -1,4 +1,5 @@
 """`pm pool ls`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -20,8 +21,10 @@ def ls(
     paths = config.load()
     rows = ls_mod.ls(paths, repo)
     render.emit_sections(
-        ls_mod.sections(rows), ls_mod.COLUMNS,
+        ls_mod.sections(rows),
+        ls_mod.COLUMNS,
         group=render.GroupColumn("Repo"),
-        as_json=json, shape=render.JsonShape("repo", "slots"),
+        as_json=json,
+        shape=render.JsonShape("repo", "slots"),
     )
     return 0

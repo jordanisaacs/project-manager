@@ -24,21 +24,32 @@ def init_main_repo(path: Path, branch: str = "main") -> None:
     )
     subprocess.run(["git", "-C", str(path), "config", "user.name", "test"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True,
+        ["git", "-C", str(path), "config", "commit.gpgsign", "false"],
+        check=True,
     )
     (path / "README.md").write_text("# test\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True)
     subprocess.run(
         [
-            "git", "-C", str(path), "-c", "core.hooksPath=/dev/null",
-            "commit", "-q", "-m", "init",
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-q",
+            "-m",
+            "init",
         ],
         check=True,
     )
 
 
 def git_pool(
-    paths: Paths, repo: str, n: int = 1, branch: str = "main",
+    paths: Paths,
+    repo: str,
+    n: int = 1,
+    branch: str = "main",
 ) -> list[Slot]:
     """Ensure `paths.repo(repo)` is a real git repo and mint `n` worktree slots."""
     main = paths.repo(repo)

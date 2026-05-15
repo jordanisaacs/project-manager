@@ -58,10 +58,14 @@ _HELP = "↑/↓ · j/k · ^P/^N · Enter to select · Esc to cancel"
 # a flat decode (esc-peek + CSI parse + lookup) with only the escape
 # branch as control flow.
 _SINGLE_BYTE_KEYS: dict[bytes, Key] = {
-    b"\r": Key.ENTER, b"\n": Key.ENTER,
-    b"k": Key.UP,     b"\x10": Key.UP,   # k / Ctrl-P
-    b"j": Key.DOWN,   b"\x0e": Key.DOWN, # j / Ctrl-N
-    b"q": Key.CANCEL, b"\x03": Key.CANCEL,  # q / Ctrl-C byte
+    b"\r": Key.ENTER,
+    b"\n": Key.ENTER,
+    b"k": Key.UP,
+    b"\x10": Key.UP,  # k / Ctrl-P
+    b"j": Key.DOWN,
+    b"\x0e": Key.DOWN,  # j / Ctrl-N
+    b"q": Key.CANCEL,
+    b"\x03": Key.CANCEL,  # q / Ctrl-C byte
 }
 
 
@@ -116,9 +120,7 @@ def pick(
     """
     materialized = [(s.title, list(s.rows)) for s in sections]
     flat_rows: list[T] = [r for _, rs in materialized for r in rs]
-    selectable_idxs = [
-        i for i, r in enumerate(flat_rows) if is_selectable(r)
-    ]
+    selectable_idxs = [i for i, r in enumerate(flat_rows) if is_selectable(r)]
     if not selectable_idxs:
         return None
     if not sys.stdin.isatty():
@@ -130,9 +132,14 @@ def pick(
         # → KeyboardInterrupt, which we catch below as a cancel.
         tty.setcbreak(fd)
         return _pick_core(
-            materialized, flat_rows, selectable_idxs, columns,
-            group=group, header=header,
-            read_key=_read_key_stdin, console=Console(stderr=True),
+            materialized,
+            flat_rows,
+            selectable_idxs,
+            columns,
+            group=group,
+            header=header,
+            read_key=_read_key_stdin,
+            console=Console(stderr=True),
         )
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
@@ -159,7 +166,9 @@ def _pick_core(  # noqa: PLR0913  — 8 args but all narrowly typed + keyword-on
 
     def frame() -> RenderableType:
         table = render.build_sections_table(
-            materialized, columns, group=group,
+            materialized,
+            columns,
+            group=group,
             selected_flat_idx=selectable_idxs[cur],
         )
         parts: list[RenderableType] = []
@@ -174,7 +183,10 @@ def _pick_core(  # noqa: PLR0913  — 8 args but all narrowly typed + keyword-on
     # transient=True wipes the picker on exit so the shell scrollback stays
     # clean whether we cancel or exec into an agent immediately after.
     with Live(
-        frame(), console=console, auto_refresh=False, transient=True,
+        frame(),
+        console=console,
+        auto_refresh=False,
+        transient=True,
     ) as live:
         while True:
             try:

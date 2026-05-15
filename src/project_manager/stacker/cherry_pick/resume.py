@@ -27,11 +27,7 @@ def resume_cherry_pick(
         fmt.record(ctx, logs, f"Continuing cherry-pick in {label}")
         proc = git.cherry_pick_continue(slot_path)
         if proc.returncode != 0:
-            message = (
-                proc.stderr.strip()
-                or proc.stdout.strip()
-                or "cherry-pick --continue failed"
-            )
+            message = proc.stderr.strip() or proc.stdout.strip() or "cherry-pick --continue failed"
             if empty.is_empty_cherry_pick_message(message):
                 return resume_skip_empty(ctx, op, slot_path, logs, label)
             op.status = "paused"
@@ -66,9 +62,7 @@ def resume_skip_empty(
     skip = git.cherry_pick_skip(slot_path)
     if skip.returncode != 0:
         op.status = "paused"
-        op.error_message = (
-            skip.stderr.strip() or skip.stdout.strip() or "cherry-pick --skip failed"
-        )
+        op.error_message = skip.stderr.strip() or skip.stdout.strip() or "cherry-pick --skip failed"
         ctx.db.put_operation(op)
         return driver.failure_message(op, slot_path)
     fmt.record(ctx, logs, f"Skipping empty cherry-pick {fmt.short(commit)} on {label}")
@@ -99,9 +93,7 @@ def cherry_pick_remaining(
         if proc.returncode != 0:
             op.status = "paused"
             op.error_message = (
-                proc.stderr.strip()
-                or proc.stdout.strip()
-                or f"cherry-pick failed for {commit}"
+                proc.stderr.strip() or proc.stdout.strip() or f"cherry-pick failed for {commit}"
             )
             ctx.db.put_operation(op)
             return driver.failure_message(op, slot_path)

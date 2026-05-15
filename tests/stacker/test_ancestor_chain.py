@@ -25,7 +25,9 @@ def service(
     stacker_repo: tuple[str, Path],  # noqa: ARG001 (creates demo repo)
 ) -> StackerService:
     return StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=RecordingPRBackend(),
     )
 
 
@@ -95,9 +97,7 @@ def test_pr_walks_ancestors_root_first(
         return True
 
     @contextlib.contextmanager
-    def _fake_acquired_for_op(
-        _ctx: object, _repo: str, _branch: str
-    ) -> Iterator[_Acquired]:
+    def _fake_acquired_for_op(_ctx: object, _repo: str, _branch: str) -> Iterator[_Acquired]:
         yield _Acquired(path=service.paths.repo("demo"), ops=None)
 
     def _fake_create(
@@ -107,8 +107,12 @@ def test_pr_walks_ancestors_root_first(
         return gh.PullRequest(
             number=len(pr_order),
             url=f"https://gh/fake/pull/{len(pr_order)}",
-            title="fake", body="", head_ref_name=tb.branch,
-            base_ref_name="main", state="OPEN", is_draft=False,
+            title="fake",
+            body="",
+            head_ref_name=tb.branch,
+            base_ref_name="main",
+            state="OPEN",
+            is_draft=False,
         )
 
     # push_ops uses namespace imports (`worktree.run_single_pp`) so patching the

@@ -22,6 +22,7 @@ home, used by non-CLI callers too); the repo resolvers live here because
 they're pure CLI-layer helpers — they only translate `flag → name` and
 have no other consumers.
 """
+
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -75,9 +76,7 @@ def resolve_repo(repo: str | None, paths: Paths) -> str:
         return repo
     here = locate.slot_for_cwd(paths)
     if here is None:
-        raise git.GitError(
-            "pass --repo <name> (or run from inside a pm worktree slot)."
-        )
+        raise git.GitError("pass --repo <name> (or run from inside a pm worktree slot).")
     return here.repo_name
 
 

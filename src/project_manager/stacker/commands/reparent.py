@@ -1,4 +1,5 @@
 """`pm stacker reparent`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -45,8 +46,7 @@ def reparent(
         bool,
         Parameter(
             negative="",
-            help="skip the PR-state refresh; use cached pr_state for the "
-            "merged-PR collapse.",
+            help="skip the PR-state refresh; use cached pr_state for the merged-PR collapse.",
         ),
     ] = False,
 ) -> int:
@@ -60,23 +60,19 @@ def reparent(
     if continue_ or abort:
         if allow_drop_parent_modifications or allow_drop_merge or offline:
             raise git.GitError(
-                "--allow-drop-* and --offline cannot be combined with "
-                "--continue or --abort.",
+                "--allow-drop-* and --offline cannot be combined with --continue or --abort.",
             )
         if continue_:
-            return _common.emit(
-                svc.continue_operation(_common.resolve_repo(flag.repo, paths))
-            )
-        return _common.emit(
-            svc.abort_operation(_common.resolve_repo(flag.repo, paths))
-        )
+            return _common.emit(svc.continue_operation(_common.resolve_repo(flag.repo, paths)))
+        return _common.emit(svc.abort_operation(_common.resolve_repo(flag.repo, paths)))
     if not new_parent:
         raise ValueError("reparent requires <new-parent> (or --continue / --abort).")
     target = _common.target(flag.repo, branch, paths)
     parent = _common.resolve_on_spec(paths, target.repo_name, new_parent)
     return _common.emit(
         svc.reparent(
-            target, parent,
+            target,
+            parent,
             options=SyncOptions(
                 allow_drop_parent_modifications=allow_drop_parent_modifications,
                 allow_drop_merge=allow_drop_merge,

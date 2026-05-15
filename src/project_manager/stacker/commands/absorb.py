@@ -1,4 +1,5 @@
 """`pm stacker absorb`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter

@@ -27,7 +27,8 @@ def test_pm_config_overrides(pm_env) -> None:
 
 
 def test_display_defaults_to_none_timezone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("PM_CONFIG", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -37,7 +38,8 @@ def test_display_defaults_to_none_timezone(
 
 
 def test_display_reads_configured_timezone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(
@@ -51,7 +53,8 @@ def test_display_reads_configured_timezone(
 
 
 def test_display_rejects_unknown_timezone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(
@@ -65,7 +68,8 @@ def test_display_rejects_unknown_timezone(
 
 
 def test_agents_defaults_to_empty_commands(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("PM_CONFIG", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -74,13 +78,14 @@ def test_agents_defaults_to_empty_commands(
 
 
 def test_agents_reads_commands_table(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(
         '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
         'stacker_root = "/s"\n'
-        '[agents.commands]\n'
+        "[agents.commands]\n"
         'claude = "isaac"\n'
         'codex = "isaac codex --"\n'
         'cursor = "agent"\n',
@@ -95,13 +100,14 @@ def test_agents_reads_commands_table(
 
 
 def test_agents_rejects_non_string_command(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(
         '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
         'stacker_root = "/s"\n'
-        '[agents.commands]\nclaude = 42\n',
+        "[agents.commands]\nclaude = 42\n",
     )
     monkeypatch.setenv("PM_CONFIG", str(cfg))
     with pytest.raises(ValueError, match=r"\[agents\.commands\]\.claude"):
@@ -109,7 +115,8 @@ def test_agents_rejects_non_string_command(
 
 
 def test_concurrency_defaults(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("PM_CONFIG", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
@@ -118,26 +125,28 @@ def test_concurrency_defaults(
 
 
 def test_concurrency_reads_limit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(
         '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
         'stacker_root = "/s"\n'
-        '[concurrency]\nlimit = 4\n',
+        "[concurrency]\nlimit = 4\n",
     )
     monkeypatch.setenv("PM_CONFIG", str(cfg))
     assert config.concurrency().limit == 4
 
 
 def test_concurrency_rejects_non_positive_limit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(
         '[paths]\nrepos = "/r"\nworktrees = "/w"\nprojects = "/p"\n'
         'stacker_root = "/s"\n'
-        '[concurrency]\nlimit = 0\n',
+        "[concurrency]\nlimit = 0\n",
     )
     monkeypatch.setenv("PM_CONFIG", str(cfg))
     with pytest.raises(ValueError, match="positive integer"):
@@ -145,7 +154,8 @@ def test_concurrency_rejects_non_positive_limit(
 
 
 def test_concurrency_rejects_non_integer_limit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     cfg = tmp_path / "pm.toml"
     cfg.write_text(

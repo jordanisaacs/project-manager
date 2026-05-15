@@ -14,10 +14,10 @@ from project_manager.subprocess_run import run_async
 @dataclass(frozen=True)
 class RepoRow:
     repo: str
-    branch: str | None        # None == detached
+    branch: str | None  # None == detached
     dirty: bool
-    submodules: str           # "none" | "synced" | "stale"
-    ahead: int | None         # None if no upstream or detached
+    submodules: str  # "none" | "synced" | "stale"
+    ahead: int | None  # None if no upstream or detached
     behind: int | None
     has_upstream: bool
     # Tri-state: True = local @{u} matches the remote tip (nothing to fetch);
@@ -120,10 +120,7 @@ async def _row(
         t_trunk = tg.create_task(_resolve_trunk(repo_dir, configured_trunk))
         t_upstream = tg.create_task(git_async.upstream_ref(repo_dir))
         t_ab = tg.create_task(git_async.ahead_behind(repo_dir))
-        t_fn = (
-            tg.create_task(_check_fetch_needed(repo_dir, t_upstream))
-            if check_remote else None
-        )
+        t_fn = tg.create_task(_check_fetch_needed(repo_dir, t_upstream)) if check_remote else None
     branch = t_branch.result()
     upstream = t_upstream.result()
     has_upstream = branch is not None and upstream is not None
@@ -268,9 +265,7 @@ async def _ls_async(paths: Paths, *, check_remote: bool) -> list[RepoRow]:
     async with asyncio.TaskGroup() as tg:
         tasks = [
             tg.create_task(
-                _row(paths, r,
-                     check_remote=check_remote,
-                     configured_trunk=trunks.get(r)),
+                _row(paths, r, check_remote=check_remote, configured_trunk=trunks.get(r)),
             )
             for r in repos
         ]

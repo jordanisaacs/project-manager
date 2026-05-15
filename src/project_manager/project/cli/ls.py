@@ -1,4 +1,5 @@
 """`pm project ls`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -20,8 +21,10 @@ def ls(
     rows = ls_mod.ls(paths)
     projects = [name for name, _ in discovery.list_project_dbs(paths)]
     render.emit_sections(
-        ls_mod.sections(rows, projects), ls_mod.COLUMNS,
+        ls_mod.sections(rows, projects),
+        ls_mod.COLUMNS,
         group=render.GroupColumn("Project"),
-        as_json=json, shape=render.JsonShape("project", "worktrees"),
+        as_json=json,
+        shape=render.JsonShape("project", "worktrees"),
     )
     return 0

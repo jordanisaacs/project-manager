@@ -23,8 +23,7 @@ async def current_branch(repo: Path) -> str | None:
 
 async def is_dirty(repo: Path) -> bool:
     result = await run_async(
-        ["git", "-C", str(repo), "status", "--porcelain",
-         "--ignore-submodules=all"],
+        ["git", "-C", str(repo), "status", "--porcelain", "--ignore-submodules=all"],
         check=False,
     )
     return bool(result.stdout.strip())
@@ -32,8 +31,7 @@ async def is_dirty(repo: Path) -> bool:
 
 async def upstream_ref(repo: Path) -> str | None:
     result = await run_async(
-        ["git", "-C", str(repo), "rev-parse", "--abbrev-ref",
-         "--symbolic-full-name", "@{u}"],
+        ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         check=False,
     )
     if result.returncode != 0:
@@ -62,8 +60,7 @@ _AHEAD_BEHIND_FIELDS = 2
 
 async def ahead_behind(repo: Path) -> tuple[int, int] | None:
     result = await run_async(
-        ["git", "-C", str(repo), "rev-list", "--left-right", "--count",
-         "@{u}...HEAD"],
+        ["git", "-C", str(repo), "rev-list", "--left-right", "--count", "@{u}...HEAD"],
         check=False,
     )
     if result.returncode != 0:
@@ -87,8 +84,7 @@ async def rev_parse(repo: Path, ref: str) -> str | None:
 
 async def branch_exists(repo: Path, branch: str) -> bool:
     result = await run_async(
-        ["git", "-C", str(repo), "rev-parse", "--verify", "-q",
-         f"refs/heads/{branch}"],
+        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", f"refs/heads/{branch}"],
         check=False,
     )
     return result.returncode == 0
@@ -96,8 +92,7 @@ async def branch_exists(repo: Path, branch: str) -> bool:
 
 async def origin_head_branch(repo: Path) -> str | None:
     result = await run_async(
-        ["git", "-C", str(repo), "symbolic-ref", "--short", "-q",
-         "refs/remotes/origin/HEAD"],
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
         check=False,
     )
     if result.returncode != 0:
@@ -105,7 +100,7 @@ async def origin_head_branch(repo: Path) -> str | None:
     ref = result.stdout.strip()
     prefix = "origin/"
     if ref.startswith(prefix):
-        return ref[len(prefix):] or None
+        return ref[len(prefix) :] or None
     return ref or None
 
 
@@ -123,8 +118,7 @@ async def remote_url(repo: Path, remote: str = "origin") -> str | None:
 async def remote_head_sha(repo: Path, branch: str) -> str | None:
     """Ask the remote for the current tip of `branch` without fetching."""
     result = await run_async(
-        ["git", "-C", str(repo), "ls-remote", "--heads", "origin",
-         f"refs/heads/{branch}"],
+        ["git", "-C", str(repo), "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
         check=False,
     )
     if result.returncode != 0:

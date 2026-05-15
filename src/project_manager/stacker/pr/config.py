@@ -50,10 +50,7 @@ def set_config(ctx: StackerCtx, repo_name: str, key: str, value: str) -> list[st
     notices: list[str] = []
     if key == config_schema.PR_MODE and value == "pr-pr":
         push_remote = push_remote_slug(ctx, repo_name)
-        target = (
-            ctx.db.get_config(repo_name, config_schema.PR_TARGET_REPO)
-            or push_remote
-        )
+        target = ctx.db.get_config(repo_name, config_schema.PR_TARGET_REPO) or push_remote
         if target != push_remote:
             raise git.GitError(
                 f"pr.mode=pr-pr requires pr.target-repo to equal the push "

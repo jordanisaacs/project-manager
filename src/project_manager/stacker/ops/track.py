@@ -41,9 +41,7 @@ def create_tracked_branch(
     if git.branch_exists(repo_path, branch):
         raise git.GitError(f"Branch {branch} already exists.")
     parent_head = git.rev_parse(repo_path, parent.branch)
-    start_point = (
-        git.rev_parse(repo_path, copy_from) if copy_from else parent_head
-    )
+    start_point = git.rev_parse(repo_path, copy_from) if copy_from else parent_head
     git.git(repo_path, "branch", branch, start_point)
     tracked = TrackedBranch(
         repo_name=repo_name,
@@ -58,9 +56,7 @@ def create_tracked_branch(
     return tracked
 
 
-def track(
-    ctx: StackerCtx, target: SelectorTarget, parent: ParentLocator
-) -> TrackedBranch:
+def track(ctx: StackerCtx, target: SelectorTarget, parent: ParentLocator) -> TrackedBranch:
     """Adopt an existing branch into stacker tracking.
 
     Slot resolution mirrors fresh `create` (`allow_branch_switch=True`) so

@@ -62,13 +62,9 @@ def head_ref_for_branch(
     return remote_branch
 
 
-def first_commit_text(
-    ctx: StackerCtx, tracked: TrackedBranch
-) -> tuple[str, str, Path]:
+def first_commit_text(ctx: StackerCtx, tracked: TrackedBranch) -> tuple[str, str, Path]:
     path = require_checked_out(ctx, tracked.repo_name, tracked.branch)
-    title, body = git.first_commit_title_and_body(
-        path, f"{tracked.managed_base_commit}..HEAD"
-    )
+    title, body = git.first_commit_title_and_body(path, f"{tracked.managed_base_commit}..HEAD")
     if not title:
         title = tracked.branch
     return title, body, path
@@ -101,7 +97,5 @@ def pr_base_for_current_branch(
     # parent's slot is already released by the time we resolve a child's
     # base, and pools with fewer slots than tracked branches always trip it.
     if not parent_pr.head_ref_name:
-        raise git.GitError(
-            f"Direct parent {parent_label} has an open PR but no head ref."
-        )
+        raise git.GitError(f"Direct parent {parent_label} has an open PR but no head ref.")
     return parent_pr.head_ref_name

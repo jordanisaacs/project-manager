@@ -54,7 +54,11 @@ class _CreateCtx:
 
 
 def _claim_any_free(
-    paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, retries: int = 3,
+    paths: Paths,
+    pooldb: PoolDB,
+    owner: Owner,
+    repo: str,
+    retries: int = 3,
 ) -> Slot:
     for _ in range(retries):
         free = slot_mod.free_slots(paths, pooldb, repo)
@@ -96,7 +100,9 @@ def _claim_one(
 
 
 def create(
-    paths: Paths, project: str, wts: list[tuple[str, str]],
+    paths: Paths,
+    project: str,
+    wts: list[tuple[str, str]],
 ) -> list[CreatedWt]:
     """Create a project (or add worktrees to an existing one).
 
@@ -123,9 +129,7 @@ def create(
             ctx = _CreateCtx(paths=paths, pooldb=pooldb, conn=conn)
             for wt, repo in wts:
                 s = _claim_one(ctx, project, wt, repo)
-                claimed.append(
-                    CreatedWt(wt=wt, repo=s.repo, uuid=s.uuid, path=s.path)
-                )
+                claimed.append(CreatedWt(wt=wt, repo=s.repo, uuid=s.uuid, path=s.path))
     except BaseException:
         for c in reversed(claimed):
             forward = paths.forward(project, c.wt)

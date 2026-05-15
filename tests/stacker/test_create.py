@@ -86,7 +86,8 @@ def test_create_tracked_branch_without_worktree_slot(
     """`--no-checkout` path: branch ref exists, no slot is claimed."""
     repo_name, repo_path = stacker_repo
     tracked = service.create_tracked_branch(
-        repo_name, "ghost-branch",
+        repo_name,
+        "ghost-branch",
         ParentLocator(repo_name=repo_name, branch="main"),
     )
     assert tracked.branch == "ghost-branch"
@@ -103,7 +104,8 @@ def test_create_tracked_branch_errors_when_branch_exists(
     stacker_git.git(repo_path, "branch", "existing", "main")
     with pytest.raises(stacker_git.GitError, match="already exists"):
         service.create_tracked_branch(
-            repo_name, "existing",
+            repo_name,
+            "existing",
             ParentLocator(repo_name=repo_name, branch="main"),
         )
 
@@ -148,6 +150,7 @@ def test_track_adopts_via_cwd_when_branch_unchecked_out(
     assert stacker_git.current_branch(here.path) == "feature-detached"
     # No claim taken on the cwd slot.
     from project_manager.pool.db import PoolDB
+
     assert PoolDB(pm_env.pool_db()).get_owner(here.repo, here.uuid) is None
 
 
@@ -173,9 +176,6 @@ def test_track_adopts_via_ops_slot_when_cwd_unsuitable(  # noqa: PLR0913 (fixtur
     assert tracked.parent_branch == "main"
     # An ops slot was claimed and the branch is now checked out there.
     pooldb = PoolDB(pm_env.pool_db())
-    claimed = [
-        s for s in three_slots
-        if pooldb.get_owner(s.repo, s.uuid) == OWNER_STACKER_OPS
-    ]
+    claimed = [s for s in three_slots if pooldb.get_owner(s.repo, s.uuid) == OWNER_STACKER_OPS]
     assert len(claimed) == 1
     assert stacker_git.current_branch(claimed[0].path) == "feature-orphan"

@@ -36,9 +36,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """
     tables = {
         row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
     if "worktrees" in tables:
         return
@@ -84,9 +82,7 @@ def remove_wt(conn: sqlite3.Connection, wt: str) -> None:
 
 
 def get_slot(conn: sqlite3.Connection, wt: str) -> str | None:
-    row = conn.execute(
-        "SELECT slot_uuid FROM worktrees WHERE name = ?", (wt,)
-    ).fetchone()
+    row = conn.execute("SELECT slot_uuid FROM worktrees WHERE name = ?", (wt,)).fetchone()
     return row[0] if row is not None else None
 
 

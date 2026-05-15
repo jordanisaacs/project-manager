@@ -38,22 +38,31 @@ def test_parse_agents_rejects_unknown() -> None:
 
 
 def _make_claude_session(
-    home: Path, cwd: Path, session_id: str, prompt: str, mtime: float,
+    home: Path,
+    cwd: Path,
+    session_id: str,
+    prompt: str,
+    mtime: float,
 ) -> None:
     import os
+
     encoded = str(cwd).replace("/", "-").replace(".", "-")
     session_dir = home / ".claude" / "projects" / encoded
     session_dir.mkdir(parents=True, exist_ok=True)
     f = session_dir / f"{session_id}.jsonl"
     f.write_text(
-        json.dumps({"type": "user", "message": {"role": "user",
-                                                "content": prompt}}) + "\n",
+        json.dumps({"type": "user", "message": {"role": "user", "content": prompt}}) + "\n",
     )
     os.utime(f, (mtime, mtime))
 
 
 def _make_codex_row(
-    home: Path, *, thread_id: str, cwd: str, title: str, updated_at: int,
+    home: Path,
+    *,
+    thread_id: str,
+    cwd: str,
+    title: str,
+    updated_at: int,
 ) -> None:
     db = home / ".codex" / "state_5.sqlite"
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +85,9 @@ def _make_codex_row(
 
 
 def test_ls_merges_and_sorts_across_sources(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just(["foo"]))
@@ -88,11 +99,18 @@ def test_ls_merges_and_sorts_across_sources(
     # Claude: older prompt, Codex: newer. Both must match the pm
     # project's owned paths via cwd = project_dir.
     _make_claude_session(
-        fake_home, project_dir, "claude-1", "old claude prompt", mtime=1000,
+        fake_home,
+        project_dir,
+        "claude-1",
+        "old claude prompt",
+        mtime=1000,
     )
     _make_codex_row(
-        fake_home, thread_id="codex-1", cwd=str(project_dir),
-        title="new codex title", updated_at=2000,
+        fake_home,
+        thread_id="codex-1",
+        cwd=str(project_dir),
+        title="new codex title",
+        updated_at=2000,
     )
 
     rows = asyncio.run(
@@ -104,7 +122,9 @@ def test_ls_merges_and_sorts_across_sources(
 
 
 def test_ls_limit_applies_after_merge(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just(["foo"]))
@@ -115,12 +135,19 @@ def test_ls_limit_applies_after_merge(
 
     for i in range(3):
         _make_claude_session(
-            fake_home, project_dir, f"c-{i}", f"cq{i}", mtime=100 + i,
+            fake_home,
+            project_dir,
+            f"c-{i}",
+            f"cq{i}",
+            mtime=100 + i,
         )
     for i in range(3):
         _make_codex_row(
-            fake_home, thread_id=f"x-{i}", cwd=str(project_dir),
-            title=f"xt{i}", updated_at=200 + i,
+            fake_home,
+            thread_id=f"x-{i}",
+            cwd=str(project_dir),
+            title=f"xt{i}",
+            updated_at=200 + i,
         )
     rows = asyncio.run(
         ls_mod.ls(pm_env, ["demo"], limit=2, agents=parse_agents(None)),
@@ -131,7 +158,9 @@ def test_ls_limit_applies_after_merge(
 
 
 def test_ls_emits_placeholder_row_for_project_with_no_sessions(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pm project with zero chats across all agents still gets a
     section — a single row where every data column is empty so the
@@ -158,7 +187,9 @@ def test_ls_emits_placeholder_row_for_project_with_no_sessions(
 
 
 def test_ls_propagates_exceptions_from_sources(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just(["foo"]))
@@ -173,16 +204,14 @@ def test_ls_propagates_exceptions_from_sources(
     with pytest.raises(BaseExceptionGroup) as exc_info:
         asyncio.run(ls_mod.ls(pm_env, ["demo"], 5, parse_agents(None)))
     assert any(
-        isinstance(e, RuntimeError) and "source fault" in str(e)
-        for e in exc_info.value.exceptions
-    ) or any(
-        isinstance(e, BaseExceptionGroup)
-        for e in exc_info.value.exceptions
-    )
+        isinstance(e, RuntimeError) and "source fault" in str(e) for e in exc_info.value.exceptions
+    ) or any(isinstance(e, BaseExceptionGroup) for e in exc_info.value.exceptions)
 
 
 def test_ls_runs_sources_concurrently(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each source sleeps for DELAY in a worker thread. With N sources
     fanned out concurrently, total wall time approaches DELAY, not
@@ -215,10 +244,13 @@ def test_ls_runs_sources_concurrently(
 
 
 def _prepare_resume_env(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
     """Create a pm project, fake $HOME, chdir inside it. Returns project_dir."""
     from project_manager.project import create as create_mod
+
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just(["foo"]))
     fake_home = tmp_path / "home"
@@ -247,23 +279,29 @@ class _TTYWrapper:
 
 def _force_tty(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys as _sys
+
     monkeypatch.setattr(_sys, "stdin", _TTYWrapper(_sys.stdin))
     monkeypatch.setattr(_sys, "stderr", _TTYWrapper(_sys.stderr))
 
 
 def test_resume_combined_with_json_fails_fast(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _prepare_resume_env(pm_env, tmp_path, monkeypatch)
     from project_manager import cli as cli_mod
+
     rc = cli_mod.main(["agent", "ls", "--resume", "--json"])
     assert rc == 2
     assert "--resume cannot be combined with --json" in capsys.readouterr().err
 
 
 def test_resume_requires_tty(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _prepare_resume_env(pm_env, tmp_path, monkeypatch)
@@ -271,18 +309,19 @@ def test_resume_requires_tty(
     class NonTTY:
         def isatty(self) -> bool:
             return False
+
     monkeypatch.setattr("sys.stdin", NonTTY())
     from project_manager import cli as cli_mod
+
     rc = cli_mod.main(["agent", "ls", "--resume"])
     assert rc == 2
-    assert (
-        "--resume requires an interactive terminal"
-        in capsys.readouterr().err
-    )
+    assert "--resume requires an interactive terminal" in capsys.readouterr().err
 
 
 def test_resume_empty_prints_note_and_exits_zero(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """No real sessions → placeholder-only rows; `_resume` short-circuits
@@ -292,18 +331,23 @@ def test_resume_empty_prints_note_and_exits_zero(
 
     # Ensure `tui.pick` isn't reached — loud failure if it is.
     from project_manager import tui
+
     def boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("picker should not run when no sessions exist")
+
     monkeypatch.setattr(tui, "pick", boom)
 
     from project_manager import cli as cli_mod
+
     rc = cli_mod.main(["agent", "ls", "--resume"])
     assert rc == 0
     assert "no sessions to resume" in capsys.readouterr().err
 
 
 def test_resume_cancel_path_exits_zero_without_exec(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Picker returns None (user hit Esc) → CLI returns 0, never calls
     `run_mod.run`, so no execvp happens."""
@@ -311,25 +355,32 @@ def test_resume_cancel_path_exits_zero_without_exec(
     _force_tty(monkeypatch)
     # Seed one real session so the empty-short-circuit doesn't fire.
     _make_codex_row(
-        tmp_path / "home", thread_id="c-1",
+        tmp_path / "home",
+        thread_id="c-1",
         cwd=str(pm_env.project("demo")),
-        title="t", updated_at=1000,
+        title="t",
+        updated_at=1000,
     )
     from project_manager import tui
     from project_manager.agent import run as run_mod
+
     monkeypatch.setattr(tui, "pick", lambda *_a, **_kw: None)
 
     def no_run(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("run should not be called on cancel")
+
     monkeypatch.setattr(run_mod, "run", no_run)
 
     from project_manager import cli as cli_mod
+
     rc = cli_mod.main(["agent", "ls", "--resume"])
     assert rc == 0
 
 
 def test_resume_happy_path_execs_with_agent_resume_args(
-    pm_env: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """On ENTER, CLI dispatches to `run_mod.run(agent, project, forwarded)`
     where `forwarded` is exactly what `resume_args` produces for that
@@ -338,9 +389,11 @@ def test_resume_happy_path_execs_with_agent_resume_args(
     _prepare_resume_env(pm_env, tmp_path, monkeypatch)
     _force_tty(monkeypatch)
     _make_codex_row(
-        tmp_path / "home", thread_id="thread-xyz",
+        tmp_path / "home",
+        thread_id="thread-xyz",
         cwd=str(pm_env.project("demo")),
-        title="resume me", updated_at=1000,
+        title="resume me",
+        updated_at=1000,
     )
 
     # Stub the picker to return the one codex row we seeded. Reach into
@@ -368,6 +421,7 @@ def test_resume_happy_path_execs_with_agent_resume_args(
     monkeypatch.setattr(run_mod, "run", fake_run)
 
     from project_manager import cli as cli_mod
+
     with pytest.raises(SystemExit):
         cli_mod.main(["agent", "ls", "--resume"])
 

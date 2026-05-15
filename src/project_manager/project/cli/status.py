@@ -1,4 +1,5 @@
 """`pm project status`."""
+
 import asyncio
 from typing import Annotated
 
@@ -35,8 +36,7 @@ def _parse_sections(raw: str | None) -> frozenset[StatusSection]:
     for p in pieces:
         if p not in valid:
             raise ValueError(
-                f"unknown section {p!r} — pick from "
-                f"{', '.join(sorted(valid))}",
+                f"unknown section {p!r} — pick from {', '.join(sorted(valid))}",
             )
         out.add(StatusSection(p))
     return frozenset(out)
@@ -129,7 +129,8 @@ def status(
         asyncio.run(
             agent_ls.ls(paths, [resolved], _SESSIONS_LIMIT, frozenset(REGISTRY)),
         )
-        if StatusSection.SESSIONS in selected else []
+        if StatusSection.SESSIONS in selected
+        else []
     )
     if json:
         _emit_json(ps, sessions_rows, selected)
@@ -139,8 +140,6 @@ def status(
     # for — a sessions-only call shouldn't fail the shell pipeline just
     # because some unrelated worktree is in DRIFT.
     if StatusSection.WORKTREES in selected:
-        non_healthy = [
-            r for r in ps.worktrees if r.finding.kind != check_mod.Kind.ACTIVE
-        ]
+        non_healthy = [r for r in ps.worktrees if r.finding.kind != check_mod.Kind.ACTIVE]
         return 1 if non_healthy else 0
     return 0

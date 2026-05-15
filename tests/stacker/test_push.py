@@ -1,4 +1,5 @@
 """Coverage for the scope-aware `push` command (force-push + PR refresh)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,11 +29,16 @@ from .fakes import RecordingPRBackend
 
 def _configure_upstreams(stack: TrackedStack) -> None:
     for branch, slot in stack.slots.items():
-        stacker_git.git(slot.path, "remote", "add", "origin-fake",
-                        "git@github.com:acme/widgets.git", check=False)
+        stacker_git.git(
+            slot.path,
+            "remote",
+            "add",
+            "origin-fake",
+            "git@github.com:acme/widgets.git",
+            check=False,
+        )
         stacker_git.git(slot.path, "config", f"branch.{branch}.remote", "origin-fake")
-        stacker_git.git(slot.path, "config", f"branch.{branch}.merge",
-                        f"refs/heads/{branch}")
+        stacker_git.git(slot.path, "config", f"branch.{branch}.merge", f"refs/heads/{branch}")
 
 
 @pytest.fixture
@@ -86,7 +92,8 @@ def test_push_skip_ancestors_drops_roots(
 ) -> None:
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
     push_service.push(
-        target, PushOptions(scope=ScopeSpec(skip_ancestors=True)),
+        target,
+        PushOptions(scope=ScopeSpec(skip_ancestors=True)),
     )
     heads = [req.head for req, _body in backend.created]
     assert heads == ["b", "c", "d"]
@@ -99,7 +106,8 @@ def test_push_skip_descendants_keeps_only_upper(
 ) -> None:
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
     push_service.push(
-        target, PushOptions(scope=ScopeSpec(skip_descendants=True)),
+        target,
+        PushOptions(scope=ScopeSpec(skip_descendants=True)),
     )
     heads = [req.head for req, _body in backend.created]
     assert heads == ["a", "b"]
@@ -163,11 +171,11 @@ def test_push_conflicting_draft_publish_errors(
 
 
 def _setup_fake_upstream(slot_path: Path, branch: str) -> None:
-    stacker_git.git(slot_path, "remote", "add", "origin-fake",
-                    "git@github.com:acme/widgets.git", check=False)
+    stacker_git.git(
+        slot_path, "remote", "add", "origin-fake", "git@github.com:acme/widgets.git", check=False
+    )
     stacker_git.git(slot_path, "config", f"branch.{branch}.remote", "origin-fake")
-    stacker_git.git(slot_path, "config", f"branch.{branch}.merge",
-                    f"refs/heads/{branch}")
+    stacker_git.git(slot_path, "config", f"branch.{branch}.merge", f"refs/heads/{branch}")
 
 
 def _seed_unattached_branch(
@@ -188,10 +196,14 @@ def _seed_unattached_branch(
     svc = StackerService(StackerDB(pm_env.stacker_db()), pm_env, pr_backend=backend)
     svc.db.set_config(repo_name, "pr.mode", "repo-pr")
     svc.db.set_config(repo_name, "pr.trunk", "main")
-    svc.init_new_branch(WorktreeInit(
-        repo_name=repo_name, worktree_path=init_slot.path, branch=branch,
-        parent=ParentLocator(repo_name=repo_name, branch="main"),
-    ))
+    svc.init_new_branch(
+        WorktreeInit(
+            repo_name=repo_name,
+            worktree_path=init_slot.path,
+            branch=branch,
+            parent=ParentLocator(repo_name=repo_name, branch="main"),
+        )
+    )
     commit_file(init_slot.path, f"{branch}.txt", f"{branch}\n", f"{branch}: first commit")
     _setup_fake_upstream(init_slot.path, branch)
     stacker_git.git(init_slot.path, "checkout", "--detach", "HEAD")
@@ -222,12 +234,11 @@ def test_push_releases_target_slot_after_clean_completion(
     svc.push(SelectorTarget(repo_name=repo_name, branch="feature-x"), PushOptions(draft=True))
 
     stacker_owned = [
-        uuid for repo, uuid, owner in pooldb.list_owned(repo_name)
+        uuid
+        for repo, uuid, owner in pooldb.list_owned(repo_name)
         if owner.kind == OwnerKind.STACKER and repo == repo_name
     ]
-    assert stacker_owned == [], (
-        f"clean push left a stacker-owned slot leaked: {stacker_owned}"
-    )
+    assert stacker_owned == [], f"clean push left a stacker-owned slot leaked: {stacker_owned}"
 
 
 def test_push_holds_target_slot_when_worktree_dirty(
@@ -258,7 +269,8 @@ def test_push_holds_target_slot_when_worktree_dirty(
     svc.push(SelectorTarget(repo_name=repo_name, branch="feature-y"), PushOptions(draft=True))
 
     stacker_owned = [
-        uuid for repo, uuid, owner in pooldb.list_owned(repo_name)
+        uuid
+        for repo, uuid, owner in pooldb.list_owned(repo_name)
         if owner.kind == OwnerKind.STACKER and repo == repo_name
     ]
     assert len(stacker_owned) == 1, (
@@ -308,10 +320,12 @@ def test_push_target_already_merged_short_circuits(
     """Pushing a merged target reports the merge and creates no PRs."""
     _mark_merged(push_service, tracked_stack.repo_name, "b", number=11)
     target = SelectorTarget(
-        repo_name=tracked_stack.repo_name, branch="b",
+        repo_name=tracked_stack.repo_name,
+        branch="b",
     )
     result = push_service.push(
-        target, PushOptions(scope=ScopeSpec(only=True)),
+        target,
+        PushOptions(scope=ScopeSpec(only=True)),
     )
     assert backend.created == []
     assert "already merged" in result
@@ -384,9 +398,7 @@ def test_push_preserves_manual_title_edit(
     )
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="a")
     push_service.push(target, PushOptions(scope=ScopeSpec(only=True)))
-    title_syncs = [
-        req for req, _body in backend.edited if req.title is not None
-    ]
+    title_syncs = [req for req, _body in backend.edited if req.title is not None]
     assert title_syncs == [], (
         f"manually-edited title should be preserved, got title_syncs={title_syncs}"
     )
@@ -409,9 +421,5 @@ def test_push_resyncs_title_when_existing_matches_bottom_subject(
     )
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="a")
     push_service.push(target, PushOptions(scope=ScopeSpec(only=True)))
-    title_syncs = [
-        req.title for req, _body in backend.edited if req.title is not None
-    ]
+    title_syncs = [req.title for req, _body in backend.edited if req.title is not None]
     assert title_syncs == ["a: first commit"]
-
-

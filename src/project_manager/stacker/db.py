@@ -410,8 +410,7 @@ def _migrate_operations_gate_flags(conn: sqlite3.Connection) -> None:
         )
     if "allow_drop_merge" not in cols:
         conn.execute(
-            "ALTER TABLE operations "
-            "ADD COLUMN allow_drop_merge INTEGER NOT NULL DEFAULT 0"
+            "ALTER TABLE operations ADD COLUMN allow_drop_merge INTEGER NOT NULL DEFAULT 0"
         )
 
 
@@ -433,5 +432,3 @@ def _row_to_operation(row: sqlite3.Row) -> OperationState:
         allow_drop_parent_modifications=bool(row["allow_drop_parent_modifications"]),
         allow_drop_merge=bool(row["allow_drop_merge"]),
     )
-
-

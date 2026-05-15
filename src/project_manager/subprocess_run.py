@@ -47,8 +47,12 @@ def run(
     cwd_str = str(cwd) if cwd is not None else None
 
     proc = subprocess.Popen(
-        cmd, cwd=cwd_str, env=full_env, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cmd,
+        cwd=cwd_str,
+        env=full_env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     cmd_name = Path(cmd[0]).name if cmd else ""
     pid = proc.pid
@@ -147,7 +151,8 @@ async def run_async(
 
 
 def format_command_failure(
-    cmd: list[str], proc: subprocess.CompletedProcess[str],
+    cmd: list[str],
+    proc: subprocess.CompletedProcess[str],
 ) -> str:
     header = f"command failed: {' '.join(cmd)}"
     events: list[SubprocessLogLine] | None = getattr(proc, "log_events", None)

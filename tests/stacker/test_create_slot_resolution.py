@@ -136,7 +136,9 @@ def test_resolve_slot_skips_cwd_when_on_other_live_branch(
     cwd_slot = three_slots[0]
     # Project-claim cwd_slot so ops_slot.claim cannot grab it.
     pooldb.claim(
-        cwd_slot.repo, cwd_slot.uuid, Owner(OwnerKind.PROJECT, "user-work"),
+        cwd_slot.repo,
+        cwd_slot.uuid,
+        Owner(OwnerKind.PROJECT, "user-work"),
     )
     stacker_git.git(cwd_slot.path, "checkout", "-b", "user-feature")
     monkeypatch.chdir(cwd_slot.path)
@@ -202,7 +204,11 @@ def test_release_if_clean_releases_when_worktree_clean(
     assert pooldb.get_owner(three_slots[0].repo, three_slots[0].uuid) is None
     # Released slots are detached so the next claimant doesn't inherit a branch.
     head = stacker_git.git(
-        three_slots[0].path, "symbolic-ref", "-q", "HEAD", check=False,
+        three_slots[0].path,
+        "symbolic-ref",
+        "-q",
+        "HEAD",
+        check=False,
     )
     assert head.returncode != 0
 
@@ -246,8 +252,13 @@ def test_release_if_clean_holds_when_cherry_pick_in_progress(
     stacker_git.git(work.path, "add", "README.md")
     stacker_git.git(
         work.path,
-        "-c", "user.email=t@e.com", "-c", "user.name=t",
-        "commit", "-m", "side: divergent",
+        "-c",
+        "user.email=t@e.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-m",
+        "side: divergent",
     )
     side_sha = stacker_git.rev_parse(work.path, "HEAD")
 
@@ -256,8 +267,13 @@ def test_release_if_clean_holds_when_cherry_pick_in_progress(
     stacker_git.git(work.path, "add", "README.md")
     stacker_git.git(
         work.path,
-        "-c", "user.email=t@e.com", "-c", "user.name=t",
-        "commit", "-m", "main: divergent",
+        "-c",
+        "user.email=t@e.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-m",
+        "main: divergent",
     )
 
     stacker_git.git(work.path, "cherry-pick", side_sha, check=False)
@@ -285,18 +301,22 @@ def test_acquired_for_op_releases_on_kbinterrupt_when_clean(
     repo_name, repo_path = stacker_repo
     stacker_git.git(repo_path, "branch", "feature-target", "main")
 
-    with pytest.raises(KeyboardInterrupt), slot.acquired_for_op(
-        service.ctx, repo_name, "feature-target",
+    with (
+        pytest.raises(KeyboardInterrupt),
+        slot.acquired_for_op(
+            service.ctx,
+            repo_name,
+            "feature-target",
+        ),
     ):
         raise KeyboardInterrupt
 
     stacker_owned = [
-        uuid for repo, uuid, owner in pooldb.list_owned(repo_name)
+        uuid
+        for repo, uuid, owner in pooldb.list_owned(repo_name)
         if owner.kind == OwnerKind.STACKER
     ]
-    assert stacker_owned == [], (
-        "interrupt with a clean worktree must not leak the stacker claim"
-    )
+    assert stacker_owned == [], "interrupt with a clean worktree must not leak the stacker claim"
 
 
 def test_resolve_slot_falls_back_to_cwd_when_pool_exhausted(
@@ -344,7 +364,9 @@ def test_resolve_slot_disabled_policy_skips_cwd(
     monkeypatch.chdir(here.path)
 
     acquired = slot.resolve_slot(
-        service.ctx, repo_name, "feature-z",
+        service.ctx,
+        repo_name,
+        "feature-z",
         cwd_reuse=CwdReusePolicy(enabled=False),
     )
     # Cwd was eligible (detached, same repo) but policy disabled — fresh ops slot used.

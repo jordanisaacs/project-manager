@@ -527,8 +527,18 @@ def test_detach_allows_ignored_files(pm_env: Paths) -> None:
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / ".gitignore").write_text("*.log\n")
     git_in_slot(slot, "add", ".gitignore")
-    git_in_slot(slot, "-c", "user.email=t@t", "-c", "user.name=t",
-                "-c", "commit.gpgsign=false", "commit", "-m", "ignore logs")
+    git_in_slot(
+        slot,
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "ignore logs",
+    )
     (slot / "build.log").write_text("ignored\n")
     detach_mod.detach(pm_env, "demo", wts=None)
     assert not _forward(pm_env, "demo", "foo").exists()
@@ -557,7 +567,9 @@ def test_detach_allows_stash(pm_env: Paths) -> None:
     ],
 )
 def test_detach_blocks_on_in_progress_op(
-    pm_env: Paths, marker: str, expected: str,
+    pm_env: Paths,
+    marker: str,
+    expected: str,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
@@ -579,9 +591,7 @@ def test_delete_per_wt_blocks_on_dirty(pm_env: Paths) -> None:
     git_in_slot(slot, "add", "README.md")
     with pytest.raises(ProjectError, match="uncommitted changes"):
         delete_mod.delete(pm_env, "demo", wts=["foo"])
-    assert _db_rows(pm_env, "demo") == [
-        ("foo", "foo", _current_uuid(pm_env, "demo", "foo"))
-    ]
+    assert _db_rows(pm_env, "demo") == [("foo", "foo", _current_uuid(pm_env, "demo", "foo"))]
     assert _forward(pm_env, "demo", "foo").is_symlink()
 
 
@@ -708,6 +718,7 @@ def test_cli_wt_detach_dry_run_exits_zero_when_clean(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
     from project_manager.cli._shared import ProjectFlag, WtSelection
+
     rc = cli_wt_detach(
         flag=ProjectFlag(project="demo"),
         sel=WtSelection(all=True),
@@ -718,13 +729,15 @@ def test_cli_wt_detach_dry_run_exits_zero_when_clean(pm_env: Paths) -> None:
 
 
 def test_cli_wt_detach_dry_run_exits_one_on_blocker(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "scratch.log").write_text("noise\n")
     from project_manager.cli._shared import ProjectFlag, WtSelection
+
     rc = cli_wt_detach(
         flag=ProjectFlag(project="demo"),
         sel=WtSelection(all=True),
@@ -787,11 +800,7 @@ def test_migration_repos_to_worktrees(pm_env: Paths) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "CREATE TABLE repos ("
-            "  name TEXT PRIMARY KEY,"
-            "  slot_uuid TEXT NOT NULL,"
-            "  branch TEXT"
-            ")"
+            "CREATE TABLE repos (  name TEXT PRIMARY KEY,  slot_uuid TEXT NOT NULL,  branch TEXT)"
         )
         conn.execute(
             "INSERT INTO repos (name, slot_uuid, branch) VALUES (?, ?, ?)",
@@ -810,9 +819,7 @@ def test_migration_repos_to_worktrees(pm_env: Paths) -> None:
         rows = db.list_wts(conn)
         tables = {
             r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
 
     assert "repos" not in tables

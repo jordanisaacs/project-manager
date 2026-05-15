@@ -70,7 +70,8 @@ def _is_synced(ctx: StackerCtx, tracked: TrackedBranch) -> bool:
     """
     try:
         parent_head = git.rev_parse(
-            ctx.paths.repo(tracked.parent_repo_name), tracked.parent_branch,
+            ctx.paths.repo(tracked.parent_repo_name),
+            tracked.parent_branch,
         )
     except git.GitError:
         return False
@@ -143,9 +144,13 @@ async def _prefetch_node(ctx: StackerCtx, ni: _NodeInputs) -> NodeStatus:
     if wt_path is None or ni.details == "none":
         synced = await asyncio.to_thread(_is_synced, ctx, ni.tracked)
         return NodeStatus(
-            synced=synced, commit_count=0, ahead_of_remote=0,
-            has_upstream=False, dirty=False,
-            is_current=is_current, merged=merged,
+            synced=synced,
+            commit_count=0,
+            ahead_of_remote=0,
+            has_upstream=False,
+            dirty=False,
+            is_current=is_current,
+            merged=merged,
         )
 
     # Fan out the independent calls: is_synced (parent-repo rev-parse),
@@ -162,10 +167,13 @@ async def _prefetch_node(ctx: StackerCtx, ni: _NodeInputs) -> NodeStatus:
             asyncio.to_thread(_safe_upstream_branch, wt_path),
         )
         t_commits = (
-            tg.create_task(asyncio.to_thread(
-                _safe_rev_count, wt_path,
-                f"{ni.tracked.managed_base_commit}..HEAD",
-            ))
+            tg.create_task(
+                asyncio.to_thread(
+                    _safe_rev_count,
+                    wt_path,
+                    f"{ni.tracked.managed_base_commit}..HEAD",
+                )
+            )
             if need_counts
             else None
         )
@@ -181,15 +189,21 @@ async def _prefetch_node(ctx: StackerCtx, ni: _NodeInputs) -> NodeStatus:
     # a single rev-list call and 99% of branches have an upstream.
     if upstream_full:
         ahead_of_remote = await asyncio.to_thread(
-            _safe_rev_count, wt_path, f"{upstream_full}..HEAD",
+            _safe_rev_count,
+            wt_path,
+            f"{upstream_full}..HEAD",
         )
     else:
         ahead_of_remote = 0
 
     return NodeStatus(
-        synced=synced, commit_count=commit_count,
-        ahead_of_remote=ahead_of_remote, has_upstream=has_upstream,
-        dirty=dirty, is_current=is_current, merged=merged,
+        synced=synced,
+        commit_count=commit_count,
+        ahead_of_remote=ahead_of_remote,
+        has_upstream=has_upstream,
+        dirty=dirty,
+        is_current=is_current,
+        merged=merged,
     )
 
 
@@ -206,11 +220,7 @@ async def _prefetch_repo(
 
     def _live_sync() -> dict[str, git.WorktreeInfo]:
         try:
-            return {
-                info.branch: info
-                for info in git.worktree_list(repo_path)
-                if info.branch
-            }
+            return {info.branch: info for info in git.worktree_list(repo_path) if info.branch}
         except git.GitError:
             return {}
 
@@ -224,9 +234,7 @@ async def _prefetch_repo(
     )
 
     current_branch = (
-        opts.current[1]
-        if opts.current is not None and opts.current[0] == repo_name
-        else None
+        opts.current[1] if opts.current is not None and opts.current[0] == repo_name else None
     )
 
     async def _node(item: TrackedBranch) -> tuple[str, NodeStatus]:
@@ -245,7 +253,8 @@ async def _prefetch_repo(
     # Bound the per-repo node fanout — one repo on a large stack can
     # spawn tens of nodes, each firing 3-4 git children via to_thread.
     pairs = await bounded_gather(
-        (_node(item) for item in items), limit=opts.limit,
+        (_node(item) for item in items),
+        limit=opts.limit,
     )
     return RepoFacts(
         live=live,
@@ -272,7 +281,8 @@ async def _prefetch_all_async(
     # to 100 git children, and each spends most of its wall time in an
     # fsmonitor read — CPU stays low.
     pairs = await bounded_gather(
-        (_one(name) for name in repo_names), limit=opts.limit,
+        (_one(name) for name in repo_names),
+        limit=opts.limit,
     )
     return dict(pairs)
 

@@ -24,9 +24,7 @@ from .conftest import TrackedStack, commit_file
 from .fakes import RecordingPRBackend
 
 
-def _initialize(
-    service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str
-) -> None:
+def _initialize(service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str) -> None:
     service.init_new_branch(
         WorktreeInit(
             repo_name=repo_name,
@@ -106,7 +104,10 @@ def test_sync_multi_branch_releases_leaf_slot(
     leaf_slot = three_slots[1]
     _initialize(service, repo_name, parent_slot, "feature-parent")
     parent_commit = commit_file(
-        parent_slot.path, "parent.txt", "p\n", "parent: first commit",
+        parent_slot.path,
+        "parent.txt",
+        "p\n",
+        "parent: first commit",
     )
     service.init_new_branch(
         WorktreeInit(
@@ -133,12 +134,12 @@ def test_sync_multi_branch_releases_leaf_slot(
     assert "Sync complete." in result
 
     leaked = [
-        slot for slot in slot_mod.list_slots(pm_env, repo_name)
+        slot
+        for slot in slot_mod.list_slots(pm_env, repo_name)
         if pooldb.get_owner(slot.repo, slot.uuid) == OWNER_STACKER_OPS
     ]
     assert leaked == [], (
-        f"downstream_sync left {len(leaked)} ops slot(s) claimed: "
-        f"{[s.uuid for s in leaked]}"
+        f"downstream_sync left {len(leaked)} ops slot(s) claimed: {[s.uuid for s in leaked]}"
     )
 
 
@@ -245,7 +246,8 @@ def test_sync_from_branch_trims_walk(
     commit_file(tracked_stack.repo_path, "main-bump.txt", "m\n", "main bump")
     target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="b")
     result = service.sync(
-        target, ScopeSpec(scope="current", from_branch="c"),
+        target,
+        ScopeSpec(scope="current", from_branch="c"),
     )
     assert "Sync complete." in result
 
@@ -274,7 +276,10 @@ def test_sync_default_scope_walks_full_multi_arm_component(
     """
     repo_name = multi_arm_stack.repo_name
     new_main = commit_file(
-        multi_arm_stack.repo_path, "shared.txt", "v\n", "main: advance",
+        multi_arm_stack.repo_path,
+        "shared.txt",
+        "v\n",
+        "main: advance",
     )
 
     result = service.sync(SelectorTarget(repo_name=repo_name, branch="c1"))
@@ -283,8 +288,7 @@ def test_sync_default_scope_walks_full_multi_arm_component(
     a = service.db.get_branch(repo_name, "a")
     assert a is not None
     assert a.managed_base_commit == new_main, (
-        f"a.managed_base should advance to new main {new_main[:8]}, "
-        f"got {a.managed_base_commit[:8]}"
+        f"a.managed_base should advance to new main {new_main[:8]}, got {a.managed_base_commit[:8]}"
     )
     a_head = stacker_git.rev_parse(multi_arm_stack.slots["a"].path, "a")
 
@@ -302,7 +306,8 @@ def test_sync_default_scope_walks_full_multi_arm_component(
 
     for branch, parent in (("c1", "b1"), ("c2", "b2")):
         parent_head = stacker_git.rev_parse(
-            multi_arm_stack.slots[parent].path, parent,
+            multi_arm_stack.slots[parent].path,
+            parent,
         )
         row = service.db.get_branch(repo_name, branch)
         assert row is not None
@@ -316,7 +321,8 @@ def test_sync_default_scope_walks_full_multi_arm_component(
 
 
 def _service_with_backend(
-    pm_env: Paths, backend: RecordingPRBackend,
+    pm_env: Paths,
+    backend: RecordingPRBackend,
 ) -> StackerService:
     """Build a fresh StackerService against the shared DB with a fake PR backend.
 
@@ -329,7 +335,9 @@ def _service_with_backend(
 
 
 def _rebase_below_anchor(
-    slot_path: Path, repo_path: Path, fork_from: str,
+    slot_path: Path,
+    repo_path: Path,
+    fork_from: str,
 ) -> str:
     """Rewrite the branch's anchor: fork main from `fork_from`, rebase branch.
 
@@ -343,7 +351,10 @@ def _rebase_below_anchor(
     old_anchor = stacker_git.rev_parse(slot_path, "HEAD~1")
     stacker_git.git(repo_path, "reset", "--hard", fork_from)
     new_anchor = commit_file(
-        repo_path, "main-fork.txt", "fork\n", "main: forked",
+        repo_path,
+        "main-fork.txt",
+        "fork\n",
+        "main: forked",
     )
     # Omit the third arg so rebase runs on the currently-checked-out
     # branch ref; passing the literal `HEAD` here detaches and leaves
@@ -393,7 +404,9 @@ def test_sync_allow_drop_parent_modifications_proceeds(
     commit_file(feature_slot.path, "feat.txt", "feat\n", "feat: own commit")
 
     new_anchor = _rebase_below_anchor(
-        feature_slot.path, repo_path, fork_from=main_root,
+        feature_slot.path,
+        repo_path,
+        fork_from=main_root,
     )
 
     result = service.sync(
@@ -468,7 +481,10 @@ _PR_URL = "https://github.com/acme/widgets/pull/{n}"
 
 
 def _seed_open_pr(
-    db: StackerDB, repo_name: str, branch: str, number: int,
+    db: StackerDB,
+    repo_name: str,
+    branch: str,
+    number: int,
 ) -> str:
     """Insert an OPEN pr_state row for `branch`. Returns the PR URL."""
     url = _PR_URL.format(n=number)
@@ -499,8 +515,10 @@ def _mark_pr_merged(
     """
     if online:
         backend.review_by_pr[("acme", "widgets", number)] = gh.PRReviewSummary(
-            state="MERGED", is_draft=False,
-            is_approved=False, has_open_comments=False,
+            state="MERGED",
+            is_draft=False,
+            is_approved=False,
+            has_open_comments=False,
         )
 
 
@@ -690,7 +708,8 @@ def test_sync_chain_of_merged_branches_collapses_in_order(
         assert row.managed_base_commit == squashed_main, branch
         assert row.last_clean_head == squashed_main, branch
         slot_head = stacker_git.rev_parse(
-            tracked_stack.slots[branch].path, "HEAD",
+            tracked_stack.slots[branch].path,
+            "HEAD",
         )
         assert slot_head == squashed_main, branch
 
@@ -772,10 +791,7 @@ def test_sync_chained_no_commit_branches_with_no_commit_parents(
     )
     svc.sync(SelectorTarget(repo_name=repo_name, branch="d"))
 
-    snapshot = {
-        branch: svc.db.get_branch(repo_name, branch)
-        for branch in ("a", "b", "c", "d")
-    }
+    snapshot = {branch: svc.db.get_branch(repo_name, branch) for branch in ("a", "b", "c", "d")}
 
     # Resync each individually with offline=True so we don't re-collapse —
     # they should each short-circuit on the unchanged-parent check.
@@ -785,7 +801,5 @@ def test_sync_chained_no_commit_branches_with_no_commit_parents(
             ScopeSpec(scope="current", skip_descendants=True, skip_ancestors=True),
             options=SyncOptions(offline=True),
         )
-        assert (
-            "Nothing to sync" in result or "Sync complete." in result
-        ), f"{branch}: {result!r}"
+        assert "Nothing to sync" in result or "Sync complete." in result, f"{branch}: {result!r}"
         assert svc.db.get_branch(repo_name, branch) == snapshot[branch]

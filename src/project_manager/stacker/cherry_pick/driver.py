@@ -33,7 +33,9 @@ _SINGLE_OP_DONE: dict[str, str] = {
 
 
 def sync_plan(
-    ctx: StackerCtx, tracked: TrackedBranch, slot_path: Path,
+    ctx: StackerCtx,
+    tracked: TrackedBranch,
+    slot_path: Path,
 ) -> tuple[str, str, list[str]]:
     """Plan an exact-range cherry-pick of the branch's working commits.
 
@@ -47,9 +49,7 @@ def sync_plan(
     repo_path = ctx.paths.repo(tracked.parent_repo_name)
     parent_head = git.rev_parse(repo_path, tracked.parent_branch)
     start_head = git.rev_parse(slot_path, "HEAD")
-    commit_list = git.rev_list(
-        slot_path, f"{tracked.managed_base_commit}..{start_head}"
-    )
+    commit_list = git.rev_list(slot_path, f"{tracked.managed_base_commit}..{start_head}")
     return parent_head, start_head, commit_list
 
 
@@ -64,9 +64,7 @@ def prepare_local_operation(
     parent_head, start_head, commit_list = sync_plan(ctx, tracked, slot_path)
     op = ctx.db.get_operation(tracked.repo_name)
     if op is None:
-        op = OperationState(
-            repo_name=tracked.repo_name, op_type=op_type, status="running"
-        )
+        op = OperationState(repo_name=tracked.repo_name, op_type=op_type, status="running")
     op.status = "running"
     op.branch = tracked.branch
     op.parent_branch = tracked.parent_branch
@@ -108,8 +106,11 @@ def run_until_pause_or_finish(
             if op.branch:
                 with _owned_slot(ctx, repo_name, op, handle) as h:
                     result = drive_local(
-                        ctx, op, slot_path=h.path,
-                        continuing=continuing, logs=logs,
+                        ctx,
+                        op,
+                        slot_path=h.path,
+                        continuing=continuing,
+                        logs=logs,
                     )
                     continuing = False
                 handle = None
@@ -211,7 +212,9 @@ def advance_downstream(
             ctx.db.clear_operation(repo_name)
             raise
         collapse_msg = sync_gates.collapse_if_merged(
-            ctx, tracked, acquired.path,
+            ctx,
+            tracked,
+            acquired.path,
             allow_drop_merge=op.allow_drop_merge,
         )
         if collapse_msg is not None:
@@ -223,9 +226,7 @@ def advance_downstream(
         parent_head, _, _ = sync_plan(ctx, tracked, acquired.path)
         if parent_head == tracked.managed_base_commit:
             child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
-            parent_label = selectors.selector_for(
-                tracked.parent_repo_name, tracked.parent_branch
-            )
+            parent_label = selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)
             fmt.record(
                 ctx,
                 logs,
@@ -237,7 +238,10 @@ def advance_downstream(
             worktree.release_if_clean(ctx, acquired)
             return None
         prepare_local_operation(
-            ctx, tracked, op_type="downstream_sync", slot_path=acquired.path,
+            ctx,
+            tracked,
+            op_type="downstream_sync",
+            slot_path=acquired.path,
             logs=logs,
         )
     except BaseException:
@@ -265,15 +269,11 @@ def drive_local(
     return finalize_local_op(ctx, op, slot_path)
 
 
-def finalize_local_op(
-    ctx: StackerCtx, op: OperationState, slot_path: Path
-) -> str | None:
+def finalize_local_op(ctx: StackerCtx, op: OperationState, slot_path: Path) -> str | None:
     assert op.branch
     if op.op_type == "local_absorb":
         return _finalize_absorb(ctx, op, slot_path)
-    tracked = require_tracked(
-        ctx, SelectorTarget(repo_name=op.repo_name, branch=op.branch)
-    )
+    tracked = require_tracked(ctx, SelectorTarget(repo_name=op.repo_name, branch=op.branch))
     ctx.db.upsert_branch(
         TrackedBranch(
             repo_name=tracked.repo_name,
@@ -281,9 +281,7 @@ def finalize_local_op(
             parent_repo_name=tracked.parent_repo_name,
             parent_branch=tracked.parent_branch,
             managed_base_commit=op.target_parent_head or tracked.managed_base_commit,
-            last_synced_parent_commit=(
-                op.target_parent_head or tracked.last_synced_parent_commit
-            ),
+            last_synced_parent_commit=(op.target_parent_head or tracked.last_synced_parent_commit),
             last_clean_head=git.rev_parse(slot_path, "HEAD"),
         )
     )
@@ -303,9 +301,7 @@ def finalize_local_op(
     return None
 
 
-def _finalize_absorb(
-    ctx: StackerCtx, op: OperationState, slot_path: Path
-) -> str:
+def _finalize_absorb(ctx: StackerCtx, op: OperationState, slot_path: Path) -> str:
     """Absorb variant: parent advanced by child's commits; child untouched.
 
     Intentionally does NOT call `require_tracked` or `upsert_branch` with the
@@ -356,15 +352,9 @@ def failure_message(op: OperationState, slot_path: Path) -> str:
     # parent being updated, op.parent_branch is the source child. Headline
     # wording follows that.
     if op.op_type == "local_absorb":
-        headline = (
-            f"Absorb paused on {inspect_selector} while absorbing from "
-            f"{other_selector}."
-        )
+        headline = f"Absorb paused on {inspect_selector} while absorbing from {other_selector}."
     else:
-        headline = (
-            f"Sync paused on {inspect_selector} while syncing onto "
-            f"{other_selector}."
-        )
+        headline = f"Sync paused on {inspect_selector} while syncing onto {other_selector}."
     cherry = git.cherry_pick_in_progress(slot_path)
     parts = [f"{headline}\nCherry-pick in progress: {'yes' if cherry else 'no'}"]
     if op.error_message:

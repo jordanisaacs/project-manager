@@ -285,7 +285,8 @@ def _resolve_branch(
         if finding.slot_path is None:
             return None
         live = repo_branches.setdefault(
-            finding.repo, _live_branches(paths, finding.repo),
+            finding.repo,
+            _live_branches(paths, finding.repo),
         )
         try:
             resolved = finding.slot_path.resolve()
@@ -421,9 +422,7 @@ def status(
             repo = repo or row_repo
         branch = _resolve_branch(f, repo_branches, paths, project)
         pr = pr_map.get((repo, branch)) if repo and branch else None
-        tracked_entry = (
-            tracked_by_key.get((repo, branch)) if repo and branch else None
-        )
+        tracked_entry = tracked_by_key.get((repo, branch)) if repo and branch else None
         if want_worktrees:
             worktrees.append(
                 WorktreeRow(
@@ -436,8 +435,11 @@ def status(
                 ),
             )
         if (
-            want_prs and pr is not None and f.wt is not None
-            and repo is not None and branch is not None
+            want_prs
+            and pr is not None
+            and f.wt is not None
+            and repo is not None
+            and branch is not None
         ):
             prs.append(PRRow(wt=f.wt, repo=repo, branch=branch, pr=pr))
         if want_stacker and tracked_entry is not None and repo is not None:
@@ -448,8 +450,5 @@ def status(
         if want_stacker and f.wt is not None and repo is not None and branch is not None:
             wt_labels[(repo, branch)] = f.wt
     prs.sort(key=lambda r: (r.repo, r.wt))
-    stacker = (
-        _gather_stacker(ctx, paths, tracked_per_repo, wt_labels)
-        if want_stacker else []
-    )
+    stacker = _gather_stacker(ctx, paths, tracked_per_repo, wt_labels) if want_stacker else []
     return ProjectStatus(worktrees=worktrees, prs=prs, stacker=stacker)

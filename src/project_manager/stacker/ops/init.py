@@ -23,9 +23,7 @@ def init_new_branch(ctx: StackerCtx, spec: WorktreeInit) -> TrackedBranch:
         raise git.GitError("Parent and child must be in the same repo.")
     repo_path = ctx.paths.repo(spec.repo_name)
     parent_head = git.rev_parse(repo_path, spec.parent.branch)
-    start_point = (
-        git.rev_parse(repo_path, spec.copy_from) if spec.copy_from else parent_head
-    )
+    start_point = git.rev_parse(repo_path, spec.copy_from) if spec.copy_from else parent_head
     git.git(spec.worktree_path, "checkout", "-b", spec.branch, start_point)
     return _persist_init(ctx, spec, parent_head, parent_head)
 

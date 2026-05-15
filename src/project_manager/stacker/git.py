@@ -46,9 +46,7 @@ def current_context(cwd: Path | None = None) -> GitContext:
     worktree_path = Path(git(path, "rev-parse", "--show-toplevel").stdout.strip())
     branch = current_branch(worktree_path)
     if not branch:
-        raise GitError(
-            f"Detached HEAD at {worktree_path}; stacker requires a branch checkout."
-        )
+        raise GitError(f"Detached HEAD at {worktree_path}; stacker requires a branch checkout.")
     return GitContext(repo_root=repo_root, worktree_path=worktree_path, branch=branch)
 
 
@@ -91,7 +89,7 @@ def upstream_branch_name(path: Path) -> str | None:
         return None
     merge = proc.stdout.strip()
     prefix = "refs/heads/"
-    return merge[len(prefix):] if merge.startswith(prefix) else None
+    return merge[len(prefix) :] if merge.startswith(prefix) else None
 
 
 def upstream_remote_name(path: Path) -> str | None:
@@ -127,9 +125,10 @@ def parse_github_slug(url: str) -> str | None:
 
 
 def branch_exists(repo_root: Path, branch: str) -> bool:
-    return git(repo_root, "rev-parse", "--verify", branch, check=False).returncode == 0 or git(
-        repo_root, "rev-parse", "--verify", f"origin/{branch}", check=False
-    ).returncode == 0
+    return (
+        git(repo_root, "rev-parse", "--verify", branch, check=False).returncode == 0
+        or git(repo_root, "rev-parse", "--verify", f"origin/{branch}", check=False).returncode == 0
+    )
 
 
 def rev_parse(path: Path, rev: str) -> str:
@@ -160,8 +159,13 @@ def rev_list_picking(path: Path, left: str, right: str) -> list[str]:
     commits. `--reverse` matches `rev_list` so cherry-picks run oldest-first.
     """
     out = git(
-        path, "rev-list", "--reverse", "--cherry-pick", "--right-only",
-        "--no-merges", f"{left}...{right}",
+        path,
+        "rev-list",
+        "--reverse",
+        "--cherry-pick",
+        "--right-only",
+        "--no-merges",
+        f"{left}...{right}",
     ).stdout.strip()
     return [line for line in out.splitlines() if line]
 
@@ -309,8 +313,15 @@ def cherry_pick(path: Path, commit: str) -> subprocess.CompletedProcess[str]:
     # auto-detected case.
     return run(
         [
-            "git", "-C", str(path), "-c", "core.editor=true",
-            "cherry-pick", "--no-edit", "--empty=drop", commit,
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "core.editor=true",
+            "cherry-pick",
+            "--no-edit",
+            "--empty=drop",
+            commit,
         ],
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
@@ -357,7 +368,10 @@ def tree_of(path: Path, rev: str) -> str:
 
 
 def merge_tree_write_tree(
-    repo_root: Path, base: str, ours: str, theirs: str,
+    repo_root: Path,
+    base: str,
+    ours: str,
+    theirs: str,
 ) -> str | None:
     """3-way merge of `ours` and `theirs` using `base`, in memory.
 
@@ -394,9 +408,7 @@ def guess_trunk_branch(repo_root: Path) -> str:
     current = current_branch(repo_root)
     if current:
         return current
-    proc = git(
-        repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads", check=False
-    )
+    proc = git(repo_root, "for-each-ref", "--format=%(refname:short)", "refs/heads", check=False)
     branches = [line for line in proc.stdout.strip().splitlines() if line]
     if branches:
         return branches[0]
@@ -434,12 +446,8 @@ class GitClient(Protocol):
     def upstream_branch_name(self, path: Path) -> str | None: ...
     def upstream_remote_name(self, path: Path) -> str | None: ...
     def remote_url(self, path: Path, remote: str) -> str | None: ...
-    def log_subject_and_author(
-        self, path: Path, revspec: str
-    ) -> list[tuple[str, str]]: ...
-    def first_commit_title_and_body(
-        self, path: Path, revspec: str
-    ) -> tuple[str, str]: ...
+    def log_subject_and_author(self, path: Path, revspec: str) -> list[tuple[str, str]]: ...
+    def first_commit_title_and_body(self, path: Path, revspec: str) -> tuple[str, str]: ...
     def guess_trunk_branch(self, repo_root: Path) -> str: ...
     def is_ancestor(self, repo_root: Path, older: str, newer: str) -> bool: ...
     def tree_of(self, path: Path, rev: str) -> str: ...
@@ -451,9 +459,7 @@ class GitClient(Protocol):
 class SubprocessGitClient:
     """Production GitClient impl: delegates to module-level helpers."""
 
-    def run(
-        self, path: Path, *args: str, check: bool = True
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, path: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return git(path, *args, check=check)
 
     def current_branch(self, path: Path) -> str:
@@ -489,9 +495,7 @@ class SubprocessGitClient:
     def reset_hard(self, path: Path, target: str) -> None:
         reset_hard(path, target)
 
-    def cherry_pick(
-        self, path: Path, commit: str
-    ) -> subprocess.CompletedProcess[str]:
+    def cherry_pick(self, path: Path, commit: str) -> subprocess.CompletedProcess[str]:
         return cherry_pick(path, commit)
 
     def cherry_pick_continue(self, path: Path) -> subprocess.CompletedProcess[str]:
@@ -518,14 +522,10 @@ class SubprocessGitClient:
     def remote_url(self, path: Path, remote: str) -> str | None:
         return remote_url(path, remote)
 
-    def log_subject_and_author(
-        self, path: Path, revspec: str
-    ) -> list[tuple[str, str]]:
+    def log_subject_and_author(self, path: Path, revspec: str) -> list[tuple[str, str]]:
         return log_subject_and_author(path, revspec)
 
-    def first_commit_title_and_body(
-        self, path: Path, revspec: str
-    ) -> tuple[str, str]:
+    def first_commit_title_and_body(self, path: Path, revspec: str) -> tuple[str, str]:
         return first_commit_title_and_body(path, revspec)
 
     def guess_trunk_branch(self, repo_root: Path) -> str:
@@ -541,5 +541,3 @@ class SubprocessGitClient:
         self, repo_root: Path, base: str, ours: str, theirs: str
     ) -> str | None:
         return merge_tree_write_tree(repo_root, base, ours, theirs)
-
-

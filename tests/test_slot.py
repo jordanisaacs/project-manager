@@ -60,7 +60,11 @@ def test_release_idempotent(pm_env: Paths) -> None:
 
 
 def _claim_child(
-    paths: Paths, repo: str, uuid: str, index: int, queue: "mp.Queue[str]",
+    paths: Paths,
+    repo: str,
+    uuid: str,
+    index: int,
+    queue: "mp.Queue[str]",
 ) -> None:
     """Run in a spawned child; report outcome to `queue`."""
     pooldb = PoolDB(paths.pool_db())
@@ -87,8 +91,7 @@ def test_concurrent_claim_exactly_one_wins(pm_env: Paths) -> None:
     queue: mp.Queue[str] = ctx.Queue()
     n = 8
     procs = [
-        ctx.Process(target=_claim_child, args=(pm_env, s.repo, s.uuid, i, queue))
-        for i in range(n)
+        ctx.Process(target=_claim_child, args=(pm_env, s.repo, s.uuid, i, queue)) for i in range(n)
     ]
     for p in procs:
         p.start()
@@ -105,6 +108,4 @@ def test_concurrent_claim_exactly_one_wins(pm_env: Paths) -> None:
     assert len(losses) == n - 1
 
     winner_idx = int(wins[0][1:])
-    assert _pooldb(pm_env).get_owner(s.repo, s.uuid) == Owner(
-        OwnerKind.PROJECT, f"p{winner_idx}"
-    )
+    assert _pooldb(pm_env).get_owner(s.repo, s.uuid) == Owner(OwnerKind.PROJECT, f"p{winner_idx}")

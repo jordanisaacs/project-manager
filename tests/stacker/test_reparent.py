@@ -124,9 +124,16 @@ def test_reparent_replays_own_commits_onto_new_parent(
     c = service.db.get_branch(tracked_stack.repo_name, "c")
     assert c is not None
     assert c.parent_branch == "a"
-    head_log = stacker_git.git(
-        c_slot.path, "log", "--format=%s", "-3",
-    ).stdout.strip().splitlines()
+    head_log = (
+        stacker_git.git(
+            c_slot.path,
+            "log",
+            "--format=%s",
+            "-3",
+        )
+        .stdout.strip()
+        .splitlines()
+    )
     assert head_log[0] == "c: shared"
     assert head_log[1] == "c: first commit"
     assert head_log[2] == "a: first commit"

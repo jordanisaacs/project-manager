@@ -100,23 +100,20 @@ def _plan_split(
             "Use `pm stacker continue` or `pm stacker abort`."
         )
     tracked = require_tracked(ctx, target)
-    current_path = worktree.require_checked_out(
-        ctx, tracked.repo_name, tracked.branch
-    )
+    current_path = worktree.require_checked_out(ctx, tracked.repo_name, tracked.branch)
     if git.has_tracked_changes(current_path):
         raise git.GitError(
             f"Tracked changes present in {current_path}. Commit or discard before splitting."
         )
     if git.cherry_pick_in_progress(current_path):
-        raise git.GitError(
-            f"Cherry-pick in progress in {current_path}. Resolve before splitting."
-        )
+        raise git.GitError(f"Cherry-pick in progress in {current_path}. Resolve before splitting.")
     if git.branch_exists(ctx.paths.repo(tracked.repo_name), new_name):
         raise git.GitError(f"Branch {new_name} already exists.")
     split_sha = git.rev_parse(current_path, split_commit)
     head_sha = git.rev_parse(current_path, "HEAD")
     commit_list = git.rev_list(
-        current_path, f"{tracked.managed_base_commit}..{head_sha}",
+        current_path,
+        f"{tracked.managed_base_commit}..{head_sha}",
     )
     if split_sha not in commit_list:
         raise git.GitError(

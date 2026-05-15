@@ -53,14 +53,16 @@ def _resolve_wts(
     known = {name: (repo, uuid) for name, repo, uuid in all_rows}
     missing = [w for w in wts if w not in known]
     if missing:
-        raise ProjectError(
-            f"project '{project}' has no such worktree(s): {', '.join(missing)}"
-        )
+        raise ProjectError(f"project '{project}' has no such worktree(s): {', '.join(missing)}")
     return [(w, *known[w]) for w in wts]
 
 
 def _try_reclaim(
-    paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, slot_uuid: str,
+    paths: Paths,
+    pooldb: PoolDB,
+    owner: Owner,
+    repo: str,
+    slot_uuid: str,
 ) -> Slot | None:
     """Attempt to reclaim the remembered slot. Returns the claimed Slot, or None if unavailable."""
     slot_path = paths.slot(repo, slot_uuid)
@@ -76,7 +78,11 @@ def _try_reclaim(
 
 
 def _claim_fallback(
-    paths: Paths, pooldb: PoolDB, owner: Owner, repo: str, retries: int = 3,
+    paths: Paths,
+    pooldb: PoolDB,
+    owner: Owner,
+    repo: str,
+    retries: int = 3,
 ) -> Slot:
     for _ in range(retries):
         free = slot_mod.free_slots(paths, pooldb, repo)
@@ -111,9 +117,7 @@ def _attach_one(
         existing = ctx.pooldb.get_owner(repo, target.name)
         if existing == owner:
             return None  # already active (idempotent)
-        raise ProjectError(
-            f"{forward} exists but is not owned by this project — run `pm check`"
-        )
+        raise ProjectError(f"{forward} exists but is not owned by this project — run `pm check`")
 
     s = _try_reclaim(ctx.paths, ctx.pooldb, owner, repo, remembered_uuid)
     if s is None:
@@ -154,10 +158,7 @@ def _maybe_restore_branch(
                 f"{outcome.conflict_path}; slot left on default"
             )
         elif outcome.result == RestoreResult.SKIPPED_MISSING_BRANCH:
-            warning = (
-                f"{wt}: saved branch '{saved}' no longer exists; "
-                f"slot left on default"
-            )
+            warning = f"{wt}: saved branch '{saved}' no longer exists; slot left on default"
     db.set_branch(ctx.conn, wt, None)
     return warning
 
@@ -196,7 +197,11 @@ def attach(
                 s = _attach_one(ctx, project, wt, repo, remembered)
                 if s is not None:
                     warning = _maybe_restore_branch(
-                        ctx, wt, repo, s.path, no_branch=no_branch,
+                        ctx,
+                        wt,
+                        repo,
+                        s.path,
+                        no_branch=no_branch,
                     )
                     if warning:
                         warnings.append(warning)
@@ -210,8 +215,7 @@ def attach(
         raise
     return AttachResult(
         newly_claimed=[
-            AttachedWt(wt=wt, repo=repo, uuid=s.uuid, path=s.path)
-            for wt, repo, s in attached
+            AttachedWt(wt=wt, repo=repo, uuid=s.uuid, path=s.path) for wt, repo, s in attached
         ],
         warnings=warnings,
     )

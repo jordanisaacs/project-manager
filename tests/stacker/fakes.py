@@ -4,6 +4,7 @@
 tests can assert on the exact request stacker would have sent to GitHub
 without shelling out to `gh`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -96,7 +97,8 @@ class RecordingPRBackend:
         return None
 
     def batch_pr_review(
-        self, entries: Sequence[tuple[str, str, int]],
+        self,
+        entries: Sequence[tuple[str, str, int]],
     ) -> dict[tuple[str, str, int], gh.PRReviewSummary]:
         self.review_calls.append(list(entries))
         return {e: self.review_by_pr[e] for e in entries if e in self.review_by_pr}
@@ -170,4 +172,5 @@ class FakeGitClient:
             raise NotImplementedError(
                 f"FakeGitClient.{name} not implemented; override in a subclass."
             )
+
         return _not_implemented

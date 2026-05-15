@@ -84,7 +84,5 @@ def test_composed_body_satisfies_gitstack_parser_signature() -> None:
     sep_line = next(
         i for i, line in enumerate(out.split("\n")) if line.strip().startswith(STACK_SEPARATOR)
     )
-    summary_line = next(
-        i for i, line in enumerate(out.split("\n")) if line.strip() == "## Summary"
-    )
+    summary_line = next(i for i, line in enumerate(out.split("\n")) if line.strip() == "## Summary")
     assert summary_line > sep_line

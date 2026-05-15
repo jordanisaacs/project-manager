@@ -64,9 +64,7 @@ def claim(
         time.sleep(opts.poll_interval_s)
 
 
-def _try_claim_free(
-    paths: Paths, pooldb: PoolDB, repo_name: str
-) -> slot_mod.Slot | None:
+def _try_claim_free(paths: Paths, pooldb: PoolDB, repo_name: str) -> slot_mod.Slot | None:
     """One claim attempt. Returns the slot on success; None if pool is full.
 
     Handles the race where another claimer grabs our target between the
@@ -87,8 +85,7 @@ def _try_claim_free(
 
 def _stacker_owns_any(pooldb: PoolDB, repo_name: str) -> bool:
     return any(
-        owner.kind == OwnerKind.STACKER
-        for (_repo, _uuid, owner) in pooldb.list_owned(repo_name)
+        owner.kind == OwnerKind.STACKER for (_repo, _uuid, owner) in pooldb.list_owned(repo_name)
     )
 
 

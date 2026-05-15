@@ -52,7 +52,7 @@ def test_list_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert _run(list_=True, json=True) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == [
-        {"key": "pr.mode",  "value": "repo-pr"},
+        {"key": "pr.mode", "value": "repo-pr"},
         {"key": "pr.trunk", "value": "master"},
     ]
 
@@ -70,6 +70,7 @@ def test_unset_existing_key_exits_0_and_clears() -> None:
 def test_unknown_key_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
     # Routed through `main()` to exercise the global CommandError handler.
     from project_manager.cli import main
+
     code = main(["stacker", "config", "--repo", "demo", "nope", "x"])
     assert code == 2
     assert "Unknown config key" in capsys.readouterr().err

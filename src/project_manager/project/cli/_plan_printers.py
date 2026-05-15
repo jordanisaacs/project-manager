@@ -1,4 +1,5 @@
 """Shared dry-run plan printers for project/wt delete and detach."""
+
 import sys
 
 from project_manager import render
@@ -20,7 +21,10 @@ def emit_detach_plan(plan: detach_mod.DetachPlan, *, as_json: bool) -> None:
 
 
 def emit_delete_plan(
-    plan: delete_mod.DeletePlan, paths: Paths, *, as_json: bool,
+    plan: delete_mod.DeletePlan,
+    paths: Paths,
+    *,
+    as_json: bool,
 ) -> None:
     if as_json:
         render.emit_json(plan.__pm_json__())
@@ -32,8 +36,7 @@ def emit_delete_plan(
     if plan.drop_rows:
         print()
         render.console().print(
-            f"Would drop {len(plan.drop_rows)} db row(s): "
-            + ", ".join(plan.drop_rows),
+            f"Would drop {len(plan.drop_rows)} db row(s): " + ", ".join(plan.drop_rows),
         )
     extras: list[str] = []
     if plan.remove_readme:

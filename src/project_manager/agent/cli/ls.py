@@ -1,4 +1,5 @@
 """`pm agent ls`."""
+
 import asyncio
 import sys
 from typing import Annotated
@@ -56,16 +57,20 @@ def ls(
     paths = config.load()
     projects = resolve_project_scope(paths, scope)
     agents = parse_agents(agent)
-    effective_limit = limit if limit is not None else (
-        _DEFAULT_LIMIT_SINGLE if len(projects) == 1 else _DEFAULT_LIMIT_MULTI
+    effective_limit = (
+        limit
+        if limit is not None
+        else (_DEFAULT_LIMIT_SINGLE if len(projects) == 1 else _DEFAULT_LIMIT_MULTI)
     )
     rows = asyncio.run(ls_mod.ls(paths, projects, effective_limit, agents))
     if resume:
         return _resume(rows)
     render.emit_sections(
-        ls_mod.sections(rows), ls_mod.COLUMNS,
+        ls_mod.sections(rows),
+        ls_mod.COLUMNS,
         group=render.GroupColumn("Project"),
-        as_json=json, shape=render.JsonShape("project", "sessions"),
+        as_json=json,
+        shape=render.JsonShape("project", "sessions"),
     )
     return 0
 
@@ -84,7 +89,8 @@ def _resume(rows: list[ls_mod.AgentRow]) -> int:
         render.console(stderr=True).print("no sessions to resume")
         return 0
     chosen = tui.pick(
-        sections, ls_mod.COLUMNS,
+        sections,
+        ls_mod.COLUMNS,
         group=render.GroupColumn("Project"),
         header="Select a session to resume",
         is_selectable=lambda r: bool(r.session_id),
@@ -96,7 +102,8 @@ def _resume(rows: list[ls_mod.AgentRow]) -> int:
     # process — but the ruff `return`-completeness rule doesn't see
     # that, so we return an exit code for form's sake after the call.
     run_mod.run(
-        agent_name, chosen.project,
+        agent_name,
+        chosen.project,
         run_mod.resume_args(agent_name, chosen.session_id),
     )
     return 0

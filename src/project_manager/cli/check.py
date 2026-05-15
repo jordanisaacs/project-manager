@@ -1,4 +1,5 @@
 """`pm check` — top-level invariant checker."""
+
 import sys
 from typing import Annotated
 

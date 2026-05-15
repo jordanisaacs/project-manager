@@ -246,7 +246,9 @@ def test_absorb_rejects_when_op_active(
 
     service.db.put_operation(
         OperationState(
-            repo_name=repo_name, op_type="local_sync", status="paused",
+            repo_name=repo_name,
+            op_type="local_sync",
+            status="paused",
             branch="feature",
         )
     )
@@ -287,7 +289,9 @@ def test_absorb_leaves_sibling_tracked_children_intact(
     assert b_row_after == b_row_before
     # Sibling B's managed_base is still a reachable ancestor of new main.
     assert stacker_git.is_ancestor(
-        repo_path, b_row_after.managed_base_commit, _head(repo_path),
+        repo_path,
+        b_row_after.managed_base_commit,
+        _head(repo_path),
     )
 
     # Sync on B rebases it onto new main. Use skip_descendants so the walk

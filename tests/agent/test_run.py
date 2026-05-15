@@ -67,7 +67,10 @@ def test_build_command_codex_preserves_double_dash_separator() -> None:
 
 def test_build_command_cursor_no_forwarded_args() -> None:
     _cwd, argv = run_mod.build_command(
-        AgentName.CURSOR, Path("/proj/a"), (), {"cursor": "agent"},
+        AgentName.CURSOR,
+        Path("/proj/a"),
+        (),
+        {"cursor": "agent"},
     )
     assert argv == ["agent"]
 
@@ -75,14 +78,20 @@ def test_build_command_cursor_no_forwarded_args() -> None:
 def test_build_command_missing_config_raises() -> None:
     with pytest.raises(ProjectError, match=r"no \[agents\.commands\]\.codex"):
         run_mod.build_command(
-            AgentName.CODEX, Path("/proj/a"), (), {"claude": "isaac"},
+            AgentName.CODEX,
+            Path("/proj/a"),
+            (),
+            {"claude": "isaac"},
         )
 
 
 def test_build_command_empty_string_raises() -> None:
     with pytest.raises(ProjectError, match="is empty"):
         run_mod.build_command(
-            AgentName.CLAUDE, Path("/proj/a"), (), {"claude": "   "},
+            AgentName.CLAUDE,
+            Path("/proj/a"),
+            (),
+            {"claude": "   "},
         )
 
 
@@ -96,13 +105,15 @@ def _prepare_project(pm_env: Paths) -> Path:
 
 
 def _write_config_with_agents(
-    pm_env: Paths, commands: dict[str, str],
+    pm_env: Paths,
+    commands: dict[str, str],
 ) -> None:
     """The pm_env fixture already wrote a `[paths]`-only config and set
     PM_CONFIG. Append an `[agents.commands]` table by rewriting the file
     with the same paths plus the supplied agent commands.
     """
     import os
+
     cfg_path = Path(os.environ["PM_CONFIG"])
     body = (
         "[paths]\n"
@@ -118,7 +129,8 @@ def _write_config_with_agents(
 
 
 def test_run_execvps_the_configured_command_in_project_dir(
-    pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_dir = _prepare_project(pm_env)
     _write_config_with_agents(pm_env, {"claude": "isaac"})
@@ -151,7 +163,8 @@ def test_run_execvps_the_configured_command_in_project_dir(
 
 
 def test_run_rewraps_filenotfound_as_project_error(
-    pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepare_project(pm_env)
     _write_config_with_agents(pm_env, {"claude": "definitely-not-on-path"})
@@ -170,7 +183,9 @@ def test_run_rewraps_filenotfound_as_project_error(
 
 
 def test_run_raises_when_cwd_not_in_any_project(
-    pm_env: Paths, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    pm_env: Paths,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Mirrors the `-p` requirement when the user is outside any pm
     project — uses the existing `resolve_project` behavior, so we

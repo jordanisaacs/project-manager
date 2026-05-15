@@ -1,4 +1,5 @@
 """Tests for the PR cache surface: unlink/refresh + the track-time PR auto-link."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -72,20 +73,33 @@ def pr_service(
 
 def _config_upstream(slot_path: Path, branch: str) -> None:
     stacker_git.git(
-        slot_path, "remote", "add", "origin-fake",
-        "git@github.com:acme/widgets.git", check=False,
+        slot_path,
+        "remote",
+        "add",
+        "origin-fake",
+        "git@github.com:acme/widgets.git",
+        check=False,
     )
     stacker_git.git(
-        slot_path, "config", f"branch.{branch}.remote", "origin-fake",
+        slot_path,
+        "config",
+        f"branch.{branch}.remote",
+        "origin-fake",
     )
     stacker_git.git(
-        slot_path, "config", f"branch.{branch}.merge",
+        slot_path,
+        "config",
+        f"branch.{branch}.merge",
         f"refs/heads/{branch}",
     )
 
 
 def _seed_pr(
-    backend: RecordingPRBackend, repo: str, head: str, *, number: int = 99,
+    backend: RecordingPRBackend,
+    repo: str,
+    head: str,
+    *,
+    number: int = 99,
 ) -> gh.PullRequest:
     pr = gh.PullRequest(
         number=number,

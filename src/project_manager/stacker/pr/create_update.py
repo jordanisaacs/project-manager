@@ -93,9 +93,7 @@ def create_or_update_current_pr(
         # UI survives.
         template = load_pr_template(worktree_path)
         body_seed = (
-            inject_body_into_template(first_body, template)
-            if template is not None
-            else first_body
+            inject_body_into_template(first_body, template) if template is not None else first_body
         )
         body = compose_body_with_block(body_seed, "")
         with body_file(body) as file_path:
@@ -164,9 +162,7 @@ def refresh_component_pr_bodies(
         )
 
 
-def _live_heads(
-    ctx: StackerCtx, component: list[TrackedBranch]
-) -> dict[str, str]:
+def _live_heads(ctx: StackerCtx, component: list[TrackedBranch]) -> dict[str, str]:
     """Map `branch -> git rev-parse <branch>` from the canonical repo.
 
     Source of truth for the head SHA in `_files_url`. Reads the branch

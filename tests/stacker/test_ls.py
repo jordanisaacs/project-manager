@@ -55,9 +55,7 @@ def test_ls_current_scope_includes_full_multi_arm_component(
         LsOptions(target_branch="c1", scope="current"),
     )
     for name in ("a", "b1", "c1", "b2", "c2"):
-        assert name in out, (
-            f"`ls -c` from c1 should include {name}; got:\n{out}"
-        )
+        assert name in out, f"`ls -c` from c1 should include {name}; got:\n{out}"
 
 
 def test_ls_details_none_strips_suffixes(
@@ -79,7 +77,8 @@ def test_ls_details_status_counts_includes_commit_counts(
     service: StackerService,
 ) -> None:
     out = service.ls_text(
-        tracked_stack.repo_name, LsOptions(details="status-counts"),
+        tracked_stack.repo_name,
+        LsOptions(details="status-counts"),
     )
     # Each branch has 1 commit since its managed_base; no upstream, so the
     # whole count is `unpushed` → `↑` arrow shows.
@@ -146,7 +145,8 @@ def test_ls_json_details_none_omits_status_fields(
     service: StackerService,
 ) -> None:
     raw = service.ls_text(
-        tracked_stack.repo_name, LsOptions(details="none", json_output=True),
+        tracked_stack.repo_name,
+        LsOptions(details="none", json_output=True),
     )
     payload = json.loads(raw)
     for b in _all_branches(payload):
@@ -160,7 +160,8 @@ def test_ls_json_details_all_includes_debug_fields(
     service: StackerService,
 ) -> None:
     raw = service.ls_text(
-        tracked_stack.repo_name, LsOptions(details="all", json_output=True),
+        tracked_stack.repo_name,
+        LsOptions(details="all", json_output=True),
     )
     payload = json.loads(raw)
     for b in _all_branches(payload):
@@ -186,7 +187,10 @@ def test_ls_unsynced_branch_renders_bang_and_cross_connector(
     connector leading into `b` for `├─✗` / `└─✗`.
     """
     commit_file(
-        tracked_stack.slots["a"].path, "a_extra.txt", "a2\n", "a: second commit",
+        tracked_stack.slots["a"].path,
+        "a_extra.txt",
+        "a2\n",
+        "a: second commit",
     )
     out = service.ls_text(tracked_stack.repo_name, LsOptions(details="status"))
     assert "!" in out
@@ -198,7 +202,10 @@ def test_ls_icons_off_suppresses_cross_connector(
     service: StackerService,
 ) -> None:
     commit_file(
-        tracked_stack.slots["a"].path, "a_extra.txt", "a2\n", "a: second commit",
+        tracked_stack.slots["a"].path,
+        "a_extra.txt",
+        "a2\n",
+        "a: second commit",
     )
     out = service.ls_text(
         tracked_stack.repo_name,
@@ -328,7 +335,8 @@ def test_ls_shows_project_tag_on_every_row_in_project_slots(
     )
     # The fixture claims all four slots for project "tracked-stack".
     branch_lines = [
-        line for line in out.splitlines()
+        line
+        for line in out.splitlines()
         if any(f"demo:{name}" in line for name in ("a", "b", "c", "d"))
     ]
     assert len(branch_lines) == 4
@@ -433,10 +441,14 @@ def _strip_markup(s: str) -> str:
     import io
 
     from rich.console import Console
+
     buf = io.StringIO()
-    Console(file=buf, force_terminal=False, no_color=True, width=120,
-            highlight=False, markup=False).print(
-        s, markup=True, highlight=False,
+    Console(
+        file=buf, force_terminal=False, no_color=True, width=120, highlight=False, markup=False
+    ).print(
+        s,
+        markup=True,
+        highlight=False,
     )
     return buf.getvalue()
 
@@ -446,16 +458,27 @@ def _render_ansi(s: str) -> str:
     import io
 
     from rich.console import Console
+
     buf = io.StringIO()
-    Console(file=buf, force_terminal=True, color_system="truecolor",
-            width=120, highlight=False, markup=False).print(
-        s, markup=True, highlight=False,
+    Console(
+        file=buf,
+        force_terminal=True,
+        color_system="truecolor",
+        width=120,
+        highlight=False,
+        markup=False,
+    ).print(
+        s,
+        markup=True,
+        highlight=False,
     )
     return buf.getvalue()
 
 
 def _seed_approved(
-    svc: StackerService, repo_name: str, branch: str,
+    svc: StackerService,
+    repo_name: str,
+    branch: str,
 ) -> RecordingPRBackend:
     """Install an approved PR for `branch` via a fake PR backend.
 
@@ -510,7 +533,9 @@ def test_ls_icon_mode_colors_symbol_not_name_for_approved(
     pm_env: Paths,
 ) -> None:
     svc = StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=RecordingPRBackend(),
     )
     _seed_approved(svc, tracked_stack.repo_name, "b")
     out = svc.ls_text(
@@ -528,7 +553,9 @@ def test_ls_title_mode_colors_both_symbol_and_approved_branch_name(
     pm_env: Paths,
 ) -> None:
     svc = StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=RecordingPRBackend(),
     )
     _seed_approved(svc, tracked_stack.repo_name, "b")
     out = svc.ls_text(

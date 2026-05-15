@@ -21,7 +21,9 @@ def service(
     stacker_repo: tuple[str, Path],  # noqa: ARG001 (creates repo on disk)
 ) -> StackerService:
     return StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=RecordingPRBackend(),
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=RecordingPRBackend(),
     )
 
 

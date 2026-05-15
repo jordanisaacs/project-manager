@@ -62,9 +62,7 @@ def render_stack_block(
     # ReviewStack's gitstack parser keys off.
     lines = ["<!-- stacker:begin -->", STACK_HEADER, ""]
     component_keys = {node.branch for node in render_ctx.component}
-    roots = [
-        node for node in render_ctx.component if node.parent_branch not in component_keys
-    ]
+    roots = [node for node in render_ctx.component if node.parent_branch not in component_keys]
     for index, root in enumerate(sorted(roots, key=lambda item: item.branch)):
         if index:
             lines.append("")
@@ -139,10 +137,7 @@ def _files_url(node: TrackedBranch, render_ctx: _StackRender) -> str | None:
     if not head_sha:
         return None
     base_sha = node.managed_base_commit
-    return (
-        f"{pr.url}/files/"
-        f"{quote(base_sha, safe=':/')}..{quote(head_sha, safe=':/')}"
-    )
+    return f"{pr.url}/files/{quote(base_sha, safe=':/')}..{quote(head_sha, safe=':/')}"
 
 
 @contextlib.contextmanager

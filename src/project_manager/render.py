@@ -60,10 +60,7 @@ class Column(Generic[T]):
     markup: bool = False
 
     def render_cell(self, row: T) -> str:
-        raw = (
-            getattr(row, self.value) if isinstance(self.value, str)
-            else self.value(row)
-        )
+        raw = getattr(row, self.value) if isinstance(self.value, str) else self.value(row)
         if raw is None or raw == "":
             return self.empty
         return str(raw)
@@ -136,7 +133,10 @@ def console(*, stderr: bool = False) -> Console:
     default; callers opt into markup via `print(..., markup=True)`.
     """
     return Console(
-        stderr=stderr, highlight=False, markup=False, soft_wrap=True,
+        stderr=stderr,
+        highlight=False,
+        markup=False,
+        soft_wrap=True,
     )
 
 
@@ -170,17 +170,17 @@ def emit_sections(
 
     JSON shape: `[{shape.group_key: title, shape.items_key: [raw_row...]}]`.
     """
-    materialized: list[tuple[str, list[T]]] = [
-        (s.title, list(s.rows)) for s in sections
-    ]
+    materialized: list[tuple[str, list[T]]] = [(s.title, list(s.rows)) for s in sections]
     if as_json:
-        console().print_json(data=[
-            {
-                shape.group_key: title,
-                shape.items_key: [_default_to_dict(r) for r in rows],
-            }
-            for title, rows in materialized
-        ])
+        console().print_json(
+            data=[
+                {
+                    shape.group_key: title,
+                    shape.items_key: [_default_to_dict(r) for r in rows],
+                }
+                for title, rows in materialized
+            ]
+        )
         return
     if not materialized:
         return
@@ -217,14 +217,22 @@ def build_sections_table(
     """
     flat_rows = [r for _, rs in materialized for r in rs]
     other_widths = _compute_widths(flat_rows, columns)
-    group_width = max(
-        len(group.title),
-        *(len(title) for title, _ in materialized),
-    ) if materialized else len(group.title)
+    group_width = (
+        max(
+            len(group.title),
+            *(len(title) for title, _ in materialized),
+        )
+        if materialized
+        else len(group.title)
+    )
     t = Table(
-        box=box.HORIZONTALS, show_edge=False, pad_edge=False, padding=(0, 2),
+        box=box.HORIZONTALS,
+        show_edge=False,
+        pad_edge=False,
+        padding=(0, 2),
         collapse_padding=selected_flat_idx is not None,
-        show_header=True, header_style="dim",
+        show_header=True,
+        header_style="dim",
     )
     t.add_column(group.title, min_width=group_width)
     for i, col in enumerate(columns):
@@ -254,14 +262,14 @@ def build_sections_table(
             t.add_row(
                 Text(
                     title if i == 0 else "",
-                    style=_selected_style(group.style) if is_selected
-                    else group.style,
+                    style=_selected_style(group.style) if is_selected else group.style,
                 ),
                 *(
                     Text(
                         col.render_cell(r),
                         style=_selected_style(col.render_style(r))
-                        if is_selected else (col.render_style(r) or ""),
+                        if is_selected
+                        else (col.render_style(r) or ""),
                     )
                     for col in columns
                 ),
@@ -417,8 +425,12 @@ def _render_table(
     columns: list[Column[T]],
 ) -> None:
     t = Table(
-        box=box.HORIZONTALS, show_edge=False, pad_edge=False, padding=(0, 2),
-        show_header=True, header_style="dim",
+        box=box.HORIZONTALS,
+        show_edge=False,
+        pad_edge=False,
+        padding=(0, 2),
+        show_header=True,
+        header_style="dim",
     )
     for col in columns:
         t.add_column(col.title)

@@ -1,4 +1,5 @@
 """`pm stacker repair`."""
+
 from project_manager import config
 from project_manager.cli._shared import RepoFlag
 
@@ -18,6 +19,4 @@ def repair(
     """
     paths = config.load()
     svc = _common.service(paths)
-    return _common.emit(
-        svc.repair(_common.target(flag.repo, branch, paths), base_ref)
-    )
+    return _common.emit(svc.repair(_common.target(flag.repo, branch, paths), base_ref))

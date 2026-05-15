@@ -4,6 +4,7 @@ These exercise parsing — no service calls — so assertions target the aligned
 command surface: the subcommand set, scope flag grammar, and the handlers
 wired to each command.
 """
+
 import pytest
 
 # Import for side-effect: registers every sub-app/command on `root`.
@@ -86,7 +87,9 @@ def test_removed_commands_no_longer_exist() -> None:
     ],
 )
 def test_every_subcommand_is_registered(
-    subcommand: str, args: list[str], expected_fn,
+    subcommand: str,
+    args: list[str],
+    expected_fn,
 ) -> None:
     fn, _ = _parse(subcommand, *args)
     assert fn is expected_fn

@@ -285,8 +285,13 @@ def test_repo_pr_files_url_uses_current_head_after_local_commit(
     stacker_git.git(slot_b.path, "add", "feature-b-extra.txt")
     stacker_git.git(
         slot_b.path,
-        "-c", "user.email=t@e.com", "-c", "user.name=t",
-        "commit", "-m", "B: extra local commit",
+        "-c",
+        "user.email=t@e.com",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-m",
+        "B: extra local commit",
     )
     actual_head_b = stacker_git.rev_parse(slot_b.path, "HEAD")
 
@@ -302,9 +307,7 @@ def test_repo_pr_files_url_uses_current_head_after_local_commit(
         f"current HEAD ({actual_head_b}); last_clean_head was not refreshed "
         f"after the local commit"
     )
-    assert base_sha != head_sha, (
-        f"base..head collapsed to {base_sha}..{head_sha} (empty diff)"
-    )
+    assert base_sha != head_sha, f"base..head collapsed to {base_sha}..{head_sha} (empty diff)"
 
 
 def test_repo_pr_root_branch_files_link_omits_range(
@@ -464,7 +467,11 @@ def test_push_from_middle_branch_links_focus_pr_in_stack_blocks(
     slot_a, slot_b, slot_c = three_slots[0], three_slots[1], three_slots[2]
 
     _build_branch(
-        repo_path, slot_a.path, "feature-a", "main", ("A\n", "A: first commit\n\n"),
+        repo_path,
+        slot_a.path,
+        "feature-a",
+        "main",
+        ("A\n", "A: first commit\n\n"),
     )
     _setup_fake_upstream(slot_a.path, "feature-a")
     service.init_adopt_branch(
@@ -477,7 +484,11 @@ def test_push_from_middle_branch_links_focus_pr_in_stack_blocks(
     )
 
     _build_branch(
-        repo_path, slot_b.path, "feature-b", "feature-a", ("B\n", "B: second commit\n\n"),
+        repo_path,
+        slot_b.path,
+        "feature-b",
+        "feature-a",
+        ("B\n", "B: second commit\n\n"),
     )
     _setup_fake_upstream(slot_b.path, "feature-b")
     service.init_adopt_branch(
@@ -490,7 +501,11 @@ def test_push_from_middle_branch_links_focus_pr_in_stack_blocks(
     )
 
     _build_branch(
-        repo_path, slot_c.path, "feature-c", "feature-b", ("C\n", "C: third commit\n\n"),
+        repo_path,
+        slot_c.path,
+        "feature-c",
+        "feature-b",
+        ("C\n", "C: third commit\n\n"),
     )
     _setup_fake_upstream(slot_c.path, "feature-c")
     service.init_adopt_branch(
@@ -508,7 +523,8 @@ def test_push_from_middle_branch_links_focus_pr_in_stack_blocks(
     # Default scope walks the full lineage parent→leaf, so PR #1 (feature-a),
     # PR #2 (feature-b), PR #3 (feature-c) get created in that order.
     service.push(
-        SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True),
+        SelectorTarget(repo_name=repo_name, branch="feature-b"),
+        PushOptions(draft=True),
     )
 
     final = {req.number: body for (req, body) in backend.edited if body is not None}
@@ -808,8 +824,7 @@ def test_push_only_from_one_arm_skips_other_arms(
 
     pushed_branches = {request.head.rsplit(":", 1)[-1] for request, _ in backend.created}
     assert pushed_branches == {"feature-c1"}, (
-        f"--only push from feature-c1 must push only feature-c1, "
-        f"got {pushed_branches}"
+        f"--only push from feature-c1 must push only feature-c1, got {pushed_branches}"
     )
 
 
@@ -836,11 +851,13 @@ def test_push_from_one_arm_renders_full_tree_in_stack_block(
     )
 
     final = {req.number: body for (req, body) in backend.edited if body is not None}
-    pr_numbers_by_branch = {
-        head: pr.number for (_repo, head), pr in backend.prs_by_head.items()
-    }
+    pr_numbers_by_branch = {head: pr.number for (_repo, head), pr in backend.prs_by_head.items()}
     expected_branches = (
-        "feature-a", "feature-b1", "feature-c1", "feature-b2", "feature-c2",
+        "feature-a",
+        "feature-b1",
+        "feature-c1",
+        "feature-b2",
+        "feature-c2",
     )
     for branch in expected_branches:
         assert branch in pr_numbers_by_branch, (

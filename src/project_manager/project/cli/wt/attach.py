@@ -1,4 +1,5 @@
 """`pm project wt attach`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -26,7 +27,10 @@ def attach(
     paths = config.load()
     project = current.resolve_project(paths, flag.project)
     result = attach_mod.attach(
-        paths, project, selected_wts(sel), no_branch=no_branch,
+        paths,
+        project,
+        selected_wts(sel),
+        no_branch=no_branch,
     )
     err = render.console(stderr=True)
     for warning in result.warnings:

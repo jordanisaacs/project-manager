@@ -6,6 +6,7 @@ never touch termios or real stdin and don't depend on running in a TTY.
 `pick`'s TTY guard is exercised directly (it raises before touching
 termios).
 """
+
 from __future__ import annotations
 
 import io
@@ -61,13 +62,16 @@ def _call_core(
 ) -> _Row | None:
     materialized = [(s.title, list(s.rows)) for s in sections]
     flat_rows = [r for _, rs in materialized for r in rs]
-    selectable_idxs = [
-        i for i, r in enumerate(flat_rows) if is_selectable(r)
-    ]
+    selectable_idxs = [i for i, r in enumerate(flat_rows) if is_selectable(r)]
     return tui._pick_core(
-        materialized, flat_rows, selectable_idxs, _COLUMNS,
-        group=GroupColumn("G"), header=None,
-        read_key=_script(keys), console=_sink_console(),
+        materialized,
+        flat_rows,
+        selectable_idxs,
+        _COLUMNS,
+        group=GroupColumn("G"),
+        header=None,
+        read_key=_script(keys),
+        console=_sink_console(),
     )
 
 
@@ -95,7 +99,8 @@ def test_up_at_top_stays_at_top() -> None:
 def test_down_at_bottom_stays_at_bottom() -> None:
     secs = [Section(title="s", rows=[_Row("a"), _Row("b")])]
     assert _call_core(
-        secs, [Key.DOWN, Key.DOWN, Key.DOWN, Key.ENTER],
+        secs,
+        [Key.DOWN, Key.DOWN, Key.DOWN, Key.ENTER],
     ) == _Row("b")
 
 
@@ -109,21 +114,28 @@ def test_other_keys_are_ignored() -> None:
     # OTHER should not move the cursor or select — only the final ENTER
     # resolves the pick, still on row 0.
     assert _call_core(
-        secs, [Key.OTHER, Key.OTHER, Key.ENTER],
+        secs,
+        [Key.OTHER, Key.OTHER, Key.ENTER],
     ) == _Row("a")
 
 
 def test_keyboard_interrupt_cancels() -> None:
     """Ctrl-C during cbreak raises KeyboardInterrupt in the caller's
     key reader; the picker treats it as cancel, not an unhandled crash."""
+
     def read() -> Key:
         raise KeyboardInterrupt
 
     materialized = [("s", [_Row("a")])]
     got = tui._pick_core(
-        materialized, [_Row("a")], [0], _COLUMNS,
-        group=GroupColumn("G"), header=None,
-        read_key=read, console=_sink_console(),
+        materialized,
+        [_Row("a")],
+        [0],
+        _COLUMNS,
+        group=GroupColumn("G"),
+        header=None,
+        read_key=read,
+        console=_sink_console(),
     )
     assert got is None
 
@@ -133,14 +145,18 @@ def test_is_selectable_skips_placeholder_rows() -> None:
     `pm agent ls`) but navigation hops over them — DOWN from row 0
     lands on row 2, skipping the middle placeholder."""
     secs = [
-        Section(title="s", rows=[
-            _Row("a", selectable=True),
-            _Row("placeholder", selectable=False),
-            _Row("c", selectable=True),
-        ]),
+        Section(
+            title="s",
+            rows=[
+                _Row("a", selectable=True),
+                _Row("placeholder", selectable=False),
+                _Row("c", selectable=True),
+            ],
+        ),
     ]
     got = _call_core(
-        secs, [Key.DOWN, Key.ENTER],
+        secs,
+        [Key.DOWN, Key.ENTER],
         is_selectable=lambda r: r.selectable,
     )
     assert got == _Row("c")
@@ -151,13 +167,18 @@ def test_all_unselectable_returns_none_without_entering_loop() -> None:
     scripted reader is never consumed, which our `_script` would
     flag as an assertion error if the picker tried to read."""
     secs = [
-        Section(title="s", rows=[
-            _Row("p1", selectable=False),
-            _Row("p2", selectable=False),
-        ]),
+        Section(
+            title="s",
+            rows=[
+                _Row("p1", selectable=False),
+                _Row("p2", selectable=False),
+            ],
+        ),
     ]
     got = tui.pick(
-        secs, _COLUMNS, group=GroupColumn("G"),
+        secs,
+        _COLUMNS,
+        group=GroupColumn("G"),
         is_selectable=lambda r: r.selectable,
     )
     assert got is None
@@ -173,6 +194,7 @@ def test_pick_raises_tui_error_on_non_tty_stdin(
 ) -> None:
     """Library-level guard — call sites should normally pre-check, but
     `pick` still fails loudly rather than silently hanging on a non-TTY."""
+
     class NonTtyStdin:
         def isatty(self) -> bool:
             return False

@@ -80,5 +80,8 @@ def absorb(ctx: StackerCtx, target: SelectorTarget) -> str:
             f"({fmt.short(parent_slot_head)})",
         )
         return cp_driver.run_until_pause_or_finish(
-            ctx, repo_name, acquired, logs=logs,
+            ctx,
+            repo_name,
+            acquired,
+            logs=logs,
         )

@@ -7,6 +7,7 @@ of the operation against every branch in scope, then per-branch gate
 checks read the freshly-updated `pr_state` rows from SQLite — no network
 calls in the per-branch path.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -20,7 +21,8 @@ if TYPE_CHECKING:
 
 
 def refresh_review_state(
-    ctx: StackerCtx, branches: list[TrackedBranch],
+    ctx: StackerCtx,
+    branches: list[TrackedBranch],
 ) -> None:
     """Bulk-refresh `pr_state` rows via one GraphQL call per (owner, repo).
 
@@ -30,10 +32,7 @@ def refresh_review_state(
     GraphQL blip can't break `ls` or `sync`; callers fall back to
     whatever's already in the cache.
     """
-    cached = {
-        (pr.repo_name, pr.branch): pr
-        for pr in ctx.db.list_pr_states()
-    }
+    cached = {(pr.repo_name, pr.branch): pr for pr in ctx.db.list_pr_states()}
     entries: list[tuple[tuple[str, str, int], tuple[str, str]]] = []
     for b in branches:
         pr = cached.get((b.repo_name, b.branch))

@@ -21,8 +21,11 @@ if TYPE_CHECKING:
 
 
 def reparent(
-    ctx: StackerCtx, target: SelectorTarget, new_parent: ParentLocator,
-    *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
+    ctx: StackerCtx,
+    target: SelectorTarget,
+    new_parent: ParentLocator,
+    *,
+    options: SyncOptions = DEFAULT_SYNC_OPTIONS,
 ) -> str:
     """Move `target` onto a new parent; cascade cherry-pick through descendants.
 
@@ -51,9 +54,7 @@ def reparent(
         )
     repo_path = ctx.paths.repo(tracked.repo_name)
     if not git.branch_exists(repo_path, new_parent.branch):
-        raise git.GitError(
-            f"Branch '{new_parent.branch}' not found in {tracked.repo_name}."
-        )
+        raise git.GitError(f"Branch '{new_parent.branch}' not found in {tracked.repo_name}.")
     ctx.db.upsert_branch(
         TrackedBranch(
             repo_name=tracked.repo_name,
@@ -66,14 +67,14 @@ def reparent(
         )
     )
     return sync_ops.sync(
-        ctx, target, ScopeSpec(scope="current", skip_ancestors=True),
+        ctx,
+        target,
+        ScopeSpec(scope="current", skip_ancestors=True),
         options=options,
     )
 
 
-def _is_descendant(
-    ctx: StackerCtx, tracked: TrackedBranch, candidate: str
-) -> bool:
+def _is_descendant(ctx: StackerCtx, tracked: TrackedBranch, candidate: str) -> bool:
     for descendant in toposorted_descendants(ctx, tracked.repo_name, tracked.branch):
         if descendant.branch == candidate:
             return True

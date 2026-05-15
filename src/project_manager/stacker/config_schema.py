@@ -20,9 +20,7 @@ _REPO_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 def _validate_mode(value: str) -> None:
     if value not in PR_MODES:
-        raise git.GitError(
-            f"pr.mode must be one of {sorted(PR_MODES)}; got {value!r}."
-        )
+        raise git.GitError(f"pr.mode must be one of {sorted(PR_MODES)}; got {value!r}.")
 
 
 def _validate_trunk(value: str) -> None:
@@ -32,9 +30,7 @@ def _validate_trunk(value: str) -> None:
 
 def _validate_target_repo(value: str) -> None:
     if not _REPO_SLUG_RE.match(value):
-        raise git.GitError(
-            f"pr.target-repo must be in 'owner/repo' form; got {value!r}."
-        )
+        raise git.GitError(f"pr.target-repo must be in 'owner/repo' form; got {value!r}.")
 
 
 @dataclass(frozen=True)
@@ -67,9 +63,7 @@ def require_known_key(key: str) -> _KeySpec:
     spec = CONFIG_KEYS.get(key)
     if spec is None:
         valid = ", ".join(sorted(CONFIG_KEYS))
-        raise git.GitError(
-            f"Unknown config key {key!r}. Valid keys: {valid}."
-        )
+        raise git.GitError(f"Unknown config key {key!r}. Valid keys: {valid}.")
     return spec
 
 

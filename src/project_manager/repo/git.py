@@ -35,8 +35,7 @@ def is_dirty(repo: Path) -> bool:
     subsequent pull of the parent.
     """
     result = run(
-        ["git", "-C", str(repo), "status", "--porcelain",
-         "--ignore-submodules=all"],
+        ["git", "-C", str(repo), "status", "--porcelain", "--ignore-submodules=all"],
         check=False,
     )
     return bool(result.stdout.strip())
@@ -45,8 +44,7 @@ def is_dirty(repo: Path) -> bool:
 def upstream_ref(repo: Path) -> str | None:
     """Return the upstream tracking ref (e.g. 'origin/main'), or None."""
     result = run(
-        ["git", "-C", str(repo), "rev-parse", "--abbrev-ref",
-         "--symbolic-full-name", "@{u}"],
+        ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         check=False,
     )
     if result.returncode != 0:
@@ -94,8 +92,7 @@ _AHEAD_BEHIND_FIELDS = 2
 def ahead_behind(repo: Path) -> tuple[int, int] | None:
     """Return (ahead, behind) vs. @{u}, or None if no upstream."""
     result = run(
-        ["git", "-C", str(repo), "rev-list", "--left-right", "--count",
-         "@{u}...HEAD"],
+        ["git", "-C", str(repo), "rev-list", "--left-right", "--count", "@{u}...HEAD"],
         check=False,
     )
     if result.returncode != 0:
@@ -121,8 +118,7 @@ def rev_parse(repo: Path, ref: str) -> str | None:
 def branch_exists(repo: Path, branch: str) -> bool:
     """True if a local branch with this name exists."""
     result = run(
-        ["git", "-C", str(repo), "rev-parse", "--verify", "-q",
-         f"refs/heads/{branch}"],
+        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", f"refs/heads/{branch}"],
         check=False,
     )
     return result.returncode == 0
@@ -137,8 +133,7 @@ def origin_head_branch(repo: Path) -> str | None:
     "don't know" and fall back to other heuristics.
     """
     result = run(
-        ["git", "-C", str(repo), "symbolic-ref", "--short", "-q",
-         "refs/remotes/origin/HEAD"],
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"],
         check=False,
     )
     if result.returncode != 0:
@@ -146,7 +141,7 @@ def origin_head_branch(repo: Path) -> str | None:
     ref = result.stdout.strip()
     prefix = "origin/"
     if ref.startswith(prefix):
-        return ref[len(prefix):] or None
+        return ref[len(prefix) :] or None
     return ref or None
 
 
@@ -158,8 +153,7 @@ def remote_head_sha(repo: Path, branch: str) -> str | None:
     branch) — callers treat that as "unknown" rather than "up-to-date".
     """
     result = run(
-        ["git", "-C", str(repo), "ls-remote", "--heads", "origin",
-         f"refs/heads/{branch}"],
+        ["git", "-C", str(repo), "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
         check=False,
     )
     if result.returncode != 0:

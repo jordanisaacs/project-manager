@@ -29,7 +29,11 @@ def continue_operation(ctx: StackerCtx, repo_name: str) -> str:
         else None
     )
     return cp_driver.run_until_pause_or_finish(
-        ctx, repo_name, handle, continuing=True, logs=[],
+        ctx,
+        repo_name,
+        handle,
+        continuing=True,
+        logs=[],
     )
 
 

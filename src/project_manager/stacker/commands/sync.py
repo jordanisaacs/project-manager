@@ -1,4 +1,5 @@
 """`pm stacker sync`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -78,8 +79,7 @@ def sync(
     if continue_ or abort:
         if allow_drop_parent_modifications or allow_drop_merge or offline:
             raise git.GitError(
-                "--allow-drop-* and --offline cannot be combined with "
-                "--continue or --abort.",
+                "--allow-drop-* and --offline cannot be combined with --continue or --abort.",
             )
         if continue_:
             return _common.emit(svc.continue_operation(_common.resolve_repo(scope.repo, paths)))
@@ -87,7 +87,8 @@ def sync(
     target = _common.target(scope.repo, branch, paths)
     return _common.emit(
         svc.sync(
-            target, _common.scope_spec(scope),
+            target,
+            _common.scope_spec(scope),
             options=SyncOptions(
                 allow_drop_parent_modifications=allow_drop_parent_modifications,
                 allow_drop_merge=allow_drop_merge,

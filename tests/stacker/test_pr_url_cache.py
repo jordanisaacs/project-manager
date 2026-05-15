@@ -5,6 +5,7 @@ re-used on subsequent runs instead of re-searching GitHub. Lives in
 the `pr_state` table rather than on `tracked_branches` so PR metadata
 stays orthogonal to stack state.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,16 +32,17 @@ from .fakes import RecordingPRBackend
 def _commit_one(slot_path: Path, name: str) -> None:
     (slot_path / name).write_text(f"{name}\n")
     stacker_git.git(slot_path, "add", name)
-    stacker_git.git(slot_path, "-c", "user.email=t@e.com", "-c", "user.name=t",
-                    "commit", "-m", f"add {name}")
+    stacker_git.git(
+        slot_path, "-c", "user.email=t@e.com", "-c", "user.name=t", "commit", "-m", f"add {name}"
+    )
 
 
 def _config_upstream(slot_path: Path, branch: str) -> None:
-    stacker_git.git(slot_path, "remote", "add", "origin-fake",
-                    "git@github.com:acme/widgets.git", check=False)
+    stacker_git.git(
+        slot_path, "remote", "add", "origin-fake", "git@github.com:acme/widgets.git", check=False
+    )
     stacker_git.git(slot_path, "config", f"branch.{branch}.remote", "origin-fake")
-    stacker_git.git(slot_path, "config", f"branch.{branch}.merge",
-                    f"refs/heads/{branch}")
+    stacker_git.git(slot_path, "config", f"branch.{branch}.merge", f"refs/heads/{branch}")
 
 
 @pytest.fixture
@@ -71,7 +73,9 @@ def feature_a(
     slot = three_slots[0]
     service.init_new_branch(
         WorktreeInit(
-            repo_name=repo_name, worktree_path=slot.path, branch="feature-a",
+            repo_name=repo_name,
+            worktree_path=slot.path,
+            branch="feature-a",
             parent=ParentLocator(repo_name=repo_name, branch="main"),
         )
     )
@@ -106,7 +110,10 @@ def test_second_run_is_cache_hit_no_search(
     original = backend.list_open_prs
 
     def _count(
-        repo: str, *, head: str | None = None, search: str | None = None,
+        repo: str,
+        *,
+        head: str | None = None,
+        search: str | None = None,
     ) -> list[gh.PullRequest]:
         search_calls.append(search or head or "")
         return original(repo, head=head, search=search)

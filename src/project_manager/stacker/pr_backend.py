@@ -14,9 +14,7 @@ class PRBackend(Protocol):
     recording fake.
     """
 
-    def repo_info(
-        self, *, cwd: Path | None = None, repo: str | None = None
-    ) -> gh.RepoInfo: ...
+    def repo_info(self, *, cwd: Path | None = None, repo: str | None = None) -> gh.RepoInfo: ...
 
     def list_open_prs(
         self,
@@ -35,16 +33,15 @@ class PRBackend(Protocol):
     def search_prs(self, query: str) -> list[gh.PullRequest]: ...
 
     def batch_pr_review(
-        self, entries: Sequence[tuple[str, str, int]],
+        self,
+        entries: Sequence[tuple[str, str, int]],
     ) -> dict[tuple[str, str, int], gh.PRReviewSummary]: ...
 
 
 class GhCliBackend:
     """Production backend — delegates to `stacker.gh` module-level functions."""
 
-    def repo_info(
-        self, *, cwd: Path | None = None, repo: str | None = None
-    ) -> gh.RepoInfo:
+    def repo_info(self, *, cwd: Path | None = None, repo: str | None = None) -> gh.RepoInfo:
         return gh.repo_info(cwd=cwd, repo=repo)
 
     def list_open_prs(
@@ -69,6 +66,7 @@ class GhCliBackend:
         return gh.search_prs(query)
 
     def batch_pr_review(
-        self, entries: Sequence[tuple[str, str, int]],
+        self,
+        entries: Sequence[tuple[str, str, int]],
     ) -> dict[tuple[str, str, int], gh.PRReviewSummary]:
         return gh.batch_pr_review(entries)

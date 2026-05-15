@@ -5,6 +5,7 @@ resolved path — the actual directory change happens in the
 `integrations/pm-cd.zsh` shell wrapper, which captures stdout and runs
 `builtin cd`. `--print` opts out of that wrapper for scripting.
 """
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -48,8 +49,7 @@ def cd(
     forward = paths.forward(project, wt)
     if not forward.is_symlink():
         raise ProjectError(
-            f"worktree '{wt}' is detached; "
-            f"run `pm project wt attach -p {project} --wt {wt}`",
+            f"worktree '{wt}' is detached; run `pm project wt attach -p {project} --wt {wt}`",
         )
     print(forward)
     return 0

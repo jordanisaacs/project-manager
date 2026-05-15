@@ -7,6 +7,7 @@
   these compose against live in `project_manager.cli._params`.
 - `fail` renders the consistent `pm: <msg>` error line used everywhere.
 """
+
 import sys
 from dataclasses import dataclass
 from typing import Annotated
@@ -43,10 +44,12 @@ class WtSelection:
     """`--wt <a,b>` or `--all`; exactly one must be set (enforced in body)."""
 
     wt: Annotated[
-        str | None, Parameter(help="comma-separated worktree names"),
+        str | None,
+        Parameter(help="comma-separated worktree names"),
     ] = None
     all: Annotated[
-        bool, Parameter(name="--all", negative="", help="every worktree in the project"),
+        bool,
+        Parameter(name="--all", negative="", help="every worktree in the project"),
     ] = False
 
 

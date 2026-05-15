@@ -12,6 +12,7 @@ Step (2) is what made it possible to do `pm stacker create --replace` and
 `pm stacker sync` on the cwd slot after the user explicitly detached HEAD
 to free it; previously each flow had its own ad-hoc resolution.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -88,12 +89,16 @@ def resolve_slot(
     pooldb = PoolDB(ctx.paths.pool_db())
     try:
         claimed = ops_slot.acquire(
-            ctx.paths, pooldb, repo_name, branch,
+            ctx.paths,
+            pooldb,
+            repo_name,
+            branch,
             wait=ops_slot.WaitOptions(progress=ctx.progress),
         )
     except slot_mod.PoolExhaustedError:
         fallback = _cwd_reuse_path(
-            ctx, repo_name,
+            ctx,
+            repo_name,
             CwdReusePolicy(enabled=cwd_reuse.enabled, allow_branch_switch=True),
         )
         if fallback is None:
@@ -121,7 +126,9 @@ def reserve_for_new_branch(
         return AcquiredSlot(path=cwd_path, ops=None)
     pooldb = PoolDB(ctx.paths.pool_db())
     claimed = ops_slot.claim(
-        ctx.paths, pooldb, repo_name,
+        ctx.paths,
+        pooldb,
+        repo_name,
         wait=ops_slot.WaitOptions(progress=ctx.progress),
     )
     return AcquiredSlot(path=claimed.path, ops=claimed)
@@ -214,9 +221,7 @@ def try_release_ops_slot(ctx: StackerCtx, repo: str, uuid: str) -> bool:
     return True
 
 
-def _cwd_reuse_path(
-    ctx: StackerCtx, repo_name: str, policy: CwdReusePolicy
-) -> Path | None:
+def _cwd_reuse_path(ctx: StackerCtx, repo_name: str, policy: CwdReusePolicy) -> Path | None:
     if not policy.enabled:
         return None
     here = locate.slot_for_cwd(ctx.paths)

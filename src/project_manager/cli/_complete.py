@@ -13,6 +13,7 @@ per-parameter completion. See upstream issue #641. When that lands, the
 bodies below collapse into plain `() -> list[str]` functions attached via
 `Parameter(completion=...)` and this sub-app can be deleted.
 """
+
 import re
 from contextlib import suppress
 from typing import Literal
@@ -265,8 +266,7 @@ def zsh_script() -> int:
     m = _PROJECT_CREATE_BLOCK.search(script)
     if m is None:
         warn.append(
-            "project-level `create)` block not found; --project "
-            "autocompletion may leak into it",
+            "project-level `create)` block not found; --project autocompletion may leak into it",
         )
     else:
         stash = m.group(0)

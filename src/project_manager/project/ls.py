@@ -103,12 +103,7 @@ def ls(paths: Paths) -> list[ProjectRow]:
         findings = check_mod.check_project(paths, project, include_orphan_owners=False)
         for f in findings:
             label = _KIND_TO_LABEL.get(f.kind)
-            if (
-                label is None
-                or f.wt is None
-                or f.repo is None
-                or f.slot_path is None
-            ):
+            if label is None or f.wt is None or f.repo is None or f.slot_path is None:
                 continue
             rows.append(
                 ProjectRow(

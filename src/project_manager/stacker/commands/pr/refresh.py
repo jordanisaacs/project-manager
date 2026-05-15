@@ -1,4 +1,5 @@
 """`pm stacker pr refresh` — re-discover the GitHub PR for a tracked branch."""
+
 from project_manager import config, render
 from project_manager.cli._shared import RepoFlag
 from project_manager.stacker.commands import _common

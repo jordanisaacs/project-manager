@@ -12,9 +12,7 @@ from project_manager.stacker.models import OperationState, ParentLocator, Worktr
 from project_manager.stacker.service import StackerService
 
 
-def _initialize(
-    service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str
-) -> None:
+def _initialize(service: StackerService, repo_name: str, slot: slot_mod.Slot, branch: str) -> None:
     service.init_new_branch(
         WorktreeInit(
             repo_name=repo_name,

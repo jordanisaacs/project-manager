@@ -16,9 +16,7 @@ from .fakes import RecordingPRBackend
 @pytest.fixture
 def backend() -> RecordingPRBackend:
     return RecordingPRBackend(
-        default_repo=gh.RepoInfo(
-            name_with_owner="acme/widgets", owner="acme", name="widgets"
-        )
+        default_repo=gh.RepoInfo(name_with_owner="acme/widgets", owner="acme", name="widgets")
     )
 
 

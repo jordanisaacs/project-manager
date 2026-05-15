@@ -1,4 +1,5 @@
 """`pm stacker guard` — internal guardrails for Git hooks."""
+
 from cyclopts import App
 
 from project_manager import config

@@ -1,4 +1,5 @@
 """`pm stacker push`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -35,6 +36,4 @@ def push(
         publish=publish,
         create_pr=create_pr,
     )
-    return _common.emit(
-        svc.push(_common.target(scope.repo, branch, paths), options)
-    )
+    return _common.emit(svc.push(_common.target(scope.repo, branch, paths), options))

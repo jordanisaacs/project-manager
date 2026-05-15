@@ -44,7 +44,8 @@ def test_split_moves_later_commits_to_new_branch_stay(
     assert b_tracked is not None
     # only one commit since managed_base (the original b1)
     commits = stacker_git.rev_list(
-        b_slot.path, f"{b_tracked.managed_base_commit}..{b_head}",
+        b_slot.path,
+        f"{b_tracked.managed_base_commit}..{b_head}",
     )
     assert len(commits) == 1
 
@@ -165,5 +166,3 @@ def test_split_default_degrades_when_pool_is_saturated(
     assert "Split" in result
     assert "could not claim a slot" in result
     assert service.db.get_branch(tracked_stack.repo_name, "b-split") is not None
-
-

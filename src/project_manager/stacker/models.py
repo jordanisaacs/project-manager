@@ -106,7 +106,7 @@ class PRState:
     repo_name: str
     branch: str
     pr_url: str
-    state: str                       # "OPEN" | "MERGED" | "CLOSED"
+    state: str  # "OPEN" | "MERGED" | "CLOSED"
     pr_number: int | None = None
     is_draft: bool = False
     merged: bool = False

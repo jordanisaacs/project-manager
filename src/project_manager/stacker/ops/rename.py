@@ -32,9 +32,7 @@ def rename(ctx: StackerCtx, target: SelectorTarget, new_name: str) -> str:
     repo_path = ctx.paths.repo(tracked.repo_name)
     if git.branch_exists(repo_path, new_name):
         raise git.GitError(f"Branch {new_name} already exists.")
-    current_path = worktree.require_checked_out(
-        ctx, tracked.repo_name, tracked.branch
-    )
+    current_path = worktree.require_checked_out(ctx, tracked.repo_name, tracked.branch)
     children = ctx.db.get_children(tracked.repo_name, target.branch)
     # Capture the PR-state cache under the old name before deleting the
     # branch (which also wipes its pr_state row). Re-upsert under the new

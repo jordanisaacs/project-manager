@@ -1,4 +1,5 @@
 """Smoke tests for `pm __complete` verbs (see cli/_complete.py)."""
+
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,8 @@ def _just_repos(names: list[str]) -> list[tuple[str, str]]:
 
 
 def test_projects_lists_created_projects(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
@@ -34,7 +36,8 @@ def test_projects_empty_on_fresh_env(
 
 
 def test_repos_lists_pool_repos(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
@@ -52,7 +55,8 @@ def test_repos_empty_on_fresh_env(
 
 
 def test_worktrees_lists_project_wts(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=2)
     git_pool(pm_env, "bar", n=1)
@@ -74,10 +78,12 @@ def test_worktrees_unknown_project_silent(
 
 
 def test_worktrees_filter_by_attach_state(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """state=attached/unattached filter correctly."""
     from project_manager.project import detach as detach_mod
+
     git_pool(pm_env, "foo", n=2)
     create_mod.create(pm_env, "demo", [("foo1", "foo"), ("foo2", "foo")])
     # Detach foo1 → it should appear in "unattached", not in "attached".
@@ -108,7 +114,8 @@ def test_worktrees_no_project_outside_cwd(
 
 
 def test_verbs_swallow_broken_config(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Pointing PM_CONFIG at a bogus file must not raise — completion should

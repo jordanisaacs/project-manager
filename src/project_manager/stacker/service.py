@@ -10,6 +10,7 @@ This facade just bundles deps into a StackerCtx and forwards 20 public
 methods. No private passthroughs — tests that need internals import
 them directly from the new modules.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -138,9 +139,7 @@ class StackerService:
             self._ctx, repo_name, branch, parent, copy_from=copy_from
         )
 
-    def track(
-        self, target: SelectorTarget, parent: ParentLocator
-    ) -> TrackedBranch:
+    def track(self, target: SelectorTarget, parent: ParentLocator) -> TrackedBranch:
         return track_ops.track(self._ctx, target, parent)
 
     # --- mutate ---
@@ -162,11 +161,17 @@ class StackerService:
         )
 
     def reparent(
-        self, target: SelectorTarget, new_parent: ParentLocator,
-        *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
+        self,
+        target: SelectorTarget,
+        new_parent: ParentLocator,
+        *,
+        options: SyncOptions = DEFAULT_SYNC_OPTIONS,
     ) -> str:
         return reparent_ops.reparent(
-            self._ctx, target, new_parent, options=options,
+            self._ctx,
+            target,
+            new_parent,
+            options=options,
         )
 
     def split(
@@ -177,9 +182,7 @@ class StackerService:
         *,
         stay: bool = False,
     ) -> str:
-        return split_ops.split(
-            self._ctx, target, new_name, split_commit, stay=stay
-        )
+        return split_ops.split(self._ctx, target, new_name, split_commit, stay=stay)
 
     def rename(self, target: SelectorTarget, new_name: str) -> str:
         return rename_ops.rename(self._ctx, target, new_name)
@@ -187,8 +190,11 @@ class StackerService:
     # --- sync / push / repair ---
 
     def sync(
-        self, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE,
-        *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
+        self,
+        target: SelectorTarget,
+        spec: ScopeSpec = DEFAULT_SCOPE,
+        *,
+        options: SyncOptions = DEFAULT_SYNC_OPTIONS,
     ) -> str:
         return sync_ops.sync(self._ctx, target, spec, options=options)
 

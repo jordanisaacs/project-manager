@@ -1,4 +1,5 @@
 """`pm stacker create`."""
+
 from typing import Annotated
 
 from cyclopts import Parameter
@@ -33,7 +34,9 @@ def create(
     repo_name = _common.resolve_repo(flag.repo, paths)
     on_spec = _on_spec_for_create(on, replace)
     parent = _common.resolve_on_spec(
-        paths, repo_name, on_spec,
+        paths,
+        repo_name,
+        on_spec,
         fallback_branch=branch if replace else None,
     )
     if replace:

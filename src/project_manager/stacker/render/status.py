@@ -17,9 +17,7 @@ def status_text(ctx: StackerCtx, target: SelectorTarget) -> str:
     lines = [selectors.selector_for(target.repo_name, target.branch)]
     lines.append(f"checked out in: {slot_path or '-'}")
     if tracked:
-        parent_label = selectors.selector_for(
-            tracked.parent_repo_name, tracked.parent_branch
-        )
+        parent_label = selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)
         lines.extend(
             [
                 f"parent: {parent_label}",

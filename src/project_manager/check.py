@@ -14,21 +14,21 @@ from project_manager.stacker import ops_slot
 
 
 class Kind(StrEnum):
-    ACTIVE = "active"                  # db row + forward + pool row aligned
-    DETACHED = "detached"              # db row, no forward, no pool row
-    DRIFT = "drift"                    # forward points at slot != db's remembered uuid
-    STALE = "stale"                    # forward exists; pool db row missing or wrong owner
-    BROKEN = "broken"                  # forward points at a missing slot dir
+    ACTIVE = "active"  # db row + forward + pool row aligned
+    DETACHED = "detached"  # db row, no forward, no pool row
+    DRIFT = "drift"  # forward points at slot != db's remembered uuid
+    STALE = "stale"  # forward exists; pool db row missing or wrong owner
+    BROKEN = "broken"  # forward points at a missing slot dir
     ORPHAN_FORWARD = "orphan-forward"  # forward exists, no db row
-    ORPHAN_OWNER = "orphan-owner"      # project-owned pool row with no backing forward
-    OPS_OWNED = "ops-owned"            # stacker-owned slot mid-op (resumable state present)
-    STALE_OPS = "stale-ops"            # stacker-owned slot with a clean worktree — leaked
+    ORPHAN_OWNER = "orphan-owner"  # project-owned pool row with no backing forward
+    OPS_OWNED = "ops-owned"  # stacker-owned slot mid-op (resumable state present)
+    STALE_OPS = "stale-ops"  # stacker-owned slot with a clean worktree — leaked
 
 
 @dataclass(frozen=True)
 class Finding:
     kind: Kind
-    wt: str | None   # worktree name (symlink name under projects/<project>/)
+    wt: str | None  # worktree name (symlink name under projects/<project>/)
     repo: str | None  # pool repo key (may be None when unknowable, e.g. bare orphan forward)
     slot_path: Path | None
     forward_path: Path | None
@@ -134,7 +134,9 @@ def _row_findings(
 
 
 def _orphan_forwards(
-    paths: Paths, project: str, db_wts: set[str],
+    paths: Paths,
+    project: str,
+    db_wts: set[str],
 ) -> Iterator[Finding]:
     project_dir = paths.project(project)
     for entry in sorted(project_dir.iterdir()):
@@ -208,14 +210,15 @@ def _classify_pool_rows(
             slot_path=slot_path,
             forward_path=None,
             detail=(
-                f"pool row owned by {owner.kind.value}:{owner.id} "
-                "but not backed by a live forward"
+                f"pool row owned by {owner.kind.value}:{owner.id} but not backed by a live forward"
             ),
         )
 
 
 def _project_findings(
-    paths: Paths, pooldb: PoolDB, project: str,
+    paths: Paths,
+    pooldb: PoolDB,
+    project: str,
 ) -> tuple[list[Finding], set[tuple[str, str, str]]]:
     """Row findings + orphan_forwards for one project, plus legit (project, repo, uuid) triples."""
     db_path = discovery.require_project_db(paths, project)
@@ -239,9 +242,7 @@ def _project_findings(
                 ),
             )
             continue
-        row_findings = list(
-            _row_findings(paths, pooldb, project, (wt, repo, slot_uuid))
-        )
+        row_findings = list(_row_findings(paths, pooldb, project, (wt, repo, slot_uuid)))
         findings.extend(row_findings)
         for rf in row_findings:
             # ACTIVE and DRIFT both indicate the pool row is legitimately backing
@@ -257,7 +258,10 @@ def _project_findings(
 
 
 def check_project(
-    paths: Paths, project: str, *, include_orphan_owners: bool = True,
+    paths: Paths,
+    project: str,
+    *,
+    include_orphan_owners: bool = True,
 ) -> list[Finding]:
     """All findings for a single project.
 

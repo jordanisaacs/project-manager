@@ -26,7 +26,9 @@ def service(
     backend: RecordingPRBackend,
 ) -> StackerService:
     return StackerService(
-        StackerDB(pm_env.stacker_db()), pm_env, pr_backend=backend,
+        StackerDB(pm_env.stacker_db()),
+        pm_env,
+        pr_backend=backend,
     )
 
 
@@ -75,7 +77,8 @@ def test_pr_pr_mode_with_untracked_parent_errors(service: StackerService) -> Non
 
 
 def test_pr_pr_mode_uses_parent_pr_head_ref_when_parent_not_in_worktree(
-    service: StackerService, backend: RecordingPRBackend,
+    service: StackerService,
+    backend: RecordingPRBackend,
 ) -> None:
     # Repro of the live bug: parent is tracked and has an open PR, but is not
     # checked out in any worktree (e.g. its slot was released after pm pushed
@@ -108,13 +111,17 @@ def test_pr_pr_mode_uses_parent_pr_head_ref_when_parent_not_in_worktree(
     )
 
     base = pr_base_for_current_branch(
-        service.ctx, child, _config("pr-pr"), _repo_info(),
+        service.ctx,
+        child,
+        _config("pr-pr"),
+        _repo_info(),
     )
     assert base == "jordan-isaacs_data/feat-a"
 
 
 def test_pr_pr_mode_errors_if_parent_pr_has_empty_head_ref(
-    service: StackerService, backend: RecordingPRBackend,
+    service: StackerService,
+    backend: RecordingPRBackend,
 ) -> None:
     # Defensive: gh.PullRequest.head_ref_name is `str` not `str | None`, but
     # if a backend ever returns an open PR with an empty ref we must surface
@@ -146,5 +153,8 @@ def test_pr_pr_mode_errors_if_parent_pr_has_empty_head_ref(
 
     with pytest.raises(git.GitError, match="no head ref"):
         pr_base_for_current_branch(
-            service.ctx, child, _config("pr-pr"), _repo_info(),
+            service.ctx,
+            child,
+            _config("pr-pr"),
+            _repo_info(),
         )

@@ -71,9 +71,13 @@ def list_open_prs(
     repo: str, *, head: str | None = None, search: str | None = None
 ) -> list[PullRequest]:
     cmd = [
-        "gh", "pr", "list",
-        "--repo", repo,
-        "--state", "open",
+        "gh",
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
         "--json",
         "number,url,title,body,headRefName,baseRefName,state,isDraft",
     ]
@@ -90,12 +94,19 @@ def create_pr(request: CreatePRRequest) -> str:
     if request.head_repo and request.head_repo != request.repo:
         return _create_pr_rest(request)
     cmd = [
-        "gh", "pr", "create",
-        "--repo", request.repo,
-        "--base", request.base,
-        "--head", request.head,
-        "--title", request.title,
-        "--body-file", str(request.body_file),
+        "gh",
+        "pr",
+        "create",
+        "--repo",
+        request.repo,
+        "--base",
+        request.base,
+        "--head",
+        request.head,
+        "--title",
+        request.title,
+        "--body-file",
+        str(request.body_file),
     ]
     if request.draft:
         cmd.append("--draft")
@@ -110,14 +121,23 @@ def _create_pr_rest(request: CreatePRRequest) -> str:
     """
     assert request.head_repo is not None
     cmd = [
-        "gh", "api", "--method", "POST",
+        "gh",
+        "api",
+        "--method",
+        "POST",
         f"/repos/{request.repo}/pulls",
-        "-f", f"title={request.title}",
-        "-f", f"body={request.body_file.read_text()}",
-        "-f", f"head={request.head}",
-        "-f", f"head_repo={request.head_repo}",
-        "-f", f"base={request.base}",
-        "-F", f"draft={'true' if request.draft else 'false'}",
+        "-f",
+        f"title={request.title}",
+        "-f",
+        f"body={request.body_file.read_text()}",
+        "-f",
+        f"head={request.head}",
+        "-f",
+        f"head_repo={request.head_repo}",
+        "-f",
+        f"base={request.base}",
+        "-F",
+        f"draft={'true' if request.draft else 'false'}",
     ]
     proc = run(cmd)
     payload = json.loads(proc.stdout or "{}")
@@ -127,9 +147,7 @@ def _create_pr_rest(request: CreatePRRequest) -> str:
     return url
 
 
-_PR_URL_RE = re.compile(
-    r"^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$"
-)
+_PR_URL_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$")
 
 
 def parse_pr_url(url: str) -> tuple[str, str, int] | None:
@@ -191,7 +209,8 @@ def view_pr(url: str) -> PullRequest | None:
         return None
     owner, repo, number = parsed
     proc = run(
-        ["gh", "api", f"/repos/{owner}/{repo}/pulls/{number}"], check=False,
+        ["gh", "api", f"/repos/{owner}/{repo}/pulls/{number}"],
+        check=False,
     )
     if proc.returncode != 0:
         return None
@@ -233,7 +252,7 @@ class PRReviewSummary:
     `▼ ⚑ ✓ ◼` set gitstack ships.
     """
 
-    state: str               # OPEN | MERGED | CLOSED
+    state: str  # OPEN | MERGED | CLOSED
     is_draft: bool
     is_approved: bool
     has_open_comments: bool
@@ -267,12 +286,10 @@ def batch_pr_review(
             f"latestReviews(last: 50) {{ nodes {{ state }} }} }}"
             for n in numbers
         )
-        query = (
-            f'query {{ repository(owner: "{owner}", name: "{repo}") {{ '
-            f'{alias_body} }} }}'
-        )
+        query = f'query {{ repository(owner: "{owner}", name: "{repo}") {{ {alias_body} }} }}'
         proc = run(
-            ["gh", "api", "graphql", "-f", f"query={query}"], check=False,
+            ["gh", "api", "graphql", "-f", f"query={query}"],
+            check=False,
         )
         if proc.returncode != 0:
             continue

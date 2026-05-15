@@ -46,9 +46,7 @@ def _init_repo(repo_path: Path, branch: str = "main") -> None:
     _git("commit", "-q", "-m", "init", cwd=repo_path)
 
 
-def commit_file(
-    path: Path, relpath: str, content: str, message: str
-) -> str:
+def commit_file(path: Path, relpath: str, content: str, message: str) -> str:
     file_path = path / relpath
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content)
@@ -121,7 +119,9 @@ def _build_chain(
         # fixture want production-accurate ownership so ops_slot.claim cannot
         # grab a slot that already has a branch checked out.
         pooldb.claim(
-            repo_name, slot.uuid, Owner(OwnerKind.PROJECT, project_label),
+            repo_name,
+            slot.uuid,
+            Owner(OwnerKind.PROJECT, project_label),
         )
         slots[branch] = slot
         service.init_new_branch(
@@ -133,7 +133,10 @@ def _build_chain(
             )
         )
         commits[branch] = commit_file(
-            slot.path, f"{branch}.txt", f"{branch}\n", f"{branch}: first commit",
+            slot.path,
+            f"{branch}.txt",
+            f"{branch}\n",
+            f"{branch}: first commit",
         )
     return TrackedStack(
         repo_name=repo_name,

@@ -26,8 +26,11 @@ if TYPE_CHECKING:
 
 
 def sync(
-    ctx: StackerCtx, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE,
-    *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
+    ctx: StackerCtx,
+    target: SelectorTarget,
+    spec: ScopeSpec = DEFAULT_SCOPE,
+    *,
+    options: SyncOptions = DEFAULT_SYNC_OPTIONS,
 ) -> str:
     """Cherry-pick a set of tracked branches onto their parents.
 
@@ -69,7 +72,10 @@ def sync(
 
 
 def _sync_one(
-    ctx: StackerCtx, tracked: TrackedBranch, *, options: SyncOptions,
+    ctx: StackerCtx,
+    tracked: TrackedBranch,
+    *,
+    options: SyncOptions,
 ) -> str:
     """Single-branch sync path: local_sync op with up-to-date short-circuit."""
     ctx.db.put_operation(
@@ -91,7 +97,9 @@ def _sync_one(
         with worktree.acquired_for_op(ctx, tracked.repo_name, tracked.branch) as acquired:
             sync_gates.run_branch_gates(ctx, tracked, acquired.path, options=options)
             collapse_msg = sync_gates.collapse_if_merged(
-                ctx, tracked, acquired.path,
+                ctx,
+                tracked,
+                acquired.path,
                 allow_drop_merge=options.allow_drop_merge,
             )
             if collapse_msg is not None:
@@ -111,11 +119,17 @@ def _sync_one(
             ensure_syncable(acquired.path)
             logs: list[str] = []
             cp_driver.prepare_local_operation(
-                ctx, tracked, op_type="local_sync", slot_path=acquired.path,
+                ctx,
+                tracked,
+                op_type="local_sync",
+                slot_path=acquired.path,
                 logs=logs,
             )
             return cp_driver.run_until_pause_or_finish(
-                ctx, tracked.repo_name, acquired, logs=logs,
+                ctx,
+                tracked.repo_name,
+                acquired,
+                logs=logs,
             )
     except BaseException:
         # The slot is already handled by the context manager above; we
@@ -144,8 +158,7 @@ def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:
         and current_head == (tracked.last_clean_head or "")
     ):
         return (
-            f"No repair needed for {label}.\n"
-            f"Stored base already matches {fmt.short(actual_base)}."
+            f"No repair needed for {label}.\nStored base already matches {fmt.short(actual_base)}."
         )
     ctx.db.upsert_branch(
         TrackedBranch(

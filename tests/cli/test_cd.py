@@ -1,4 +1,5 @@
 """Tests for `pm cd` (see cli/cd.py)."""
+
 import pytest
 
 # Import for side-effect: registers every sub-app including `cd`.
@@ -15,7 +16,8 @@ def _just_repos(names: list[str]) -> list[tuple[str, str]]:
 
 
 def test_cd_project_only_prints_project_dir(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", _just_repos(["foo"]))
@@ -24,7 +26,8 @@ def test_cd_project_only_prints_project_dir(
 
 
 def test_cd_print_flag_is_accepted(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # `--print` is consumed by the shell wrapper, but must still parse
     # cleanly when the wrapper isn't sourced (or when scripts call it).
@@ -35,7 +38,8 @@ def test_cd_print_flag_is_accepted(
 
 
 def test_cd_project_and_wt_prints_forward_symlink(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", [("foo1", "foo")])
@@ -52,7 +56,8 @@ def test_cd_unknown_project_errors(
 
 
 def test_cd_unknown_wt_errors(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", [("foo1", "foo")])
@@ -61,7 +66,8 @@ def test_cd_unknown_wt_errors(
 
 
 def test_cd_detached_wt_errors(
-    pm_env: Paths, capsys: pytest.CaptureFixture[str],
+    pm_env: Paths,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
     create_mod.create(pm_env, "demo", [("foo1", "foo")])

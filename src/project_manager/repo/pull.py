@@ -64,7 +64,12 @@ def _pull_one(paths: Paths, repo: str) -> PullResult:
 
     head_before = git.head_sha(repo_dir)
     cmd = [
-        "git", "-C", str(repo_dir), "pull", "--ff-only", "--prune",
+        "git",
+        "-C",
+        str(repo_dir),
+        "pull",
+        "--ff-only",
+        "--prune",
         "--recurse-submodules",
     ]
     emit_command_start(cmd)
@@ -73,10 +78,7 @@ def _pull_one(paths: Paths, repo: str) -> PullResult:
     except CommandError as e:
         return PullResult(repo=repo, ok=False, message=f"pull failed: {e}")
 
-    base_message = (
-        "up-to-date" if git.head_sha(repo_dir) == head_before
-        else "fast-forwarded"
-    )
+    base_message = "up-to-date" if git.head_sha(repo_dir) == head_before else "fast-forwarded"
     # `pull --recurse-submodules` updates already-populated submodules but
     # won't --init new ones; run `submodule update --init --recursive` so
     # newly-added submodules are checked out.

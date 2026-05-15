@@ -60,11 +60,7 @@ def inject_body_into_template(commit_body: str, template: str) -> str:
     if first_header is None:
         return f"{commit_body}\n\n{template}"
     next_header = next(
-        (
-            i
-            for i in range(first_header + 1, len(lines))
-            if lines[i].startswith("## ")
-        ),
+        (i for i in range(first_header + 1, len(lines)) if lines[i].startswith("## ")),
         len(lines),
     )
     out = [

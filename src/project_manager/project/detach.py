@@ -74,9 +74,7 @@ def detach(paths: Paths, project: str, wts: list[str] | None) -> list[DetachedWt
 
             if pooldb.get_owner(repo, uuid) == owner:
                 pooldb.release(repo, uuid)
-                released.append(
-                    DetachedWt(wt=wt, repo=repo, uuid=uuid, path=target)
-                )
+                released.append(DetachedWt(wt=wt, repo=repo, uuid=uuid, path=target))
             with contextlib.suppress(FileNotFoundError):
                 forward.unlink()
     return released
@@ -147,7 +145,9 @@ DETACH_ACTION_COLUMNS: list[Column] = [
 
 
 def plan_detach(
-    paths: Paths, project: str, wts: list[str] | None,
+    paths: Paths,
+    project: str,
+    wts: list[str] | None,
 ) -> DetachPlan:
     """Describe what `detach` would do without mutating state.
 
@@ -167,9 +167,7 @@ def plan_detach(
         known = {w: r for w, r, _ in all_rows}
         missing = [w for w in wts if w not in known]
         if missing:
-            raise ProjectError(
-                f"project '{project}' has no such worktree(s): {', '.join(missing)}"
-            )
+            raise ProjectError(f"project '{project}' has no such worktree(s): {', '.join(missing)}")
         to_plan = [(w, known[w]) for w in wts]
 
     actions: list[DetachAction] = []
@@ -178,7 +176,11 @@ def plan_detach(
         if not forward.is_symlink():
             actions.append(
                 DetachAction(
-                    wt=wt, repo=repo, kind="noop", slot_uuid=None, blocker=None,
+                    wt=wt,
+                    repo=repo,
+                    kind="noop",
+                    slot_uuid=None,
+                    blocker=None,
                 )
             )
             continue
@@ -199,7 +201,11 @@ def plan_detach(
         blocker = branch_mod.cleanliness_blocker(slot_path)
         actions.append(
             DetachAction(
-                wt=wt, repo=repo, kind="detach", slot_uuid=uuid, blocker=blocker,
+                wt=wt,
+                repo=repo,
+                kind="detach",
+                slot_uuid=uuid,
+                blocker=blocker,
             )
         )
     return DetachPlan(project=project, actions=actions)

@@ -63,8 +63,6 @@ def test_slot_for_cwd_matches_nested_path(
     assert found.uuid == slot.uuid
 
 
-def test_slot_for_cwd_returns_none_outside_pool(
-    pm_env: Paths, tmp_path: Path
-) -> None:
+def test_slot_for_cwd_returns_none_outside_pool(pm_env: Paths, tmp_path: Path) -> None:
     assert locate.slot_for_cwd(pm_env, tmp_path) is None
     assert locate.slot_for_cwd(pm_env, pm_env.worktrees) is None

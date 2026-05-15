@@ -68,8 +68,7 @@ def build_command(
     prefix = commands.get(agent.value)
     if prefix is None:
         raise ProjectError(
-            f"no [agents.commands].{agent.value} configured — "
-            f"add it to ~/.config/pm/config.toml",
+            f"no [agents.commands].{agent.value} configured — add it to ~/.config/pm/config.toml",
         )
     argv = [*shlex.split(prefix), *forwarded]
     if not argv:
@@ -78,7 +77,9 @@ def build_command(
 
 
 def run(
-    agent: AgentName, project: str | None, forwarded: tuple[str, ...],
+    agent: AgentName,
+    project: str | None,
+    forwarded: tuple[str, ...],
 ) -> NoReturn:
     """Resolve the project, chdir, and exec into the configured agent CLI.
 

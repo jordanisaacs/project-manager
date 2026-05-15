@@ -5,6 +5,7 @@ to `project_manager.cli._shared` during the cyclopts migration. The
 things remaining here all resolve/construct values the `StackerService`
 needs; they know nothing about how the user invoked the command.
 """
+
 from project_manager import render
 from project_manager.cli._params import resolve_repo, resolve_repo_optional
 from project_manager.cli._shared import StackerScope
@@ -49,14 +50,10 @@ def resolve_branch(branch: str | None, paths: Paths) -> str:
         return branch
     here = locate.slot_for_cwd(paths)
     if here is None:
-        raise git.GitError(
-            "pass <branch> (or run from inside a pm worktree slot)."
-        )
+        raise git.GitError("pass <branch> (or run from inside a pm worktree slot).")
     current = git.current_branch(here.path)
     if not current:
-        raise git.GitError(
-            f"worktree {here.path} is detached; pass <branch> explicitly."
-        )
+        raise git.GitError(f"worktree {here.path} is detached; pass <branch> explicitly.")
     return current
 
 
@@ -85,34 +82,25 @@ def resolve_on_spec(
     if on_spec == "current":
         here = locate.slot_for_cwd(paths)
         if here is None:
-            raise git.GitError(
-                "--on current requires running from a pm worktree slot."
-            )
+            raise git.GitError("--on current requires running from a pm worktree slot.")
         current = fallback_branch or git.current_branch(here.path)
         if not current:
-            raise git.GitError(
-                "--on current: current worktree has no branch checked out."
-            )
+            raise git.GitError("--on current: current worktree has no branch checked out.")
         return ParentLocator(repo_name=repo_name, branch=current)
     if on_spec == "parent":
         here = locate.slot_for_cwd(paths)
         if here is None:
-            raise git.GitError(
-                "--on parent requires running from a pm worktree slot."
-            )
+            raise git.GitError("--on parent requires running from a pm worktree slot.")
         current = git.current_branch(here.path)
         if not current:
-            raise git.GitError(
-                "--on parent: current worktree is detached; pass a branch instead."
-            )
+            raise git.GitError("--on parent: current worktree is detached; pass a branch instead.")
         svc = service(paths)
         tracked = svc.db.get_branch(repo_name, current)
         if tracked is None:
-            raise git.GitError(
-                f"{current} is not tracked; cannot resolve --on parent."
-            )
+            raise git.GitError(f"{current} is not tracked; cannot resolve --on parent.")
         return ParentLocator(
-            repo_name=tracked.parent_repo_name, branch=tracked.parent_branch,
+            repo_name=tracked.parent_repo_name,
+            branch=tracked.parent_branch,
         )
     # Literal branch reference — may include cross-repo `repo:branch` form.
     return selectors.resolve_parent_for_base(paths, repo_name, on_spec)

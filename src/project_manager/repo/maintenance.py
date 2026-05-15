@@ -91,23 +91,28 @@ async def _run_job(job: _Job) -> MaintenanceResult:
     # EOF before returning anything — adding a line-pump mode there
     # would let us drop `asyncio.to_thread` and the per-job thread.
     result = await asyncio.to_thread(
-        run, job.cmd, check=False, stream=True,
+        run,
+        job.cmd,
+        check=False,
+        stream=True,
     )
     ok = job.ignore_returncode or result.returncode == 0
     # Many maintenance subcommands are silent on success, so fall back to
     # "ok"/"exit N" when git said nothing useful.
     tail = [line for line in result.stderr.splitlines() if line.strip()]
-    message = (
-        tail[-1].strip() if tail
-        else ("ok" if ok else f"exit {result.returncode}")
-    )
+    message = tail[-1].strip() if tail else ("ok" if ok else f"exit {result.returncode}")
     return MaintenanceResult(
-        repo=job.repo, target=job.target, op=job.op, ok=ok, message=message,
+        repo=job.repo,
+        target=job.target,
+        op=job.op,
+        ok=ok,
+        message=message,
     )
 
 
 def _update_index_targets(
-    paths: Paths, repo: str,
+    paths: Paths,
+    repo: str,
 ) -> list[tuple[str, Path]]:
     """`(target_label, path)` for the canonical repo + every pool slot."""
     out: list[tuple[str, Path]] = []
@@ -123,29 +128,44 @@ def _jobs_for_repo(paths: Paths, repo: str) -> list[_Job]:
     repo_dir = paths.repo(repo)
     if repo_dir.is_dir():
         task_args = [f"--task={t}" for t in _MAINTENANCE_TASKS]
-        jobs.append(_Job(
-            repo=repo, target="(repo)", op="maintenance",
-            cmd=["git", "-C", str(repo_dir), "maintenance", "run", *task_args],
-        ))
-        jobs.append(_Job(
-            repo=repo, target="(repo)", op="worktree-prune",
-            cmd=["git", "-C", str(repo_dir), "worktree", "prune"],
-        ))
+        jobs.append(
+            _Job(
+                repo=repo,
+                target="(repo)",
+                op="maintenance",
+                cmd=["git", "-C", str(repo_dir), "maintenance", "run", *task_args],
+            )
+        )
+        jobs.append(
+            _Job(
+                repo=repo,
+                target="(repo)",
+                op="worktree-prune",
+                cmd=["git", "-C", str(repo_dir), "worktree", "prune"],
+            )
+        )
     for target, path in _update_index_targets(paths, repo):
-        jobs.append(_Job(
-            repo=repo, target=target, op="update-index",
-            cmd=["git", "-C", str(path), "update-index", "-q", "--refresh"],
-            ignore_returncode=True,
-        ))
+        jobs.append(
+            _Job(
+                repo=repo,
+                target=target,
+                op="update-index",
+                cmd=["git", "-C", str(path), "update-index", "-q", "--refresh"],
+                ignore_returncode=True,
+            )
+        )
     return jobs
 
 
 async def _maintain_async(
-    paths: Paths, repos: list[str], limit: int,
+    paths: Paths,
+    repos: list[str],
+    limit: int,
 ) -> list[MaintenanceResult]:
     jobs = [j for r in repos for j in _jobs_for_repo(paths, r)]
     return await bounded_gather(
-        (_run_job(j) for j in jobs), limit=limit,
+        (_run_job(j) for j in jobs),
+        limit=limit,
     )
 
 

@@ -1,4 +1,5 @@
 """`pm project` sub-app."""
+
 from cyclopts import App
 
 from project_manager.cli._shared import root

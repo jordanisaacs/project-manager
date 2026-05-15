@@ -77,7 +77,8 @@ def _fetch_sync(owned_paths: set[Path], limit: int) -> list[SessionEntry]:
 
 
 def _collect_candidates(
-    root: Path, owned_paths: set[Path],
+    root: Path,
+    owned_paths: set[Path],
 ) -> list[tuple[Path, Path, float]]:
     out: list[tuple[Path, Path, float]] = []
     for cwd in owned_paths:
@@ -156,7 +157,7 @@ def _pick_title(synthetic: str | None, first_user: str | None) -> str | None:
     if synthetic:
         stripped = synthetic.lstrip()
         if stripped.startswith(_SUMMARY_PREFIX):
-            stripped = stripped[len(_SUMMARY_PREFIX):].lstrip()
+            stripped = stripped[len(_SUMMARY_PREFIX) :].lstrip()
         collapsed = " ".join(stripped.split())
         if collapsed:
             return collapsed

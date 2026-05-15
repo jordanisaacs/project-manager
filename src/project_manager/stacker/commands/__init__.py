@@ -1,4 +1,5 @@
 """`pm stacker` sub-app and per-command module registration."""
+
 from cyclopts import App
 
 from project_manager.cli._shared import root

@@ -51,10 +51,7 @@ class AgentRow:
             "agent": self.agent,
             "session_id": self.session_id,
             "title": self.title,
-            "last_active": (
-                self.last_active.isoformat()
-                if self.last_active is not None else None
-            ),
+            "last_active": (self.last_active.isoformat() if self.last_active is not None else None),
         }
 
 
@@ -65,7 +62,11 @@ def _placeholder(project: str) -> "AgentRow":
     replaces with the standard `-` placeholder in the table.
     """
     return AgentRow(
-        project=project, agent="", session_id="", title="", last_active=None,
+        project=project,
+        agent="",
+        session_id="",
+        title="",
+        last_active=None,
     )
 
 
@@ -87,10 +88,7 @@ COLUMNS: list[Column[AgentRow]] = [
         # Goes through `render.format_datetime` so every listing
         # command that shows a timestamp applies the same display-tz
         # rule (configured via `[display].timezone`).
-        lambda r: (
-            render.format_datetime(r.last_active)
-            if r.last_active is not None else ""
-        ),
+        lambda r: render.format_datetime(r.last_active) if r.last_active is not None else "",
     ),
 ]
 
@@ -125,10 +123,7 @@ async def ls(
     if not projects:
         return []
     async with asyncio.TaskGroup() as tg:
-        tasks = [
-            tg.create_task(_fetch_project(paths, p, limit, agents))
-            for p in projects
-        ]
+        tasks = [tg.create_task(_fetch_project(paths, p, limit, agents)) for p in projects]
     return [row for t in tasks for row in t.result()]
 
 

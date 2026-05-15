@@ -169,8 +169,7 @@ def agents() -> Agents:
     for key, value in commands_raw.items():
         if not isinstance(value, str):
             raise ValueError(  # noqa: TRY004
-                f"[agents.commands].{key} must be a string, "
-                f"got {type(value).__name__}",
+                f"[agents.commands].{key} must be a string, got {type(value).__name__}",
             )
         commands[str(key)] = value
     return Agents(commands=commands)

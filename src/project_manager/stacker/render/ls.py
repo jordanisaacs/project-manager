@@ -93,11 +93,7 @@ def ls_text(
     if options.render.online:
         refresh_review_state(ctx, branches)
     if options.render.hide_merged:
-        merged = {
-            (pr.repo_name, pr.branch)
-            for pr in ctx.db.list_pr_states(repo_name)
-            if pr.merged
-        }
+        merged = {(pr.repo_name, pr.branch) for pr in ctx.db.list_pr_states(repo_name) if pr.merged}
         branches = [b for b in branches if (b.repo_name, b.branch) not in merged]
     if options.json_output:
         # `--legend` is intentionally ignored here — JSON consumers don't
@@ -118,7 +114,8 @@ _WORKTREE_MIN_PARTS = 2
 
 
 def _resolve_branch_projects(
-    paths: Paths, live: dict[str, git.WorktreeInfo],
+    paths: Paths,
+    live: dict[str, git.WorktreeInfo],
 ) -> dict[str, str]:
     """Map each live branch to the pm project whose slot has it checked out.
 
@@ -143,7 +140,9 @@ def _resolve_branch_projects(
 
 
 def _project_for_path(
-    pooldb: PoolDB, pool_root: Path, wt_path: Path,
+    pooldb: PoolDB,
+    pool_root: Path,
+    wt_path: Path,
 ) -> str | None:
     try:
         rel = wt_path.resolve().relative_to(pool_root)
@@ -159,7 +158,9 @@ def _project_for_path(
 
 
 def _empty_text(
-    ctx: StackerCtx, repo_name: str | None, current: tuple[str, str] | None,
+    ctx: StackerCtx,
+    repo_name: str | None,
+    current: tuple[str, str] | None,
 ) -> str:
     """Empty-set message. Adds the "not tracked" note when it applies.
 
@@ -173,10 +174,7 @@ def _empty_text(
         return "No tracked branches."
     if ctx.db.get_branch(cur_repo, cur_branch) is not None:
         return "No tracked branches."
-    return (
-        f"No tracked branches in {cur_repo}. "
-        f"Current branch `{cur_branch}` is not tracked by pm."
-    )
+    return f"No tracked branches in {cur_repo}. Current branch `{cur_branch}` is not tracked by pm."
 
 
 def _ls_branch_set(
@@ -187,12 +185,8 @@ def _ls_branch_set(
 ) -> list[TrackedBranch]:
     if scope == "current":
         if repo_name is None or target_branch is None:
-            raise git.GitError(
-                "ls --scope current requires a repo and target branch."
-            )
-        target = require_tracked(
-            ctx, SelectorTarget(repo_name=repo_name, branch=target_branch)
-        )
+            raise git.GitError("ls --scope current requires a repo and target branch.")
+        target = require_tracked(ctx, SelectorTarget(repo_name=repo_name, branch=target_branch))
         return lineage(ctx, target)
     return ctx.db.list_branches(repo_name)
 
@@ -212,8 +206,10 @@ def _ls_tree(
     # One concurrent pre-pass computes every per-repo and per-node git
     # fact before rendering. The render walk below is pure dict lookups.
     facts = prefetch_mod.prefetch_all(
-        ctx, by_repo,
-        details=details, current=current,
+        ctx,
+        by_repo,
+        details=details,
+        current=current,
         limit=config.concurrency().limit,
     )
     lines: list[str] = []
@@ -225,11 +221,7 @@ def _ls_tree(
         # Two-space gutter mirrors the per-row `> ` current marker.
         lines.append("  " + fmt.style(repo, fg="blue", bold=True))
         tracked_branches = {item.branch for item in items}
-        if (
-            current is not None
-            and current[0] == repo
-            and current[1] not in tracked_branches
-        ):
+        if current is not None and current[0] == repo and current[1] not in tracked_branches:
             # Tracked branches already signal their state via the `> / (current)`
             # marker; only call out the non-managed case, where the marker
             # can't fire and the reader would otherwise miss the branch.
@@ -243,10 +235,7 @@ def _ls_tree(
         roots: list[tuple[str, bool]] = []
         seen_roots: set[str] = set()
         for item in items:
-            if (
-                item.parent_branch not in tracked_branches
-                and item.parent_branch not in seen_roots
-            ):
+            if item.parent_branch not in tracked_branches and item.parent_branch not in seen_roots:
                 roots.append((item.parent_branch, True))
                 seen_roots.add(item.parent_branch)
         current_branch = current[1] if current and current[0] == repo else None
@@ -268,7 +257,10 @@ def _ls_tree(
                 lines,
                 gctx,
                 graph.GraphPos(
-                    branch=parent_branch, prefix="", is_last=True, implicit=implicit,
+                    branch=parent_branch,
+                    prefix="",
+                    is_last=True,
+                    implicit=implicit,
                 ),
             )
     return "\n".join(lines)
@@ -302,8 +294,7 @@ def _ls_json(
     include_counts = details in ("status-counts", "all")
     include_all = details == "all"
     pr_map: dict[tuple[str, str], PRState] = {
-        (pr.repo_name, pr.branch): pr
-        for pr in ctx.db.list_pr_states()
+        (pr.repo_name, pr.branch): pr for pr in ctx.db.list_pr_states()
     }
     tracked_keys: set[tuple[str, str]] = {(b.repo_name, b.branch) for b in branches}
     children_map: dict[tuple[str, str], list[TrackedBranch]] = {}
@@ -316,8 +307,10 @@ def _ls_json(
     # reflects cached state only (matching gitstack's emit-don't-fetch
     # semantics), so RenderOptions isn't threaded through here.
     facts = prefetch_mod.prefetch_all(
-        ctx, by_repo,
-        details=details, current=current,
+        ctx,
+        by_repo,
+        details=details,
+        current=current,
         limit=config.concurrency().limit,
     )
 
@@ -326,8 +319,12 @@ def _ls_json(
         status = facts[b.repo_name].node_status.get(b.branch)
         if status is None:
             status = graph.NodeStatus(
-                synced=False, commit_count=0, ahead_of_remote=0,
-                has_upstream=False, dirty=False, is_current=False,
+                synced=False,
+                commit_count=0,
+                ahead_of_remote=0,
+                has_upstream=False,
+                dirty=False,
+                is_current=False,
                 merged=pr is not None and pr.merged,
             )
         entry: dict[str, object] = {
@@ -338,9 +335,9 @@ def _ls_json(
             "is_root": (b.parent_repo_name, b.parent_branch) not in tracked_keys,
             "pr_url": pr.pr_url if pr is not None else None,
             "merged": pr.merged if pr is not None else False,
-            "status": _STATUS_JSON[
-                graph.classify(b, pr, status, online=False)
-            ] if include_state else None,
+            "status": _STATUS_JSON[graph.classify(b, pr, status, online=False)]
+            if include_state
+            else None,
             "needs_sync": (not status.synced) if include_state else None,
             "ahead_of_remote": status.ahead_of_remote if include_counts else None,
             "commit_count": status.commit_count if include_counts else None,
@@ -367,5 +364,3 @@ def _ls_json(
         },
         indent=2,
     )
-
-

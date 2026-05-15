@@ -31,7 +31,8 @@ def test_detects_from_forward_path(pm_env: Paths, monkeypatch: pytest.MonkeyPatc
 
 
 def test_detects_from_physical_worktree_via_pool_db(
-    pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     create_mod.create(pm_env, "demo", _just(["foo"]))
@@ -40,7 +41,8 @@ def test_detects_from_physical_worktree_via_pool_db(
 
 
 def test_detach_while_inside_worktree_clears_detection(
-    pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """After detach the pool row is gone, so worktree-path detection can't recover
     the project name. Users in this corner case must pass the name explicitly.
@@ -53,7 +55,8 @@ def test_detach_while_inside_worktree_clears_detection(
 
 
 def test_resolve_project_prefers_explicit(
-    pm_env: Paths, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     create_mod.create(pm_env, "demo", _just(["foo"]))
@@ -62,7 +65,9 @@ def test_resolve_project_prefers_explicit(
 
 
 def test_resolve_project_raises_when_nothing_to_detect(
-    pm_env: Paths, tmp_path, monkeypatch: pytest.MonkeyPatch,
+    pm_env: Paths,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _chdir(monkeypatch, tmp_path)
     with pytest.raises(ProjectError, match="no project specified"):

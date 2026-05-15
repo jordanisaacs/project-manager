@@ -39,7 +39,8 @@ def test_ls_text_prefetch_surfaces_dirty_marker(
     (slot_b.path / "b.txt").write_text("modified\n")
 
     out = service.ls_text(
-        tracked_stack.repo_name, LsOptions(details="status-counts"),
+        tracked_stack.repo_name,
+        LsOptions(details="status-counts"),
     )
     assert "[dirty]" in out, out
     line_b = _line_for_branch(out, tracked_stack.repo_name, "b")
@@ -62,7 +63,8 @@ def test_ls_text_prefetch_clean_stack_has_no_dirty_marker(
     # paint every row dirty, and `git status` on a clean worktree must
     # continue to return empty output post-collapse.
     out = service.ls_text(
-        tracked_stack.repo_name, LsOptions(details="status-counts"),
+        tracked_stack.repo_name,
+        LsOptions(details="status-counts"),
     )
     assert "[dirty]" not in out
 

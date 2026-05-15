@@ -20,7 +20,9 @@ K = TypeVar("K")
 
 
 async def bounded_gather(
-    awaitables: Iterable[Awaitable[T]], *, limit: int,
+    awaitables: Iterable[Awaitable[T]],
+    *,
+    limit: int,
 ) -> list[T]:
     """Run awaitables concurrently with at most `limit` in flight.
 
@@ -63,6 +65,7 @@ async def bounded_gather_map(
     """
     item_list = list(items)
     results = await bounded_gather(
-        (fn(item) for item in item_list), limit=limit,
+        (fn(item) for item in item_list),
+        limit=limit,
     )
     return dict(zip(item_list, results, strict=True))

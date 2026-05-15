@@ -19,9 +19,7 @@ class ParsedSelector:
 def parse_selector(text: str) -> ParsedSelector:
     if ":" in text:
         repo_query, branch = text.split(":", 1)
-        return ParsedSelector(
-            repo_query=repo_query, branch=branch or None, is_root=branch == ""
-        )
+        return ParsedSelector(repo_query=repo_query, branch=branch or None, is_root=branch == "")
     return ParsedSelector(repo_query=None, branch=text, is_root=False)
 
 
@@ -118,6 +116,4 @@ def resolve_current(paths: Paths, cwd: Path | None = None) -> RepoContext | None
     parts = relative.parts
     if not parts:
         return None
-    return RepoContext(
-        repo_name=parts[0], worktree_path=ctx.worktree_path, branch=ctx.branch
-    )
+    return RepoContext(repo_name=parts[0], worktree_path=ctx.worktree_path, branch=ctx.branch)

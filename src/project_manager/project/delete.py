@@ -45,16 +45,17 @@ def delete(paths: Paths, project: str, wts: list[str] | None) -> None:
 
 
 def _delete_wts(
-    paths: Paths, project: str, wts: list[str], db_path: Path,
+    paths: Paths,
+    project: str,
+    wts: list[str],
+    db_path: Path,
 ) -> None:
     """Per-wt delete helper. Detach each wt (cleanliness-checked), drop rows."""
     with db.transaction(db_path) as conn:
         known = {name for name, _, _ in db.list_wts(conn)}
         missing = [w for w in wts if w not in known]
         if missing:
-            raise ProjectError(
-                f"project '{project}' has no such worktree(s): {', '.join(missing)}"
-            )
+            raise ProjectError(f"project '{project}' has no such worktree(s): {', '.join(missing)}")
         detach_mod.detach(paths, project, wts=wts)
         for w in wts:
             db.remove_wt(conn, w)
@@ -64,8 +65,7 @@ def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) 
     extras = [
         str(entry)
         for entry in project_dir.iterdir()
-        if entry.name not in _ALLOWED_EXTRAS
-        and not _is_pm_symlink(entry, paths.worktrees)
+        if entry.name not in _ALLOWED_EXTRAS and not _is_pm_symlink(entry, paths.worktrees)
     ]
     if extras:
         raise ProjectError(
@@ -118,7 +118,9 @@ class DeletePlan:
 
 
 def plan_delete(
-    paths: Paths, project: str, wts: list[str] | None,
+    paths: Paths,
+    project: str,
+    wts: list[str] | None,
 ) -> DeletePlan:
     """Describe what `delete` would do without mutating state."""
     project_dir = paths.project(project)
@@ -132,8 +134,7 @@ def plan_delete(
         extras = [
             entry
             for entry in project_dir.iterdir()
-            if entry.name not in _ALLOWED_EXTRAS
-            and not _is_pm_symlink(entry, paths.worktrees)
+            if entry.name not in _ALLOWED_EXTRAS and not _is_pm_symlink(entry, paths.worktrees)
         ]
         with db.readonly(db_path) as conn:
             planned_wts = [name for name, _, _ in db.list_wts(conn)]

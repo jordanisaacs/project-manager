@@ -52,10 +52,7 @@ def _fetch_sync(owned_paths: set[Path], limit: int) -> list[SessionEntry]:
     # newer valid session just because a cluster of empties came first.
     entries: list[SessionEntry] = []
     for cwd, session_id, transcript, mtime in candidates:
-        title = (
-            _read_store_name(store_index.get(session_id))
-            or _first_user_query(transcript)
-        )
+        title = _read_store_name(store_index.get(session_id)) or _first_user_query(transcript)
         if title is None:
             # No human-assigned name and no user prompt in the transcript
             # — the session is empty (bash-only or metadata-only). Drop
@@ -76,7 +73,8 @@ def _fetch_sync(owned_paths: set[Path], limit: int) -> list[SessionEntry]:
 
 
 def _collect_candidates(
-    projects_root: Path, owned_paths: set[Path],
+    projects_root: Path,
+    owned_paths: set[Path],
 ) -> list[tuple[Path, str, Path, float]]:
     out: list[tuple[Path, str, Path, float]] = []
     for cwd in owned_paths:

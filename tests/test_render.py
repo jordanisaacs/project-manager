@@ -5,6 +5,7 @@ writes to a StringIO, with either `force_terminal=True` (to assert on
 ANSI-styled output) or `force_terminal=False` (to assert on pipe-shaped
 plain output).
 """
+
 from __future__ import annotations
 
 import io
@@ -119,6 +120,7 @@ def test_emit_rows_json_respects_pm_json_protocol(
     class Custom:
         a: int
         b: int
+
         def __pm_json__(self) -> dict[str, object]:
             return {"sum": self.a + self.b}
 
@@ -146,7 +148,9 @@ def test_default_to_dict_coerces_enum_and_path(
     out = _capture(
         monkeypatch,
         lambda: render.emit_rows(
-            [Row(Color.RED, Path("/nonexistent/x"))], row_cols, as_json=True,
+            [Row(Color.RED, Path("/nonexistent/x"))],
+            row_cols,
+            as_json=True,
         ),
         tty=False,
     )
@@ -168,14 +172,14 @@ def test_emit_sections_renders_single_table_with_group_column(
     out = _capture(
         monkeypatch,
         lambda: render.emit_sections(
-            secs, _COLUMNS, group=render.GroupColumn("G"),
+            secs,
+            _COLUMNS,
+            group=render.GroupColumn("G"),
         ),
         tty=False,
     )
     # Two rules: one under the header, one between the two sections.
-    rule_lines = [
-        line for line in out.split("\n") if line and line.strip().startswith("─")
-    ]
+    rule_lines = [line for line in out.split("\n") if line and line.strip().startswith("─")]
     assert len(rule_lines) == 2
     assert _data_lines(out) == [
         ["G", "Name", "Count"],
@@ -197,13 +201,16 @@ def test_emit_sections_json_uses_jsonshape_keys(
     out = _capture(
         monkeypatch,
         lambda: render.emit_sections(
-            secs, _COLUMNS, as_json=True, shape=JsonShape("repo", "slots"),
+            secs,
+            _COLUMNS,
+            as_json=True,
+            shape=JsonShape("repo", "slots"),
         ),
         tty=False,
     )
     payload = json.loads(out)
     assert payload == [
-        {"repo": "backend",  "slots": [{"name": "a", "count": 1}]},
+        {"repo": "backend", "slots": [{"name": "a", "count": 1}]},
         {"repo": "frontend", "slots": [{"name": "b", "count": 2}]},
     ]
 
@@ -219,7 +226,9 @@ def test_build_sections_table_is_unstyled_by_default() -> None:
     ]
     materialized = [(s.title, list(s.rows)) for s in secs]
     table = render.build_sections_table(
-        materialized, _COLUMNS, group=render.GroupColumn("G"),
+        materialized,
+        _COLUMNS,
+        group=render.GroupColumn("G"),
     )
     # Row count: 2 + 1 data rows. Header is a separate attribute, not a row.
     assert len(table.rows) == 3
@@ -236,8 +245,10 @@ def test_build_sections_table_marks_selected_row_reverse() -> None:
     ]
     materialized = [(s.title, list(s.rows)) for s in secs]
     table = render.build_sections_table(
-        materialized, _COLUMNS,
-        group=render.GroupColumn("G"), selected_flat_idx=2,
+        materialized,
+        _COLUMNS,
+        group=render.GroupColumn("G"),
+        selected_flat_idx=2,
     )
     styles = [r.style for r in table.rows]
     # Flat order: ("first","a"), ("first","b"), ("second","c") — index 2
@@ -255,8 +266,10 @@ def test_selected_row_uses_background_bar_not_reverse_video() -> None:
     secs = [Section(title="first", rows=[_Row("a", 1)])]
     materialized = [(s.title, list(s.rows)) for s in secs]
     table = render.build_sections_table(
-        materialized, _COLUMNS,
-        group=render.GroupColumn("G"), selected_flat_idx=0,
+        materialized,
+        _COLUMNS,
+        group=render.GroupColumn("G"),
+        selected_flat_idx=0,
     )
     console = Console(
         file=io.StringIO(),
@@ -381,13 +394,15 @@ def _write_tz_config(tmp_path: Path, tz_name: str) -> Path:
 
 
 def test_format_datetime_applies_configured_timezone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Every listing command rendering a time goes through
     `render.format_datetime` so `[display].timezone` is honored in one
     place — not re-implemented per handler.
     """
     from datetime import UTC, datetime
+
     monkeypatch.setenv("PM_CONFIG", str(_write_tz_config(tmp_path, "America/Los_Angeles")))
     # 2026-04-24 07:00 UTC -> 2026-04-24 00:00 PDT (-7h DST offset).
     dt = datetime(2026, 4, 24, 7, 0, tzinfo=UTC)
@@ -395,9 +410,11 @@ def test_format_datetime_applies_configured_timezone(
 
 
 def test_format_log_time_applies_configured_timezone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from datetime import UTC, datetime
+
     monkeypatch.setenv("PM_CONFIG", str(_write_tz_config(tmp_path, "America/Los_Angeles")))
     dt = datetime(2026, 4, 24, 7, 0, 45, 123456, tzinfo=UTC)
     # Same wall clock math + ms precision preserved for interleaved
@@ -406,9 +423,11 @@ def test_format_log_time_applies_configured_timezone(
 
 
 def test_format_datetime_falls_back_to_system_tz_when_unset(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from datetime import UTC, datetime
+
     monkeypatch.delenv("PM_CONFIG", raising=False)
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))

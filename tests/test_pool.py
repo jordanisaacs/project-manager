@@ -13,13 +13,9 @@ from project_manager.project import create as create_mod
 
 def _init_repo(path: Path, branch: str = "main") -> None:
     subprocess.run(["git", "init", "-q", "-b", branch, str(path)], check=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@example.com"], check=True
-    )
+    subprocess.run(["git", "-C", str(path), "config", "user.email", "test@example.com"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "test"], check=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True
-    )
+    subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
     (path / "README.md").write_text("# test\n")
     subprocess.run(["git", "-C", str(path), "add", "README.md"], check=True)
     subprocess.run(
