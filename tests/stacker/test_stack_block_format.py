@@ -42,7 +42,7 @@ def test_strip_managed_block_no_markers_returns_body_stripped() -> None:
 def test_strip_managed_block_ignores_lone_gitstack_header_in_user_text() -> None:
     # User wrote `## 🥞 Stacked PR` and `---------` in their own template
     # but did not wrap them in our HTML markers — strip must leave them.
-    body = f"## 🥞 Stacked PR (mentioned by user)\n---------\nUser body"
+    body = "## 🥞 Stacked PR (mentioned by user)\n---------\nUser body"
     assert strip_managed_block(body) == body.strip()
 
 

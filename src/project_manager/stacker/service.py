@@ -23,10 +23,12 @@ from .git import GitClient, SubprocessGitClient
 from .models import (
     DEFAULT_PUSH_OPTIONS,
     DEFAULT_SCOPE,
+    DEFAULT_SYNC_OPTIONS,
     ParentLocator,
     PushOptions,
     ScopeSpec,
     SelectorTarget,
+    SyncOptions,
     TrackedBranch,
     WorktreeInit,
 )
@@ -161,9 +163,11 @@ class StackerService:
 
     def reparent(
         self, target: SelectorTarget, new_parent: ParentLocator,
-        *, hard: bool = False,
+        *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
     ) -> str:
-        return reparent_ops.reparent(self._ctx, target, new_parent, hard=hard)
+        return reparent_ops.reparent(
+            self._ctx, target, new_parent, options=options,
+        )
 
     def split(
         self,
@@ -184,9 +188,9 @@ class StackerService:
 
     def sync(
         self, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE,
-        *, hard: bool = False,
+        *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
     ) -> str:
-        return sync_ops.sync(self._ctx, target, spec, hard=hard)
+        return sync_ops.sync(self._ctx, target, spec, options=options)
 
     def absorb(self, target: SelectorTarget) -> str:
         return absorb_ops.absorb(self._ctx, target)

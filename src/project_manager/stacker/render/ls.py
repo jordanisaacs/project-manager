@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from project_manager import config
 from project_manager.pool.db import OwnerKind, PoolDB
-from project_manager.stacker import gh, git
+from project_manager.stacker import git
 from project_manager.stacker.models import (
     ColorMode,
     Details,
@@ -18,6 +18,7 @@ from project_manager.stacker.models import (
 )
 from project_manager.stacker.ops.track import require_tracked
 from project_manager.stacker.pr.lineage import lineage
+from project_manager.stacker.pr.refresh import refresh_review_state
 
 from . import format as fmt
 from . import graph
@@ -90,7 +91,7 @@ def ls_text(
     """
     branches = _ls_branch_set(ctx, repo_name, options.target_branch, options.scope)
     if options.render.online:
-        _refresh_online_pr_state(ctx, branches)
+        refresh_review_state(ctx, branches)
     if options.render.hide_merged:
         merged = {
             (pr.repo_name, pr.branch)
@@ -176,57 +177,6 @@ def _empty_text(
         f"No tracked branches in {cur_repo}. "
         f"Current branch `{cur_branch}` is not tracked by pm."
     )
-
-
-def _refresh_online_pr_state(
-    ctx: StackerCtx, branches: list[TrackedBranch],
-) -> None:
-    """Bulk-refresh `pr_state` review fields via one GraphQL call per repo.
-
-    Groups by (owner, repo) parsed from the cached pr_url — branches
-    without a cached URL are skipped (you can't fetch review state for a
-    PR that doesn't exist yet). Errors fall through silently: a GraphQL
-    blip shouldn't break `ls`; the renderer falls back to whatever's
-    already in the cache.
-    """
-    cached = {
-        (pr.repo_name, pr.branch): pr
-        for pr in ctx.db.list_pr_states()
-    }
-    entries: list[tuple[tuple[str, str, int], tuple[str, str]]] = []
-    for b in branches:
-        pr = cached.get((b.repo_name, b.branch))
-        if pr is None:
-            continue
-        parsed = gh.parse_pr_url(pr.pr_url)
-        if parsed is None:
-            continue
-        entries.append((parsed, (b.repo_name, b.branch)))
-    if not entries:
-        return
-    try:
-        reviews = ctx.pr_backend.batch_pr_review([e[0] for e in entries])
-    except Exception:  # noqa: BLE001  # best-effort refresh; keep rendering on any failure
-        return
-    for parsed, (repo, branch) in entries:
-        summary = reviews.get(parsed)
-        if summary is None:
-            continue
-        base = cached[(repo, branch)]
-        ctx.db.upsert_pr_state(
-            PRState(
-                repo_name=repo,
-                branch=branch,
-                pr_url=base.pr_url,
-                pr_number=base.pr_number or parsed[2],
-                state=summary.state or base.state,
-                is_draft=summary.is_draft,
-                merged=summary.state == "MERGED" or base.merged,
-                merged_at=base.merged_at,
-                is_approved=summary.is_approved,
-                has_open_comments=summary.has_open_comments,
-            ),
-        )
 
 
 def _ls_branch_set(

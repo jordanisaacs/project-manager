@@ -6,16 +6,19 @@ from project_manager.stacker import git, selectors
 from project_manager.stacker.cherry_pick import driver as cp_driver
 from project_manager.stacker.models import (
     DEFAULT_SCOPE,
+    DEFAULT_SYNC_OPTIONS,
     OperationState,
     ScopeSpec,
     SelectorTarget,
+    SyncOptions,
     TrackedBranch,
 )
 from project_manager.stacker.pr.lineage import resolve_scope
+from project_manager.stacker.pr.refresh import refresh_review_state
 from project_manager.stacker.render import format as fmt
 from project_manager.stacker.render.graph import ensure_syncable
 
-from . import worktree
+from . import sync_gates, worktree
 from .track import require_tracked
 
 if TYPE_CHECKING:
@@ -24,7 +27,7 @@ if TYPE_CHECKING:
 
 def sync(
     ctx: StackerCtx, target: SelectorTarget, spec: ScopeSpec = DEFAULT_SCOPE,
-    *, hard: bool = False,
+    *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
 ) -> str:
     """Cherry-pick a set of tracked branches onto their parents.
 
@@ -32,6 +35,11 @@ def sync(
     callers see the "Nothing to sync" short-circuit; with a multi-branch
     resolution we drive a downstream_sync queue that syncs each entry in
     parent-before-child order.
+
+    Unless `options.offline` is set, the PR state cache is refreshed
+    once up front via one batched GraphQL call per (owner, repo) —
+    per-branch gate decisions then read freshly-cached `pr_state` rows
+    without further network calls.
     """
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
@@ -41,8 +49,10 @@ def sync(
     resolved = resolve_scope(ctx, target.repo_name, target.branch, spec)
     if not resolved:
         return "No tracked branches to sync."
+    if not options.offline:
+        refresh_review_state(ctx, resolved)
     if len(resolved) == 1:
-        return _sync_one(ctx, resolved[0], hard=hard)
+        return _sync_one(ctx, resolved[0], options=options)
     ctx.db.put_operation(
         OperationState(
             repo_name=target.repo_name,
@@ -51,13 +61,16 @@ def sync(
             root_branch=resolved[0].branch,
             queue=[b.branch for b in resolved],
             current_index=0,
-            hard=hard,
+            allow_drop_parent_modifications=options.allow_drop_parent_modifications,
+            allow_drop_merge=options.allow_drop_merge,
         )
     )
     return cp_driver.run_until_pause_or_finish(ctx, target.repo_name, logs=[])
 
 
-def _sync_one(ctx: StackerCtx, tracked: TrackedBranch, *, hard: bool = False) -> str:
+def _sync_one(
+    ctx: StackerCtx, tracked: TrackedBranch, *, options: SyncOptions,
+) -> str:
     """Single-branch sync path: local_sync op with up-to-date short-circuit."""
     ctx.db.put_operation(
         OperationState(
@@ -66,7 +79,8 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch, *, hard: bool = False) ->
             status="running",
             branch=tracked.branch,
             parent_branch=tracked.parent_branch,
-            hard=hard,
+            allow_drop_parent_modifications=options.allow_drop_parent_modifications,
+            allow_drop_merge=options.allow_drop_merge,
         )
     )
     # The context manager releases the slot iff the worktree is clean on
@@ -75,7 +89,15 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch, *, hard: bool = False) ->
     # sees `CHERRY_PICK_HEAD`) so `pm stacker continue` can resume.
     try:
         with worktree.acquired_for_op(ctx, tracked.repo_name, tracked.branch) as acquired:
-            parent_head, _, _ = cp_driver.sync_plan(ctx, tracked, acquired.path, hard=hard)
+            sync_gates.run_branch_gates(ctx, tracked, acquired.path, options=options)
+            collapse_msg = sync_gates.collapse_if_merged(
+                ctx, tracked, acquired.path,
+                allow_drop_merge=options.allow_drop_merge,
+            )
+            if collapse_msg is not None:
+                ctx.db.clear_operation(tracked.repo_name)
+                return collapse_msg
+            parent_head, _, _ = cp_driver.sync_plan(ctx, tracked, acquired.path)
             if parent_head == tracked.managed_base_commit:
                 ctx.db.clear_operation(tracked.repo_name)
                 child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
@@ -90,7 +112,7 @@ def _sync_one(ctx: StackerCtx, tracked: TrackedBranch, *, hard: bool = False) ->
             logs: list[str] = []
             cp_driver.prepare_local_operation(
                 ctx, tracked, op_type="local_sync", slot_path=acquired.path,
-                logs=logs, hard=hard,
+                logs=logs,
             )
             return cp_driver.run_until_pause_or_finish(
                 ctx, tracked.repo_name, acquired, logs=logs,

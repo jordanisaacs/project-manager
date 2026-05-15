@@ -595,7 +595,10 @@ def test_create_pr_uses_template_when_present(
 
     service.push(SelectorTarget(repo_name=repo_name, branch="feature-b"), PushOptions(draft=True))
 
-    for branch, expected_extra in (("feature-a", "Extra body for A."), ("feature-b", "Extra body for B.")):
+    for branch, expected_extra in (
+        ("feature-a", "Extra body for A."),
+        ("feature-b", "Extra body for B."),
+    ):
         body = _final_body_for(backend, branch)
         user = _user_section(body)
         assert "## Summary" in user

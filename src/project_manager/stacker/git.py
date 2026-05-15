@@ -300,8 +300,18 @@ def reset_hard(path: Path, target: str) -> None:
 
 
 def cherry_pick(path: Path, commit: str) -> subprocess.CompletedProcess[str]:
+    # `--empty=drop` auto-skips commits whose diff is already present on
+    # the target — covers the absorb→sync flow (parent advanced by the
+    # child's own commits), and the merged-PR squash case for any
+    # individual commit in the range. Pause-and-resume on a post-conflict
+    # empty merge still goes through `empty.is_empty_cherry_pick_message`
+    # → `resume_skip_empty`; `--empty=drop` only affects the pre-merge
+    # auto-detected case.
     return run(
-        ["git", "-C", str(path), "-c", "core.editor=true", "cherry-pick", "--no-edit", commit],
+        [
+            "git", "-C", str(path), "-c", "core.editor=true",
+            "cherry-pick", "--no-edit", "--empty=drop", commit,
+        ],
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
     )
@@ -339,6 +349,42 @@ def pp_force(path: Path) -> subprocess.CompletedProcess[str]:
 
 def is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
     return git(repo_root, "merge-base", "--is-ancestor", older, newer, check=False).returncode == 0
+
+
+def tree_of(path: Path, rev: str) -> str:
+    """Return the tree hash a commit (or other treeish) points at."""
+    return git(path, "rev-parse", f"{rev}^{{tree}}").stdout.strip()
+
+
+def merge_tree_write_tree(
+    repo_root: Path, base: str, ours: str, theirs: str,
+) -> str | None:
+    """3-way merge of `ours` and `theirs` using `base`, in memory.
+
+    Returns the resulting tree hash on a clean merge, or `None` if the
+    merge has conflicts. Uses `git merge-tree --write-tree`; requires
+    git >= 2.38.
+
+    The merged-PR collapse check uses this to detect whether the
+    squashed effect of `managed_base..branch_head` is already present on
+    `parent_tip` — if `tree_of(parent_tip)` matches the merged tree,
+    the squash has landed and the branch can collapse.
+    """
+    proc = git(
+        repo_root,
+        "merge-tree",
+        "--write-tree",
+        f"--merge-base={base}",
+        ours,
+        theirs,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.strip()
+    if not out:
+        return None
+    return out.splitlines()[0]
 
 
 def guess_trunk_branch(repo_root: Path) -> str:
@@ -395,6 +441,11 @@ class GitClient(Protocol):
         self, path: Path, revspec: str
     ) -> tuple[str, str]: ...
     def guess_trunk_branch(self, repo_root: Path) -> str: ...
+    def is_ancestor(self, repo_root: Path, older: str, newer: str) -> bool: ...
+    def tree_of(self, path: Path, rev: str) -> str: ...
+    def merge_tree_write_tree(
+        self, repo_root: Path, base: str, ours: str, theirs: str
+    ) -> str | None: ...
 
 
 class SubprocessGitClient:
@@ -479,5 +530,16 @@ class SubprocessGitClient:
 
     def guess_trunk_branch(self, repo_root: Path) -> str:
         return guess_trunk_branch(repo_root)
+
+    def is_ancestor(self, repo_root: Path, older: str, newer: str) -> bool:
+        return is_ancestor(repo_root, older, newer)
+
+    def tree_of(self, path: Path, rev: str) -> str:
+        return tree_of(path, rev)
+
+    def merge_tree_write_tree(
+        self, repo_root: Path, base: str, ours: str, theirs: str
+    ) -> str | None:
+        return merge_tree_write_tree(repo_root, base, ours, theirs)
 
 

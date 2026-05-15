@@ -32,10 +32,24 @@ class PushOptions:
     create_pr: bool = True
 
 
+@dataclass(frozen=True)
+class SyncOptions:
+    """Runtime knobs for `sync` and `reparent`'s downstream sync.
+
+    Bundles the safety-gate opt-outs and the offline switch so the
+    ops/service/CLI layers don't grow ever-longer kwarg lists.
+    """
+
+    allow_drop_parent_modifications: bool = False
+    allow_drop_merge: bool = False
+    offline: bool = False
+
+
 # Frozen singletons for default arguments: dataclasses are immutable, so
 # sharing one instance across call sites is safe and avoids B008.
 DEFAULT_SCOPE = ScopeSpec()
 DEFAULT_PUSH_OPTIONS = PushOptions()
+DEFAULT_SYNC_OPTIONS = SyncOptions()
 
 
 @dataclass(frozen=True)
@@ -125,4 +139,5 @@ class OperationState:
     commit_list: list[str] = field(default_factory=list)
     next_commit_index: int = 0
     error_message: str | None = None
-    hard: bool = False
+    allow_drop_parent_modifications: bool = False
+    allow_drop_merge: bool = False

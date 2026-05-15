@@ -43,21 +43,22 @@ CREATE TABLE IF NOT EXISTS pr_state (
 );
 
 CREATE TABLE IF NOT EXISTS operations (
-    repo_name          TEXT PRIMARY KEY,
-    op_type            TEXT NOT NULL,
-    status             TEXT NOT NULL,
-    branch             TEXT,
-    parent_branch      TEXT,
-    root_branch        TEXT,
-    queue_json         TEXT,
-    current_index      INTEGER NOT NULL DEFAULT 0,
-    start_head         TEXT,
-    target_parent_head TEXT,
-    commit_list_json   TEXT,
-    next_commit_index  INTEGER NOT NULL DEFAULT 0,
-    error_message      TEXT,
-    hard               INTEGER NOT NULL DEFAULT 0,
-    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    repo_name                       TEXT PRIMARY KEY,
+    op_type                         TEXT NOT NULL,
+    status                          TEXT NOT NULL,
+    branch                          TEXT,
+    parent_branch                   TEXT,
+    root_branch                     TEXT,
+    queue_json                      TEXT,
+    current_index                   INTEGER NOT NULL DEFAULT 0,
+    start_head                      TEXT,
+    target_parent_head              TEXT,
+    commit_list_json                TEXT,
+    next_commit_index               INTEGER NOT NULL DEFAULT 0,
+    error_message                   TEXT,
+    allow_drop_parent_modifications INTEGER NOT NULL DEFAULT 0,
+    allow_drop_merge                INTEGER NOT NULL DEFAULT 0,
+    updated_at                      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS config (
@@ -78,7 +79,7 @@ class StackerDB:
     def connect(self) -> Iterator[sqlite3.Connection]:
         with sqlite_db.transaction(self.db_path, schema=_SCHEMA, row_factory=sqlite3.Row) as conn:
             _migrate_pr_url_to_pr_state(conn)
-            _migrate_operations_add_hard(conn)
+            _migrate_operations_gate_flags(conn)
             yield conn
 
     def upsert_branch(self, tracked: TrackedBranch) -> None:
@@ -198,8 +199,9 @@ class StackerDB:
                 INSERT INTO operations (
                     repo_name, op_type, status, branch, parent_branch, root_branch,
                     queue_json, current_index, start_head, target_parent_head,
-                    commit_list_json, next_commit_index, error_message, hard, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    commit_list_json, next_commit_index, error_message,
+                    allow_drop_parent_modifications, allow_drop_merge, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(repo_name) DO UPDATE SET
                     op_type = excluded.op_type,
                     status = excluded.status,
@@ -213,7 +215,9 @@ class StackerDB:
                     commit_list_json = excluded.commit_list_json,
                     next_commit_index = excluded.next_commit_index,
                     error_message = excluded.error_message,
-                    hard = excluded.hard,
+                    allow_drop_parent_modifications =
+                        excluded.allow_drop_parent_modifications,
+                    allow_drop_merge = excluded.allow_drop_merge,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -230,7 +234,8 @@ class StackerDB:
                     json.dumps(op.commit_list),
                     op.next_commit_index,
                     op.error_message,
-                    int(op.hard),
+                    int(op.allow_drop_parent_modifications),
+                    int(op.allow_drop_merge),
                 ),
             )
 
@@ -383,11 +388,31 @@ def _migrate_pr_url_to_pr_state(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE tracked_branches DROP COLUMN pr_url")
 
 
-def _migrate_operations_add_hard(conn: sqlite3.Connection) -> None:
+def _migrate_operations_gate_flags(conn: sqlite3.Connection) -> None:
+    """Drop the legacy `hard` column and add the new `allow_drop_*` columns.
+
+    The `hard` flag was an opt-in for exact-range cherry-pick when the
+    parent had been rewritten in place; exact-range is now the only
+    cherry-pick mode, so the column is obsolete. Replaced with two
+    safety-gate flags persisted across paused multi-branch syncs:
+    `allow_drop_parent_modifications` and `allow_drop_merge`.
+
+    SQLite ≥ 3.35 supports ALTER TABLE … DROP COLUMN. Each step is
+    gated on `PRAGMA table_info` so this is a no-op after the first run.
+    """
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(operations)")}
     if "hard" in cols:
-        return
-    conn.execute("ALTER TABLE operations ADD COLUMN hard INTEGER NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE operations DROP COLUMN hard")
+    if "allow_drop_parent_modifications" not in cols:
+        conn.execute(
+            "ALTER TABLE operations "
+            "ADD COLUMN allow_drop_parent_modifications INTEGER NOT NULL DEFAULT 0"
+        )
+    if "allow_drop_merge" not in cols:
+        conn.execute(
+            "ALTER TABLE operations "
+            "ADD COLUMN allow_drop_merge INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _row_to_operation(row: sqlite3.Row) -> OperationState:
@@ -405,7 +430,8 @@ def _row_to_operation(row: sqlite3.Row) -> OperationState:
         commit_list=json.loads(row["commit_list_json"]) if row["commit_list_json"] else [],
         next_commit_index=row["next_commit_index"],
         error_message=row["error_message"],
-        hard=bool(row["hard"]),
+        allow_drop_parent_modifications=bool(row["allow_drop_parent_modifications"]),
+        allow_drop_merge=bool(row["allow_drop_merge"]),
     )
 
 

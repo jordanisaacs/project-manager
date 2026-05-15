@@ -6,6 +6,7 @@ from cyclopts import Parameter
 from project_manager import config
 from project_manager.cli._shared import RepoFlag
 from project_manager.stacker import git
+from project_manager.stacker.models import SyncOptions
 
 from . import _common, stacker_app
 
@@ -24,25 +25,44 @@ def reparent(
         bool,
         Parameter(negative="", help="abort the paused op"),
     ] = False,
-    hard: Annotated[
+    allow_drop_parent_modifications: Annotated[
         bool,
         Parameter(
             negative="",
-            help="forward --hard to the downstream sync; skip patch-id dedup so "
-            "a descendant whose shared commits have drifted from the new "
-            "parent's equivalents replays only its own added commits.",
+            help="drop out-of-band history changes below the stack range and "
+            "replay only working commits onto the new parent.",
+        ),
+    ] = False,
+    allow_drop_merge: Annotated[
+        bool,
+        Parameter(
+            negative="",
+            help="when a descendant's PR is merged but its squash is not on "
+            "its parent, drop the descendant's commits and reset to parent.",
+        ),
+    ] = False,
+    offline: Annotated[
+        bool,
+        Parameter(
+            negative="",
+            help="skip the PR-state refresh; use cached pr_state for the "
+            "merged-PR collapse.",
         ),
     ] = False,
 ) -> int:
     """Move current branch onto a new parent; cherry-pick descendants.
 
-    --hard is forwarded to the downstream sync (see `pm stacker sync --hard`).
+    The `--allow-drop-*` and `--offline` flags are forwarded to the
+    downstream sync (see `pm stacker sync`).
     """
     paths = config.load()
     svc = _common.service(paths)
     if continue_ or abort:
-        if hard:
-            raise git.GitError("--hard cannot be combined with --continue or --abort.")
+        if allow_drop_parent_modifications or allow_drop_merge or offline:
+            raise git.GitError(
+                "--allow-drop-* and --offline cannot be combined with "
+                "--continue or --abort.",
+            )
         if continue_:
             return _common.emit(
                 svc.continue_operation(_common.resolve_repo(flag.repo, paths))
@@ -54,4 +74,13 @@ def reparent(
         raise ValueError("reparent requires <new-parent> (or --continue / --abort).")
     target = _common.target(flag.repo, branch, paths)
     parent = _common.resolve_on_spec(paths, target.repo_name, new_parent)
-    return _common.emit(svc.reparent(target, parent, hard=hard))
+    return _common.emit(
+        svc.reparent(
+            target, parent,
+            options=SyncOptions(
+                allow_drop_parent_modifications=allow_drop_parent_modifications,
+                allow_drop_merge=allow_drop_merge,
+                offline=offline,
+            ),
+        )
+    )

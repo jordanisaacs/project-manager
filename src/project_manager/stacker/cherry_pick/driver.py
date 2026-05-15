@@ -6,8 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from project_manager.stacker import git, selectors, slot
-from project_manager.stacker.models import OperationState, SelectorTarget, TrackedBranch
-from project_manager.stacker.ops import worktree
+from project_manager.stacker.models import (
+    OperationState,
+    SelectorTarget,
+    SyncOptions,
+    TrackedBranch,
+)
+from project_manager.stacker.ops import sync_gates, worktree
 from project_manager.stacker.ops.track import require_tracked
 from project_manager.stacker.render import format as fmt
 from project_manager.stacker.slot import AcquiredSlot
@@ -29,37 +34,34 @@ _SINGLE_OP_DONE: dict[str, str] = {
 
 def sync_plan(
     ctx: StackerCtx, tracked: TrackedBranch, slot_path: Path,
-    *, hard: bool = False,
 ) -> tuple[str, str, list[str]]:
+    """Plan an exact-range cherry-pick of the branch's working commits.
+
+    The commit list is always `managed_base..HEAD` — only the commits
+    the child added on top of its recorded base. Patch-id dedup against
+    the parent is gone: callers can't tell when an in-place parent
+    rewrite changes the patch of a "shared" commit, so the dedup path
+    silently replayed superseded duplicates. Pre-flight gates in
+    `ops.sync_gates` catch the cases this used to mishandle.
+    """
     repo_path = ctx.paths.repo(tracked.parent_repo_name)
     parent_head = git.rev_parse(repo_path, tracked.parent_branch)
     start_head = git.rev_parse(slot_path, "HEAD")
-    if hard:
-        # Pure replay: cherry-pick exactly the commits the child added on top
-        # of its recorded base. Bypasses the patch-id walk, which can't see
-        # that a parent rewritten in-place is "the same change" as the child's
-        # now-stale duplicate (different diffs → different patch-ids).
-        commit_list = git.rev_list(
-            slot_path, f"{tracked.managed_base_commit}..{start_head}"
-        )
-    else:
-        # Drop commits whose patch is already on the parent (mirrors `git rebase`'s
-        # default). Keeps absorb→sync flows conflict-free and makes the parent the
-        # source of truth whenever both sides carry the same logical change.
-        commit_list = git.rev_list_picking(slot_path, parent_head, start_head)
+    commit_list = git.rev_list(
+        slot_path, f"{tracked.managed_base_commit}..{start_head}"
+    )
     return parent_head, start_head, commit_list
 
 
-def prepare_local_operation(  # noqa: PLR0913 — internal helper, kwargs only
+def prepare_local_operation(
     ctx: StackerCtx,
     tracked: TrackedBranch,
     *,
     op_type: str,
     slot_path: Path,
     logs: list[str],
-    hard: bool = False,
 ) -> OperationState:
-    parent_head, start_head, commit_list = sync_plan(ctx, tracked, slot_path, hard=hard)
+    parent_head, start_head, commit_list = sync_plan(ctx, tracked, slot_path)
     op = ctx.db.get_operation(tracked.repo_name)
     if op is None:
         op = OperationState(
@@ -72,7 +74,6 @@ def prepare_local_operation(  # noqa: PLR0913 — internal helper, kwargs only
     op.target_parent_head = parent_head
     op.commit_list = commit_list
     op.next_commit_index = 0
-    op.hard = hard
     ctx.db.put_operation(op)
     fmt.record(
         ctx,
@@ -196,7 +197,30 @@ def advance_downstream(
     # would orphan the just-claimed slot, since the caller's outer
     # finally only sees the new slot after this returns.
     try:
-        parent_head, _, _ = sync_plan(ctx, tracked, acquired.path, hard=op.hard)
+        options = SyncOptions(
+            allow_drop_parent_modifications=op.allow_drop_parent_modifications,
+            allow_drop_merge=op.allow_drop_merge,
+        )
+        try:
+            sync_gates.run_branch_gates(ctx, tracked, acquired.path, options=options)
+        except git.GitError:
+            # Gate failure aborts the multi-branch queue but doesn't leave
+            # a half-built operation row behind — there's nothing to
+            # `continue` once the gate has refused, so clear state so the
+            # user can re-run with the matching `--allow-drop-*` flag.
+            ctx.db.clear_operation(repo_name)
+            raise
+        collapse_msg = sync_gates.collapse_if_merged(
+            ctx, tracked, acquired.path,
+            allow_drop_merge=op.allow_drop_merge,
+        )
+        if collapse_msg is not None:
+            fmt.record(ctx, logs, collapse_msg)
+            op.current_index += 1
+            ctx.db.put_operation(op)
+            worktree.release_if_clean(ctx, acquired)
+            return None
+        parent_head, _, _ = sync_plan(ctx, tracked, acquired.path)
         if parent_head == tracked.managed_base_commit:
             child_label = selectors.selector_for(tracked.repo_name, tracked.branch)
             parent_label = selectors.selector_for(
@@ -214,7 +238,7 @@ def advance_downstream(
             return None
         prepare_local_operation(
             ctx, tracked, op_type="downstream_sync", slot_path=acquired.path,
-            logs=logs, hard=op.hard,
+            logs=logs,
         )
     except BaseException:
         worktree.release_if_clean(ctx, acquired)
@@ -323,9 +347,7 @@ def recompute_progress(path: Path, op: OperationState) -> int:
     return min(applied_count, len(op.commit_list))
 
 
-def failure_message(
-    ctx: StackerCtx, op: OperationState, slot_path: Path,
-) -> str:
+def failure_message(op: OperationState, slot_path: Path) -> str:
     assert op.branch
     inspect_selector = selectors.selector_for(op.repo_name, op.branch)
     other_selector = selectors.selector_for(op.repo_name, op.parent_branch or "")
@@ -348,37 +370,5 @@ def failure_message(
     if op.error_message:
         parts.append(f"Git says: {op.error_message}")
     parts.append(f"Worktree at: {slot_path}")
-    hint = _hard_hint(ctx, op)
-    if hint:
-        parts.append(hint)
     parts.append("Next action: `pm stacker continue` or `pm stacker abort`")
     return "\n".join(parts)
-
-
-def _hard_hint(ctx: StackerCtx, op: OperationState) -> str | None:
-    """Suggest `--hard` when the failing commit predates the branch's own work.
-
-    For sync/reparent in non-hard mode, the commit list can extend below
-    `managed_base_commit` — those are commits the branch shares with its
-    old parent that patch-id dedup couldn't see as already-applied on the
-    new parent. A pure-replay (`--hard`) drops them entirely and only
-    replays `managed_base..HEAD`, the branch's own working commits.
-    """
-    if op.hard or op.op_type == "local_absorb" or op.branch is None:
-        return None
-    if op.next_commit_index >= len(op.commit_list):
-        return None
-    tracked = ctx.db.get_branch(op.repo_name, op.branch)
-    if tracked is None:
-        return None
-    failing = op.commit_list[op.next_commit_index]
-    repo_root = ctx.paths.repo(op.repo_name)
-    if not git.is_ancestor(repo_root, failing, tracked.managed_base_commit):
-        return None
-    label = selectors.selector_for(op.repo_name, op.branch)
-    return (
-        f"Hint: {fmt.short(failing)} predates {label}'s working commits "
-        f"({fmt.short(tracked.managed_base_commit)}..HEAD). "
-        f"Abort and retry with `--hard` to replay only the branch's own "
-        f"commits and skip shared history that drifted from the new parent."
-    )

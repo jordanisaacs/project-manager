@@ -58,7 +58,8 @@ pm repo maintenance                        # warm git object store, index, fsmon
 
 # stacker — branch-stack tracking
 pm stacker create <branch> [--on current|parent|<branch>] [--copy <b>] [--replace] [--no-checkout]
-pm stacker sync [<branch>] [-c|-a] [--skip-ancestors] [--skip-descendants] [--from <b>] [--hard] [--continue | --abort]
+pm stacker sync [<branch>] [-c|-a] [--skip-ancestors] [--skip-descendants] [--from <b>]
+                [--allow-drop-parent-modifications] [--allow-drop-merge] [--offline] [--continue | --abort]
 pm stacker push [<branch>] [-c|-a] [--only] [--skip-ancestors] [--skip-descendants] [--publish|--draft] [--create-pr true|false]
 pm stacker ls [<branch>] [-c|-a] [--details none|status|status-counts|all] [--json]
 pm stacker remove [<branch>] [--keep-branch] [--parent] [--force]
@@ -80,6 +81,30 @@ pm cd <project> [<wt>]                     # cd into a project (or worktree); ne
 pm cd --print <project> [<wt>]             # print path instead — wrap with `cd "$(pm cd --print …)"`
 pm check [--fix]                           # invariant scan across pool, projects, repos
 ```
+
+### Sync semantics
+
+`pm stacker sync` always cherry-picks exactly the commits the branch
+added on top of its recorded base (`managed_base..HEAD`). Two preflight
+gates protect that replay:
+
+- `--allow-drop-parent-modifications` — required when the branch's
+  history *below* the stack range was rewritten outside stacker (e.g.
+  `git rebase --onto`, force-push from elsewhere, amends touching
+  pre-stack commits). Without the flag, sync errors; with it, those
+  changes are dropped and only the working commits are replayed onto
+  the parent's current tip.
+
+- Merged-PR collapse — when a branch's PR is `MERGED`, sync skips the
+  cherry-pick entirely and resets the branch to its parent's tip. The
+  branch becomes a no-commit branch that children stack on transparently.
+  If the squash isn't actually on the parent yet (PR was merged into a
+  different base, or the local parent hasn't pulled the merge),
+  `--allow-drop-merge` is required to perform the same reset anyway.
+
+By default sync refreshes cached `pr_state` once up front (one batched
+GraphQL call per repo). `--offline` skips that refresh and reads
+whatever's already cached.
 
 ## Integrations
 

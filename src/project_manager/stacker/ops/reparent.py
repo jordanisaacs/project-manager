@@ -3,7 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from project_manager.stacker import git
-from project_manager.stacker.models import ParentLocator, ScopeSpec, SelectorTarget, TrackedBranch
+from project_manager.stacker.models import (
+    DEFAULT_SYNC_OPTIONS,
+    ParentLocator,
+    ScopeSpec,
+    SelectorTarget,
+    SyncOptions,
+    TrackedBranch,
+)
 from project_manager.stacker.pr.lineage import toposorted_descendants
 
 from . import sync as sync_ops
@@ -15,7 +22,7 @@ if TYPE_CHECKING:
 
 def reparent(
     ctx: StackerCtx, target: SelectorTarget, new_parent: ParentLocator,
-    *, hard: bool = False,
+    *, options: SyncOptions = DEFAULT_SYNC_OPTIONS,
 ) -> str:
     """Move `target` onto a new parent; cascade cherry-pick through descendants.
 
@@ -24,11 +31,8 @@ def reparent(
     `old_base..HEAD` as "to cherry-pick onto the new parent". Sync
     then updates managed_base to the new parent's tip on finalize.
 
-    `hard` is forwarded to the downstream sync — bypasses patch-id
-    dedup, replaying only the commits each branch added on top of its
-    recorded base. Use when a descendant's shared commits have drifted
-    in patch from the new parent's equivalents and would otherwise
-    conflict instead of dedup.
+    `options` is forwarded to the downstream sync — see
+    `pm stacker sync` for semantics.
     """
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
@@ -62,7 +66,8 @@ def reparent(
         )
     )
     return sync_ops.sync(
-        ctx, target, ScopeSpec(scope="current", skip_ancestors=True), hard=hard,
+        ctx, target, ScopeSpec(scope="current", skip_ancestors=True),
+        options=options,
     )
 
 
