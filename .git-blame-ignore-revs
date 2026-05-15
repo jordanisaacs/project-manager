@@ -1,0 +1,10 @@
+# Revisions listed here are skipped by `git blame` (with
+# `blame.ignoreRevsFile` set) and the GitHub blame UI. Add only commits
+# that are pure mechanical reformatting / mass renames — never semantic
+# changes.
+#
+# Configure locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# ruff format pass over src/ and tests/ — no behavior change.
+27bd4cd88cb3b51d2afe55047252f1a920152c69

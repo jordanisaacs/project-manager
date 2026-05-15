@@ -9,6 +9,11 @@ lint:
 		echo "fix the underlying issue (rename, split, narrow types, etc.)."; \
 		exit 1; \
 	}
+	@uv run ruff format --check src tests || { \
+		echo ""; \
+		echo "format check failed — run 'make fmt' to apply ruff format."; \
+		exit 1; \
+	}
 
 typecheck:
 	uv run ty check src tests
