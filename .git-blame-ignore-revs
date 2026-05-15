@@ -7,4 +7,8 @@
 #   git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 # ruff format pass over src/ and tests/ — no behavior change.
+# Both SHAs are listed so blame skips the format pass on either side
+# of `pm stacker absorb`: `27bd4cd...` is the pre-absorb SHA on the
+# original stack branch; `ffa76aa...` is the cherry-picked SHA on master.
 27bd4cd88cb3b51d2afe55047252f1a920152c69
+ffa76aaa3239d8aeb03d7d6ac908979be90075a2
