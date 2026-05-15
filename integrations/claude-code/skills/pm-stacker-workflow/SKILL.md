@@ -17,11 +17,12 @@ Reference for managing stacked branches with `pm stacker`. Use when on `stack/*`
 
 - A **tracked branch** is a branch `pm stacker` knows about. It records a parent branch and the commit it was originally based on (the **managed base**).
 - A **stack** is a chain of tracked branches: `master ← stack/a ← stack/b ← stack/c`.
-- **Sync** means: cherry-pick this branch's commits onto the (possibly moved) parent. The branch's commits get **new SHAs** every sync — they are not stable.
+- **Sync** means: cherry-pick exactly the branch's working commits (`managed_base..HEAD`) onto the (possibly moved) parent. The branch's commits get **new SHAs** every sync — they are not stable.
 - **Push** means: force-push the branch to its remote and create or update its GitHub PR.
 - A paused **operation** (sync / reparent / absorb) holds the slot and is resumed with `pm stacker continue` or thrown away with `pm stacker abort`.
+- A **no-commit branch** is a tracked branch whose HEAD equals its parent's tip — it has no working commits. Sync produces these automatically when the branch's PR has been merged (see "Merged-PR auto-collapse").
 
-PRs are cached per branch in pm's database — `pm stacker ls` shows them without re-querying GitHub. `pm stacker pr refresh` re-syncs the cache.
+PRs are cached per branch in pm's database — `pm stacker ls` shows them without re-querying GitHub. Sync also refreshes PR state up front (one batched GraphQL call per repo) so the merged-PR collapse decision uses fresh data; `--offline` skips that. `pm stacker pr refresh` re-syncs the cache outside of a sync.
 
 ## Critical Rules
 
@@ -63,7 +64,9 @@ PRs are cached per branch in pm's database — `pm stacker ls` shows them withou
 | Command | Description |
 |---|---|
 | `pm stacker sync [--branch <b>] [--all] [--from <b>] [--skip-ancestors\|--skip-descendants]` | Cherry-pick the branch (and lineage by default) onto its parent |
-| `pm stacker sync --hard` | Cherry-pick exactly the commits added since last sync (`<managed_base>..HEAD`). Use when the parent was rewritten in place and patch-id dedup can't see the duplicate. |
+| `pm stacker sync --allow-drop-parent-modifications` | Required when the branch's history below its working commits was rewritten outside stacker (`git rebase --onto`, force-push, pre-stack amend). Drops the out-of-band changes and replays only the working commits. |
+| `pm stacker sync --allow-drop-merge` | Required when the branch's PR is merged but the squash isn't on the parent. Forces the merged-PR collapse (reset to parent) anyway. |
+| `pm stacker sync --offline` | Skip the upfront PR-state refresh; use the cached `pr_state` for the merged-PR collapse decision. |
 | `pm stacker sync --continue` | Resume after resolving a cherry-pick conflict |
 | `pm stacker sync --abort` | Roll back the in-progress sync |
 | `pm stacker push [--branch <b>] [--all] [--only] [--draft\|--publish] [--create-pr {true\|false}]` | Force-push and create/update GitHub PRs. By default leaf=published, others=draft. |
@@ -75,6 +78,7 @@ PRs are cached per branch in pm's database — `pm stacker ls` shows them withou
 | Command | Description |
 |---|---|
 | `pm stacker reparent <new-parent> [--branch <b>]` | Move branch onto a different parent; descendants are re-cherry-picked |
+| `pm stacker reparent [--allow-drop-parent-modifications] [--allow-drop-merge] [--offline]` | Same gate / collapse flags as `pm stacker sync` — forwarded to reparent's downstream sync. |
 | `pm stacker reparent --continue / --abort` | Resume/cancel a paused reparent |
 | `pm stacker absorb [--branch <b>]` | Cherry-pick the current branch's new commits onto its parent (one-way, child → parent) |
 | `pm stacker absorb --continue / --abort` | Resume/cancel a paused absorb |
@@ -177,6 +181,43 @@ pm stacker abort                      # rolls back to the pre-sync state
 
 If `continue` pauses again on the next branch, repeat. The slot stays held the whole time; the operation is durable across shells.
 
+## Sync Gates
+
+Sync runs two preflight checks per branch. Both can be opted out of with a flag — but the flag name starts with `--allow-drop-` because opting out **discards** state the user may not realize is in the worktree. Read the error message carefully before reaching for the flag.
+
+### Parent-modifications gate
+
+Fires when the branch's recorded anchor (`last_synced_parent_commit`) is no longer an ancestor of the branch's HEAD. That means the branch's history *below* its working commits was rewritten outside stacker — usually one of:
+
+- The user ran `git rebase --onto <other> ...` against the worktree.
+- A `git commit --amend` touched a pre-stack commit.
+- The branch was force-pushed from a different machine with a different base.
+
+Sync errors with a message naming the anchor and HEAD SHAs. To proceed:
+
+```bash
+pm stacker sync --allow-drop-parent-modifications
+```
+
+This drops the below-anchor changes and replays only `managed_base..HEAD` onto the parent's current tip. If the below-anchor change was something the user wanted to keep, the right move is **not** the flag — they should `git reflog` it back out and reapply on top of the working commits instead.
+
+### Merged-PR auto-collapse
+
+When the branch's PR is `MERGED` (cached in `pr_state` and refreshed at sync start), sync skips the cherry-pick path entirely and **resets the branch to its parent's tip** — the branch becomes a no-commit branch. Children stacked on top continue to work; their next sync cherry-picks their own commits onto the collapsed branch's HEAD (= parent tip).
+
+Squash presence is detected with `git merge-tree --write-tree`. Two cases:
+
+- **Squash on parent** (the normal case after `gh pr merge --squash` + `git pull` on master): sync collapses automatically, prints "Collapsed `<branch>` to `<parent>` (merged PR)". No flag needed.
+- **Squash missing on parent**: typically means the PR was merged into a different base, or the local parent hasn't pulled the merge yet. Sync errors. To force the same collapse anyway:
+
+  ```bash
+  pm stacker sync --allow-drop-merge
+  ```
+
+  The right fix is usually `pm repo pull` to bring the parent up to date first; the flag is for the case where you know the merge went somewhere else and want to drop the branch's commits regardless.
+
+`pm stacker sync --offline` skips the PR-state refresh entirely and reads whatever's in the cache. Use it when github is unreachable or rate-limited; collapse decisions then depend on `pr_state` being current (run `pm stacker pr refresh` or `pm stacker ls` first to update it).
+
 ## Restructuring Workflows
 
 ### Reparent a branch onto a different parent
@@ -207,17 +248,26 @@ This is one-way (child → parent). To go the other direction, edit the parent d
 
 ## After a PR Is Merged
 
-When the leaf PR merges (or any PR — pm doesn't enforce merge order):
+When a PR merges (any position in the stack — pm doesn't enforce merge order):
 
 ```bash
-pm repo pull                             # fetch master with the merge
-pm stacker ls --json                     # tracked branches, with `merged: true` for the merged one
-pm stacker remove --branch stack/feature-a   # drops it; children are reparented to feature-a's parent
-pm stacker sync                          # replay remaining lineage onto the new master
-pm stacker push
+pm repo pull                             # fetch master with the squash commit
+pm stacker sync                          # auto-collapses the merged branch + replays descendants
+pm stacker push                          # push the remaining un-merged branches
 ```
 
-`pm stacker push` automatically skips branches that are already merged into the trunk, so it's safe to leave merged branches in place briefly.
+Sync sees the `MERGED` PR state and resets the merged branch to its parent tip ("Collapsed `<branch>` to `<parent>` (merged PR)"). The branch stays in the stacker DB as a no-commit branch — children stack on it transparently, so descendant syncs don't see a gap.
+
+Tidy up the no-commit branches when you want:
+
+```bash
+pm stacker ls --json                     # `merged: true` + `commit_count: 0` ⇒ candidate for removal
+pm stacker remove --branch stack/feature-a   # children get reparented to feature-a's parent
+```
+
+`pm stacker push` also skips merged branches automatically, so leaving collapsed branches in place between PRs is safe.
+
+If `pm repo pull` hasn't been run (parent doesn't have the squash yet), sync errors and points at `--allow-drop-merge` — pull first instead of using the flag.
 
 ## Common Mistakes
 
@@ -232,6 +282,8 @@ pm stacker push
 | Reading state from human output | `pm stacker ls --json` | Tree rendering is for humans; JSON is parseable and stable. |
 | Pasting commit SHAs in a PR description | Reference the branch by name | SHAs change on every sync. |
 | Running `pm stacker sync` from `master` | Run sync from inside the stack | Sync from master with `--all` syncs every stack — usually not what you want. |
+| Adding `--allow-drop-merge` because sync errored on a merged PR | `pm repo pull` first | The error usually means the parent hasn't pulled the squash yet; the flag drops the commits unconditionally. |
+| Adding `--allow-drop-parent-modifications` to silence a gate failure | Read the message and figure out what got rewritten | The flag silently drops work the user did below the stack range. Recover via reflog instead unless the rewrite was intentional. |
 
 ## What `pm stacker ls --json` Returns
 
@@ -264,7 +316,8 @@ Each branch entry includes the fields needed to plan an action:
 Use:
 - `needs_sync` → run `pm stacker sync`
 - `ahead_of_remote > 0` → run `pm stacker push`
-- `merged: true` → candidate for `pm stacker remove`
+- `merged: true` + `commit_count > 0` → next `pm stacker sync` will collapse it to a no-commit branch
+- `merged: true` + `commit_count == 0` → already collapsed; candidate for `pm stacker remove`
 - `pr_url == null` → first push will create the PR
 - `status` → `"local_only"`, `"synced"`, `"out_of_sync"`, `"merged"`, etc.
 
