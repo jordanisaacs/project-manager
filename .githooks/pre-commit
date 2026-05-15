@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Project pre-commit hook.
+#
+# Runs `make lint` against the whole tree. Chains to a previous hooks
+# directory if `$PM_PRE_COMMIT_CHAIN` is set so a global Databricks (or
+# similar) pre-commit can still run its secret-scan and friends.
+#
+# Install with `make hooks-install` (sets `core.hooksPath` to `.githooks`).
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+if [[ -n "${PM_PRE_COMMIT_CHAIN:-}" ]]; then
+    chained="${PM_PRE_COMMIT_CHAIN%/}/pre-commit"
+    if [[ -x "$chained" ]]; then
+        "$chained" "$@"
+    fi
+fi
+
+cd "$repo_root"
+make lint
