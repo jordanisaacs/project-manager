@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 
 def reparent(
-    ctx: StackerCtx, target: SelectorTarget, new_parent: ParentLocator
+    ctx: StackerCtx, target: SelectorTarget, new_parent: ParentLocator,
+    *, hard: bool = False,
 ) -> str:
     """Move `target` onto a new parent; cascade cherry-pick through descendants.
 
@@ -22,6 +23,12 @@ def reparent(
     at the old parent's tip so the next sync sees every commit from
     `old_base..HEAD` as "to cherry-pick onto the new parent". Sync
     then updates managed_base to the new parent's tip on finalize.
+
+    `hard` is forwarded to the downstream sync — bypasses patch-id
+    dedup, replaying only the commits each branch added on top of its
+    recorded base. Use when a descendant's shared commits have drifted
+    in patch from the new parent's equivalents and would otherwise
+    conflict instead of dedup.
     """
     if ctx.db.get_operation(target.repo_name):
         raise git.GitError(
@@ -55,7 +62,7 @@ def reparent(
         )
     )
     return sync_ops.sync(
-        ctx, target, ScopeSpec(scope="current", skip_ancestors=True)
+        ctx, target, ScopeSpec(scope="current", skip_ancestors=True), hard=hard,
     )
 
 

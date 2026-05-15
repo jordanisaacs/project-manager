@@ -323,7 +323,9 @@ def recompute_progress(path: Path, op: OperationState) -> int:
     return min(applied_count, len(op.commit_list))
 
 
-def failure_message(op: OperationState, slot_path: Path) -> str:
+def failure_message(
+    ctx: StackerCtx, op: OperationState, slot_path: Path,
+) -> str:
     assert op.branch
     inspect_selector = selectors.selector_for(op.repo_name, op.branch)
     other_selector = selectors.selector_for(op.repo_name, op.parent_branch or "")
@@ -346,5 +348,37 @@ def failure_message(op: OperationState, slot_path: Path) -> str:
     if op.error_message:
         parts.append(f"Git says: {op.error_message}")
     parts.append(f"Worktree at: {slot_path}")
+    hint = _hard_hint(ctx, op)
+    if hint:
+        parts.append(hint)
     parts.append("Next action: `pm stacker continue` or `pm stacker abort`")
     return "\n".join(parts)
+
+
+def _hard_hint(ctx: StackerCtx, op: OperationState) -> str | None:
+    """Suggest `--hard` when the failing commit predates the branch's own work.
+
+    For sync/reparent in non-hard mode, the commit list can extend below
+    `managed_base_commit` — those are commits the branch shares with its
+    old parent that patch-id dedup couldn't see as already-applied on the
+    new parent. A pure-replay (`--hard`) drops them entirely and only
+    replays `managed_base..HEAD`, the branch's own working commits.
+    """
+    if op.hard or op.op_type == "local_absorb" or op.branch is None:
+        return None
+    if op.next_commit_index >= len(op.commit_list):
+        return None
+    tracked = ctx.db.get_branch(op.repo_name, op.branch)
+    if tracked is None:
+        return None
+    failing = op.commit_list[op.next_commit_index]
+    repo_root = ctx.paths.repo(op.repo_name)
+    if not git.is_ancestor(repo_root, failing, tracked.managed_base_commit):
+        return None
+    label = selectors.selector_for(op.repo_name, op.branch)
+    return (
+        f"Hint: {fmt.short(failing)} predates {label}'s working commits "
+        f"({fmt.short(tracked.managed_base_commit)}..HEAD). "
+        f"Abort and retry with `--hard` to replay only the branch's own "
+        f"commits and skip shared history that drifted from the new parent."
+    )

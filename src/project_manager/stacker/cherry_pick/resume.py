@@ -37,7 +37,7 @@ def resume_cherry_pick(
             op.status = "paused"
             op.error_message = message
             ctx.db.put_operation(op)
-            return driver.failure_message(op, slot_path)
+            return driver.failure_message(ctx, op, slot_path)
         op.next_commit_index += 1
         ctx.db.put_operation(op)
     elif empty.should_skip_empty_commit(op):
@@ -70,7 +70,7 @@ def resume_skip_empty(
             skip.stderr.strip() or skip.stdout.strip() or "cherry-pick --skip failed"
         )
         ctx.db.put_operation(op)
-        return driver.failure_message(op, slot_path)
+        return driver.failure_message(ctx, op, slot_path)
     fmt.record(ctx, logs, f"Skipping empty cherry-pick {fmt.short(commit)} on {label}")
     op.next_commit_index += 1
     op.error_message = None
@@ -104,7 +104,7 @@ def cherry_pick_remaining(
                 or f"cherry-pick failed for {commit}"
             )
             ctx.db.put_operation(op)
-            return driver.failure_message(op, slot_path)
+            return driver.failure_message(ctx, op, slot_path)
         op.next_commit_index += 1
         ctx.db.put_operation(op)
     return None

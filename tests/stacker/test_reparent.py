@@ -99,3 +99,60 @@ def test_reparent_pauses_on_conflict(
     # Aborting cleans up.
     service.abort_operation(tracked_stack.repo_name)
     assert service.db.get_operation(tracked_stack.repo_name) is None
+
+
+def test_reparent_hard_persists_in_op(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`reparent --hard` records hard=True on the paused OperationState.
+
+    Forces a conflict on the target's own cherry-pick (a / c both touch
+    shared.txt) so the op pauses; verifies the flag survived into the
+    downstream sync that reparent kicks off.
+    """
+    a_slot = tracked_stack.slots["a"]
+    c_slot = tracked_stack.slots["c"]
+    commit_file(a_slot.path, "shared.txt", "a\n", "a: shared")
+    commit_file(c_slot.path, "shared.txt", "c\n", "c: shared")
+
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="c")
+    new_parent = ParentLocator(repo_name=tracked_stack.repo_name, branch="a")
+    result = service.reparent(target, new_parent, hard=True)
+    assert "paused" in result.lower()
+
+    op = service.db.get_operation(tracked_stack.repo_name)
+    assert op is not None
+    assert op.hard is True
+    service.abort_operation(tracked_stack.repo_name)
+
+
+def test_reparent_hard_replays_own_commits_only(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """`reparent --hard` cherry-picks managed_base..HEAD without dedup.
+
+    `c` adds shared.txt on top of its existing c.txt commit; reparent
+    onto `a` with --hard should replay exactly those two commits (the
+    range from c's prior managed_base = b's tip), independent of what
+    the new parent contains.
+    """
+    c_slot = tracked_stack.slots["c"]
+    commit_file(c_slot.path, "shared.txt", "c\n", "c: shared")
+
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="c")
+    new_parent = ParentLocator(repo_name=tracked_stack.repo_name, branch="a")
+    result = service.reparent(target, new_parent, hard=True)
+    assert "Sync complete." in result
+
+    c = service.db.get_branch(tracked_stack.repo_name, "c")
+    assert c is not None
+    assert c.parent_branch == "a"
+    # New tip = a + c.txt + shared.txt (c's own two commits, in order).
+    head_log = stacker_git.git(
+        c_slot.path, "log", "--format=%s", "-3",
+    ).stdout.strip().splitlines()
+    assert head_log[0] == "c: shared"
+    assert head_log[1] == "c: first commit"
+    assert head_log[2] == "a: first commit"

@@ -159,8 +159,11 @@ class StackerService:
             force=force,
         )
 
-    def reparent(self, target: SelectorTarget, new_parent: ParentLocator) -> str:
-        return reparent_ops.reparent(self._ctx, target, new_parent)
+    def reparent(
+        self, target: SelectorTarget, new_parent: ParentLocator,
+        *, hard: bool = False,
+    ) -> str:
+        return reparent_ops.reparent(self._ctx, target, new_parent, hard=hard)
 
     def split(
         self,

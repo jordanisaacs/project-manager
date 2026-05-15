@@ -411,6 +411,63 @@ def test_sync_hard_continue_persists(
     assert service.db.get_operation(repo_name) is None
 
 
+def test_sync_pause_hints_at_hard_when_failing_commit_predates_working_set(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """A non-hard sync pausing on an ancestor of managed_base suggests --hard.
+
+    Setup mirrors the lbm-barnacle-config scenario: the parent has been
+    rewritten in place, patch-id dedup misses the duplicate, and the
+    cherry-pick replays a commit that is already in the child's recorded
+    base. The failure message must point the user at `--hard`.
+    """
+    repo_name, repo_path = stacker_repo
+    feature_slot = three_slots[0]
+    main_before = stacker_git.rev_parse(repo_path, "HEAD")
+    commit_file(repo_path, "shared.txt", "main v1\n", "main: v1")
+    _initialize(service, repo_name, feature_slot, "feature-hint")
+    commit_file(feature_slot.path, "feat.txt", "feat\n", "feat: own commit")
+
+    service.sync(SelectorTarget(repo_name=repo_name, branch="feature-hint"))
+
+    # Rewrite main with a conflicting change so the cherry-pick of the
+    # main_v1 commit (an ancestor of managed_base) conflicts.
+    _rewrite_main(repo_path, main_before, "main prime\n", "main: v1'")
+
+    paused = service.sync(SelectorTarget(repo_name=repo_name, branch="feature-hint"))
+    assert "paused" in paused.lower()
+    assert "--hard" in paused
+    assert "predates" in paused
+    service.abort_operation(repo_name)
+
+
+def test_sync_hard_pause_omits_hard_hint(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """A pause from `sync --hard` must not suggest `--hard` again."""
+    repo_name, repo_path = stacker_repo
+    feature_slot = three_slots[0]
+    main_before = stacker_git.rev_parse(repo_path, "HEAD")
+    commit_file(repo_path, "shared.txt", "main v1\n", "main: v1")
+    _initialize(service, repo_name, feature_slot, "feature-already-hard")
+    commit_file(feature_slot.path, "shared.txt", "child v1\n", "feat: shared")
+
+    service.sync(SelectorTarget(repo_name=repo_name, branch="feature-already-hard"))
+    _rewrite_main(repo_path, main_before, "main prime\n", "main: v1'")
+
+    paused = service.sync(
+        SelectorTarget(repo_name=repo_name, branch="feature-already-hard"),
+        hard=True,
+    )
+    assert "paused" in paused.lower()
+    assert "--hard" not in paused
+    service.abort_operation(repo_name)
+
+
 def test_sync_hard_downstream_propagates(
     tracked_stack: TrackedStack,
     service: StackerService,
