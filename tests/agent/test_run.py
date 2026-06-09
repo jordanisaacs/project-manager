@@ -6,7 +6,7 @@ from project_manager.agent import run as run_mod
 from project_manager.agent.run import AgentName
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
-from project_manager.project import create as create_mod
+from project_manager.project import add as add_mod
 from tests.helpers import git_pool
 
 
@@ -100,7 +100,7 @@ def test_build_command_empty_string_raises() -> None:
 
 def _prepare_project(pm_env: Paths) -> Path:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     return pm_env.project("demo")
 
 

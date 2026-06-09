@@ -9,7 +9,7 @@ import project_manager.cli  # noqa: F401
 from project_manager.cli import main
 from project_manager.cli._complete import projects, repos, worktrees
 from project_manager.paths import Paths
-from project_manager.project import create as create_mod
+from project_manager.project import add as add_mod
 from tests.helpers import git_pool
 
 
@@ -22,7 +22,7 @@ def test_projects_lists_created_projects(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     assert projects() == 0
     assert capsys.readouterr().out == "demo\n"
 
@@ -61,7 +61,7 @@ def test_worktrees_lists_project_wts(
     git_pool(pm_env, "foo", n=2)
     git_pool(pm_env, "bar", n=1)
     # Two worktrees in one project.
-    create_mod.create(pm_env, "demo", [("foo1", "foo"), ("foo2", "foo")])
+    add_mod.add(pm_env, "demo", [("foo1", "foo"), ("foo2", "foo")])
     # --project explicit.
     assert worktrees(project="demo") == 0
     out = capsys.readouterr().out.splitlines()
@@ -85,7 +85,7 @@ def test_worktrees_filter_by_attach_state(
     from project_manager.project import detach as detach_mod
 
     git_pool(pm_env, "foo", n=2)
-    create_mod.create(pm_env, "demo", [("foo1", "foo"), ("foo2", "foo")])
+    add_mod.add(pm_env, "demo", [("foo1", "foo"), ("foo2", "foo")])
     # Detach foo1 → it should appear in "unattached", not in "attached".
     detach_mod.detach(pm_env, "demo", ["foo1"])
 

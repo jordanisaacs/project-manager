@@ -2,7 +2,7 @@ from pathlib import Path
 
 from project_manager.agent import scope
 from project_manager.paths import Paths
-from project_manager.project import create as create_mod
+from project_manager.project import add as add_mod
 from tests.helpers import git_pool
 
 
@@ -12,7 +12,7 @@ def _just(wts: list[str]) -> list[tuple[str, str]]:
 
 def test_owned_paths_includes_project_and_worktree_targets(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     project_dir = pm_env.project("demo")
     symlink = pm_env.forward("demo", "foo")
     real_slot = symlink.resolve()
@@ -27,7 +27,7 @@ def test_owned_paths_includes_project_and_worktree_targets(pm_env: Paths) -> Non
 
 def test_owned_paths_handles_broken_symlink_gracefully(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     # Point the forward symlink at a non-existent path — simulates a
     # broken pool slot. owned_paths must not raise.
     symlink = pm_env.forward("demo", "foo")

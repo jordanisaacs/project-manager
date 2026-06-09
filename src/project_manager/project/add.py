@@ -26,19 +26,19 @@ checkout living under the pool root.
 - `pm project status` — authoritative state from `.pm.db`.
 
 Do not `git init` here, do not commit this directory, and do not move the
-symlinks by hand — use `pm project wt attach|detach|delete`.
+symlinks by hand — use `pm project wt attach|detach|remove`.
 """
 
 
 @dataclass(frozen=True)
-class CreatedWt:
+class AddedWt:
     wt: str
     repo: str
     uuid: str
     path: Path
 
 
-CREATED_COLUMNS: list[Column] = [
+ADDED_COLUMNS: list[Column] = [
     Column("Worktree", "wt"),
     Column("Repo", "repo", style="blue"),
     Column("UUID", "uuid", style="dim"),
@@ -47,7 +47,7 @@ CREATED_COLUMNS: list[Column] = [
 
 
 @dataclass(frozen=True)
-class _CreateCtx:
+class _AddCtx:
     paths: Paths
     pooldb: PoolDB
     conn: sqlite3.Connection
@@ -78,7 +78,7 @@ def _claim_any_free(
 
 
 def _claim_one(
-    ctx: _CreateCtx,
+    ctx: _AddCtx,
     project: str,
     wt: str,
     repo: str,
@@ -99,12 +99,12 @@ def _claim_one(
     return s
 
 
-def create(
+def add(
     paths: Paths,
     project: str,
     wts: list[tuple[str, str]],
-) -> list[CreatedWt]:
-    """Create a project (or add worktrees to an existing one).
+) -> list[AddedWt]:
+    """Add worktrees to a project, creating the container on first use.
 
     `wts` is a list of `(wt_name, repo)` pairs. For each: claim a pool slot
     for `repo`, symlink `projects/<project>/<wt_name>` to the slot, insert
@@ -123,13 +123,13 @@ def create(
     db_existed = db_path.exists()
 
     pooldb = PoolDB(paths.pool_db())
-    claimed: list[CreatedWt] = []
+    claimed: list[AddedWt] = []
     try:
         with db.transaction(db_path) as conn:
-            ctx = _CreateCtx(paths=paths, pooldb=pooldb, conn=conn)
+            ctx = _AddCtx(paths=paths, pooldb=pooldb, conn=conn)
             for wt, repo in wts:
                 s = _claim_one(ctx, project, wt, repo)
-                claimed.append(CreatedWt(wt=wt, repo=s.repo, uuid=s.uuid, path=s.path))
+                claimed.append(AddedWt(wt=wt, repo=s.repo, uuid=s.uuid, path=s.path))
     except BaseException:
         for c in reversed(claimed):
             forward = paths.forward(project, c.wt)

@@ -4,8 +4,8 @@ import sys
 
 from project_manager import render
 from project_manager.paths import Paths
-from project_manager.project import delete as delete_mod
 from project_manager.project import detach as detach_mod
+from project_manager.project import remove as remove_mod
 
 
 def emit_detach_plan(plan: detach_mod.DetachPlan, *, as_json: bool) -> None:
@@ -20,8 +20,8 @@ def emit_detach_plan(plan: detach_mod.DetachPlan, *, as_json: bool) -> None:
             print(f"pm: BLOCKED: {action.wt}: {action.blocker}", file=sys.stderr)
 
 
-def emit_delete_plan(
-    plan: delete_mod.DeletePlan,
+def emit_remove_plan(
+    plan: remove_mod.RemovePlan,
     paths: Paths,
     *,
     as_json: bool,

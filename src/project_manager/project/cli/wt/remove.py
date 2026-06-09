@@ -7,8 +7,8 @@ from cyclopts import Parameter
 from project_manager import config
 from project_manager.cli._shared import ProjectFlag, WtSelection, selected_wts
 from project_manager.project import current
-from project_manager.project import delete as delete_mod
-from project_manager.project.cli._plan_printers import emit_delete_plan
+from project_manager.project import remove as remove_mod
+from project_manager.project.cli._plan_printers import emit_remove_plan
 
 from . import wt_app
 
@@ -29,8 +29,8 @@ def remove(
     project = current.resolve_project(paths, flag.project)
     selected = selected_wts(sel)
     if dry_run:
-        plan = delete_mod.plan_delete(paths, project, selected)
-        emit_delete_plan(plan, paths, as_json=json)
+        plan = remove_mod.plan_remove(paths, project, selected)
+        emit_remove_plan(plan, paths, as_json=json)
         return 1 if plan.has_blocker else 0
-    delete_mod.delete(paths, project, selected)
+    remove_mod.remove(paths, project, selected)
     return 0

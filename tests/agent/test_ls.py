@@ -10,7 +10,7 @@ import project_manager.cli  # noqa: F401  — ensures agent sub-app is registere
 from project_manager.agent import ls as ls_mod
 from project_manager.agent.sources import REGISTRY, SessionEntry, parse_agents
 from project_manager.paths import Paths
-from project_manager.project import create as create_mod
+from project_manager.project import add as add_mod
 from tests.helpers import git_pool
 
 
@@ -90,7 +90,7 @@ def test_ls_merges_and_sorts_across_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
@@ -127,7 +127,7 @@ def test_ls_limit_applies_after_merge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
@@ -168,7 +168,7 @@ def test_ls_emits_placeholder_row_for_project_with_no_sessions(
     "no sessions here" from "this project doesn't exist".
     """
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
@@ -192,7 +192,7 @@ def test_ls_propagates_exceptions_from_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     monkeypatch.setenv("HOME", str(tmp_path))
 
     async def boom(_owned: set[Path], _limit: int) -> list[SessionEntry]:
@@ -219,7 +219,7 @@ def test_ls_runs_sources_concurrently(
     without making the test flaky on a slow runner.
     """
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     monkeypatch.setenv("HOME", str(tmp_path))
     delay = 0.2
 
@@ -249,10 +249,10 @@ def _prepare_resume_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
     """Create a pm project, fake $HOME, chdir inside it. Returns project_dir."""
-    from project_manager.project import create as create_mod
+    from project_manager.project import add as add_mod
 
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))

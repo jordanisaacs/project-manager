@@ -6,7 +6,7 @@ from project_manager import check as check_mod
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
-from project_manager.project import create as create_mod
+from project_manager.project import add as add_mod
 from project_manager.project import db as project_db
 from project_manager.project import detach as detach_mod
 from project_manager.project import status as status_mod
@@ -46,7 +46,7 @@ def _tracked(repo: str, branch: str, parent: str) -> TrackedBranch:
 def test_status_healthy_project(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x"])
-    create_mod.create(pm_env, "demo", _just(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just(["foo", "bar"]))
     ps = status_mod.status(pm_env, "demo")
     kinds = [r.finding.kind for r in ps.worktrees]
     assert kinds == [check_mod.Kind.ACTIVE, check_mod.Kind.ACTIVE]
@@ -60,7 +60,7 @@ def test_status_healthy_project(pm_env: Paths) -> None:
 
 def test_status_resolves_branch_for_active_row(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     forward = pm_env.projects / "demo" / "foo"
     _checkout_branch(forward, "feat")
     ps = status_mod.status(pm_env, "demo")
@@ -73,7 +73,7 @@ def test_status_resolves_branch_for_active_row(pm_env: Paths) -> None:
 
 def test_status_includes_detached_row_with_persisted_branch(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     forward = pm_env.projects / "demo" / "foo"
     _checkout_branch(forward, "feat")
     persisted = head_ref(forward.resolve())
@@ -98,8 +98,8 @@ def test_status_is_scoped_to_one_project(pm_env: Paths) -> None:
     """Orphan owners for a different project must not leak in."""
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x", "y"])
-    create_mod.create(pm_env, "alpha", _just(["foo", "bar"]))
-    create_mod.create(pm_env, "beta", _just(["bar"]))  # claims bar/y (x is taken by alpha's bar)
+    add_mod.add(pm_env, "alpha", _just(["foo", "bar"]))
+    add_mod.add(pm_env, "beta", _just(["bar"]))  # claims bar/y (x is taken by alpha's bar)
     # Inject an orphan owner: a fresh bar slot claimed by alpha in the pool db
     # with no matching forward.
     (pm_env.worktrees / "bar" / "z").mkdir()
@@ -112,7 +112,7 @@ def test_status_is_scoped_to_one_project(pm_env: Paths) -> None:
 
 def test_status_orphan_owner_row_has_no_wt(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     # Detach by just removing the forward (leaves pool row dangling → orphan owner).
     (pm_env.projects / "demo" / "foo").unlink()
     ps = status_mod.status(pm_env, "demo")
@@ -126,7 +126,7 @@ def test_status_orphan_owner_row_has_no_wt(pm_env: Paths) -> None:
 
 def test_status_populates_prs_when_stacker_db_has_match(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     forward = pm_env.projects / "demo" / "foo"
     _checkout_branch(forward, "feat")
     pr = PRState(
@@ -150,7 +150,7 @@ def test_status_populates_prs_when_stacker_db_has_match(pm_env: Paths) -> None:
 
 def test_status_pr_list_empty_without_match(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     pr = PRState(
         repo_name="foo",
         branch="some-other-branch",
@@ -167,7 +167,7 @@ def test_status_pr_list_empty_without_match(pm_env: Paths) -> None:
 def test_status_worktree_sections_group_by_repo(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x"])
-    create_mod.create(pm_env, "demo", [("foo-wt", "foo"), ("bar-wt", "bar")])
+    add_mod.add(pm_env, "demo", [("foo-wt", "foo"), ("bar-wt", "bar")])
     ps = status_mod.status(pm_env, "demo")
     sections = status_mod.worktree_sections(ps.worktrees)
     titles = [s.title for s in sections]
@@ -180,7 +180,7 @@ def test_status_worktree_sections_group_by_repo(pm_env: Paths) -> None:
 
 def test_worktree_row_json_shape_drops_slot_uuid(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     ps = status_mod.status(pm_env, "demo")
     row = ps.worktrees[0]
     data = row.__pm_json__()
@@ -196,7 +196,7 @@ def test_worktree_row_json_shape_drops_slot_uuid(pm_env: Paths) -> None:
 
 def test_worktree_row_tracked_flag_follows_stacker_db(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     forward = pm_env.projects / "demo" / "foo"
     _checkout_branch(forward, "feat")
     # Initially not tracked
@@ -216,7 +216,7 @@ def test_worktree_row_tracked_flag_follows_stacker_db(pm_env: Paths) -> None:
 
 def test_stacker_section_unions_arms_across_worktrees_same_repo(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=2)
-    create_mod.create(pm_env, "demo", [("w1", "foo"), ("w2", "foo")])
+    add_mod.add(pm_env, "demo", [("w1", "foo"), ("w2", "foo")])
     _checkout_branch(pm_env.projects / "demo" / "w1", "arm-a")
     _checkout_branch(pm_env.projects / "demo" / "w2", "arm-b")
     db = StackerDB(pm_env.stacker_db())
@@ -240,7 +240,7 @@ def test_stacker_tree_marks_branches_with_wt_name_not_current(pm_env: Paths) -> 
     git_pool(pm_env, "foo", n=1)
     # Use a worktree name distinct from both branch and repo so the
     # `(wt)` label is unambiguously the worktree name, not a fallback.
-    create_mod.create(pm_env, "demo", [("slot-one", "foo")])
+    add_mod.add(pm_env, "demo", [("slot-one", "foo")])
     _checkout_branch(pm_env.projects / "demo" / "slot-one", "feat")
     StackerDB(pm_env.stacker_db()).upsert_branch(_tracked("foo", "feat", "main"))
     ps = status_mod.status(pm_env, "demo")
@@ -252,7 +252,7 @@ def test_stacker_tree_marks_branches_with_wt_name_not_current(pm_env: Paths) -> 
 
 def test_stacker_empty_when_no_tracked_branch(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just(["foo"]))
+    add_mod.add(pm_env, "demo", _just(["foo"]))
     _checkout_branch(pm_env.projects / "demo" / "foo", "feat")
     # Track some unrelated branch — must not pollute the project's stacker section.
     StackerDB(pm_env.stacker_db()).upsert_branch(

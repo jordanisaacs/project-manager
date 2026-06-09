@@ -9,13 +9,13 @@ from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot
+from project_manager.project import add as add_mod
 from project_manager.project import attach as attach_mod
 from project_manager.project import branch as branch_mod
-from project_manager.project import create as create_mod
 from project_manager.project import db
-from project_manager.project import delete as delete_mod
 from project_manager.project import detach as detach_mod
 from project_manager.project import ls as ls_mod
+from project_manager.project import remove as remove_mod
 from project_manager.project.cli.delete import delete as cli_project_delete
 from project_manager.project.cli.wt.detach import detach as cli_wt_detach
 from project_manager.project.spec import parse_wt_spec
@@ -67,7 +67,7 @@ def _just_repos(wts: list[str]) -> list[tuple[str, str]]:
 
 def test_create_single_repo_creates_db_and_pool_row(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
     assert _forward(pm_env, "demo", "foo").is_symlink()
     assert _pool_owner(pm_env, "foo", "a") == Owner(OwnerKind.PROJECT, "demo")
@@ -77,7 +77,7 @@ def test_create_single_repo_creates_db_and_pool_row(pm_env: Paths) -> None:
 def test_create_multi_repo(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x"])
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     assert sorted(_db_rows(pm_env, "demo")) == [
         ("bar", "bar", "x"),
         ("foo", "foo", "a"),
@@ -88,21 +88,21 @@ def test_create_rolls_back_when_second_repo_exhausted(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", [])
     with pytest.raises(PoolExhaustedError):
-        create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+        add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     assert _pool_owner(pm_env, "foo", "a") is None
     assert not (pm_env.projects / "demo").exists()
 
 
 def test_create_fails_if_project_already_has_wt(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a", "b"])
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     with pytest.raises(ProjectError, match="already has worktree"):
-        create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+        add_mod.add(pm_env, "demo", _just_repos(["foo"]))
 
 
 def test_create_writes_readme(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     readme = pm_env.projects / "demo" / "README.md"
     assert readme.is_file()
     body = readme.read_text(encoding="utf-8")
@@ -114,10 +114,10 @@ def test_create_writes_readme(pm_env: Paths) -> None:
 def test_create_does_not_overwrite_readme(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x"])
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     readme = pm_env.projects / "demo" / "README.md"
     readme.write_text("user edit", encoding="utf-8")
-    create_mod.create(pm_env, "demo", _just_repos(["bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["bar"]))
     assert readme.read_text(encoding="utf-8") == "user edit"
 
 
@@ -125,13 +125,13 @@ def test_create_rollback_does_not_leave_readme(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", [])
     with pytest.raises(PoolExhaustedError):
-        create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+        add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     assert not (pm_env.projects / "demo" / "README.md").exists()
     assert not (pm_env.projects / "demo").exists()
 
 
 def test_create_empty_wts_just_materializes_project(pm_env: Paths) -> None:
-    create_mod.create(pm_env, "demo", [])
+    add_mod.add(pm_env, "demo", [])
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
     assert (pm_env.projects / "demo" / "README.md").is_file()
     assert _db_rows(pm_env, "demo") == []
@@ -139,7 +139,7 @@ def test_create_empty_wts_just_materializes_project(pm_env: Paths) -> None:
 
 def test_create_two_wts_same_repo(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a", "b"])
-    create_mod.create(pm_env, "demo", [("wt1", "foo"), ("wt2", "foo")])
+    add_mod.add(pm_env, "demo", [("wt1", "foo"), ("wt2", "foo")])
     rows = sorted(_db_rows(pm_env, "demo"))
     assert [(w, r) for w, r, _ in rows] == [("wt1", "foo"), ("wt2", "foo")]
     uuids = {u for _, _, u in rows}
@@ -151,14 +151,14 @@ def test_create_two_wts_same_repo(pm_env: Paths) -> None:
 def test_create_duplicate_wt_in_spec_rejected(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a", "b"])
     with pytest.raises(ProjectError, match="duplicate worktree"):
-        create_mod.create(pm_env, "demo", [("wt1", "foo"), ("wt1", "foo")])
+        add_mod.add(pm_env, "demo", [("wt1", "foo"), ("wt1", "foo")])
 
 
 def test_create_add_wts_to_existing_project(pm_env: Paths) -> None:
     _mk_pool(pm_env, "foo", ["a"])
     _mk_pool(pm_env, "bar", ["x"])
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
-    create_mod.create(pm_env, "demo", _just_repos(["bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["bar"]))
     wts = {w: r for w, r, _ in _db_rows(pm_env, "demo")}
     assert wts == {"foo": "foo", "bar": "bar"}
 
@@ -168,7 +168,7 @@ def test_create_add_wts_to_existing_project(pm_env: Paths) -> None:
 
 def test_detach_unlinks_forward_and_releases_pool_row_but_keeps_db(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     uuid = _current_uuid(pm_env, "demo", "foo")
     detach_mod.detach(pm_env, "demo", wts=None)
     assert not _forward(pm_env, "demo", "foo").exists()
@@ -180,7 +180,7 @@ def test_detach_unlinks_forward_and_releases_pool_row_but_keeps_db(pm_env: Paths
 def test_detach_per_wt(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     detach_mod.detach(pm_env, "demo", wts=["foo"])
     assert not _forward(pm_env, "demo", "foo").exists()
     assert _forward(pm_env, "demo", "bar").is_symlink()
@@ -188,14 +188,14 @@ def test_detach_per_wt(pm_env: Paths) -> None:
 
 def test_detach_refuses_unknown_wt(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     with pytest.raises(ProjectError, match="no such worktree"):
         detach_mod.detach(pm_env, "demo", wts=["nope"])
 
 
 def test_detach_saves_current_branch(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -204,7 +204,7 @@ def test_detach_saves_current_branch(pm_env: Paths) -> None:
 
 def test_detach_saves_null_when_detached(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     # Slots are already in detached HEAD after `pool.add`.
     detach_mod.detach(pm_env, "demo", wts=None)
     assert _saved_branch(pm_env, "demo", "foo") is None
@@ -212,7 +212,7 @@ def test_detach_saves_null_when_detached(pm_env: Paths) -> None:
 
 def test_detach_blocks_on_dirty(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     # stage an uncommitted change
     (slot / "README.md").write_text("dirty\n")
@@ -229,7 +229,7 @@ def test_detach_blocks_on_dirty(pm_env: Paths) -> None:
 def test_detach_multi_wt_partial_when_one_dirty(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["bar", "foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["bar", "foo"]))
     foo_slot = _forward(pm_env, "demo", "foo").resolve()
     (foo_slot / "README.md").write_text("dirty\n")
     git_in_slot(foo_slot, "add", "README.md")
@@ -241,7 +241,7 @@ def test_detach_multi_wt_partial_when_one_dirty(pm_env: Paths) -> None:
 
 def test_detach_parks_slot_to_default(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1, branch="main")
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -257,7 +257,7 @@ def test_detach_parks_slot_to_default(pm_env: Paths) -> None:
 
 def test_attach_reclaims_same_slot_when_free(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=2)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     rows_before = _db_rows(pm_env, "demo")
     detach_mod.detach(pm_env, "demo", wts=None)
     attach_mod.attach(pm_env, "demo", wts=None)
@@ -267,11 +267,11 @@ def test_attach_reclaims_same_slot_when_free(pm_env: Paths) -> None:
 
 def test_attach_falls_back_and_updates_row(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=2)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     remembered = _current_uuid(pm_env, "demo", "foo")
     detach_mod.detach(pm_env, "demo", wts=None)
     # steal demo's remembered slot
-    create_mod.create(pm_env, "other", _just_repos(["foo"]))
+    add_mod.add(pm_env, "other", _just_repos(["foo"]))
     # demo's attach should fall back
     attach_mod.attach(pm_env, "demo", wts=None)
     new_uuid = _current_uuid(pm_env, "demo", "foo")
@@ -281,9 +281,9 @@ def test_attach_falls_back_and_updates_row(pm_env: Paths) -> None:
 
 def test_attach_errors_when_pool_exhausted_for_fallback(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     detach_mod.detach(pm_env, "demo", wts=None)
-    create_mod.create(pm_env, "other", _just_repos(["foo"]))
+    add_mod.add(pm_env, "other", _just_repos(["foo"]))
     with pytest.raises(PoolExhaustedError):
         attach_mod.attach(pm_env, "demo", wts=None)
 
@@ -291,7 +291,7 @@ def test_attach_errors_when_pool_exhausted_for_fallback(pm_env: Paths) -> None:
 def test_attach_partial_and_all(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     detach_mod.detach(pm_env, "demo", wts=None)
     attach_mod.attach(pm_env, "demo", wts=["foo"])
     assert _forward(pm_env, "demo", "foo").is_symlink()
@@ -302,7 +302,7 @@ def test_attach_partial_and_all(pm_env: Paths) -> None:
 
 def test_attach_idempotent_when_already_attached(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     result = attach_mod.attach(pm_env, "demo", wts=None)
     assert result.newly_claimed == []
     assert result.warnings == []
@@ -318,7 +318,7 @@ def test_attach_errors_on_nonexistent_project(pm_env: Paths) -> None:
 
 def test_attach_restores_branch(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -329,7 +329,7 @@ def test_attach_restores_branch(pm_env: Paths) -> None:
 
 def test_attach_clears_saved_branch_on_success(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -340,7 +340,7 @@ def test_attach_clears_saved_branch_on_success(pm_env: Paths) -> None:
 
 def test_attach_no_branch_flag_skips_restore_but_clears(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -352,7 +352,7 @@ def test_attach_no_branch_flag_skips_restore_but_clears(pm_env: Paths) -> None:
 
 def test_attach_warns_when_branch_in_use(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -373,7 +373,7 @@ def test_attach_warns_when_branch_in_use(pm_env: Paths) -> None:
 
 def test_attach_missing_branch_warns(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -389,7 +389,7 @@ def test_attach_missing_branch_warns(pm_env: Paths) -> None:
 
 def test_attach_no_saved_branch_is_noop(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     # Never checked out a branch; detach while detached saves NULL.
     detach_mod.detach(pm_env, "demo", wts=None)
     result = attach_mod.attach(pm_env, "demo", wts=None)
@@ -403,28 +403,28 @@ def test_attach_no_saved_branch_is_noop(pm_env: Paths) -> None:
 
 def test_delete_whole_removes_db_and_dir(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     uuid = _current_uuid(pm_env, "demo", "foo")
-    delete_mod.delete(pm_env, "demo", wts=None)
+    remove_mod.remove(pm_env, "demo", wts=None)
     assert not (pm_env.projects / "demo").exists()
     assert _pool_owner(pm_env, "foo", uuid) is None
 
 
 def test_delete_whole_removes_readme(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     assert (pm_env.projects / "demo" / "README.md").is_file()
-    delete_mod.delete(pm_env, "demo", wts=None)
+    remove_mod.remove(pm_env, "demo", wts=None)
     assert not (pm_env.projects / "demo").exists()
 
 
 def test_delete_per_wt_implicit_detach(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     foo_uuid = _current_uuid(pm_env, "demo", "foo")
     bar_uuid = _current_uuid(pm_env, "demo", "bar")
-    delete_mod.delete(pm_env, "demo", wts=["foo"])
+    remove_mod.remove(pm_env, "demo", wts=["foo"])
     assert not _forward(pm_env, "demo", "foo").exists()
     assert _pool_owner(pm_env, "foo", foo_uuid) is None
     assert _forward(pm_env, "demo", "bar").is_symlink()
@@ -433,27 +433,27 @@ def test_delete_per_wt_implicit_detach(pm_env: Paths) -> None:
 
 def test_delete_per_wt_when_already_detached(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     detach_mod.detach(pm_env, "demo", wts=None)
-    delete_mod.delete(pm_env, "demo", wts=["foo"])
+    remove_mod.remove(pm_env, "demo", wts=["foo"])
     assert _db_rows(pm_env, "demo") == []
 
 
 def test_delete_whole_refuses_extra_files(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     (pm_env.projects / "demo" / "notes.txt").write_text("hi")
     with pytest.raises(ProjectError, match="non-pm entries"):
-        delete_mod.delete(pm_env, "demo", wts=None)
+        remove_mod.remove(pm_env, "demo", wts=None)
     # project still intact
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
 
 
 def test_delete_refuses_unknown_wt(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     with pytest.raises(ProjectError, match="no such worktree"):
-        delete_mod.delete(pm_env, "demo", wts=["nope"])
+        remove_mod.remove(pm_env, "demo", wts=["nope"])
 
 
 # --- ls ---
@@ -462,7 +462,7 @@ def test_delete_refuses_unknown_wt(pm_env: Paths) -> None:
 def test_ls_reports_mixed_states(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     attached_foo_branch = head_ref(_forward(pm_env, "demo", "foo").resolve())
     saved_bar_branch = head_ref(_forward(pm_env, "demo", "bar").resolve())
     detach_mod.detach(pm_env, "demo", wts=["bar"])
@@ -478,7 +478,7 @@ def test_ls_reports_mixed_states(pm_env: Paths) -> None:
 
 def test_ls_drift(pm_env: Paths) -> None:
     slots = git_pool(pm_env, "foo", n=2)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     original_uuid = _current_uuid(pm_env, "demo", "foo")
     other_slot: Slot = next(s for s in slots if s.uuid != original_uuid)
     detach_mod.detach(pm_env, "demo", wts=None)
@@ -511,7 +511,7 @@ def test_branch_ensure_clean_raises_when_dirty(pm_env: Paths) -> None:
 
 def test_detach_blocks_on_untracked(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "scratch.log").write_text("noise\n")
     uuid = _current_uuid(pm_env, "demo", "foo")
@@ -523,7 +523,7 @@ def test_detach_blocks_on_untracked(pm_env: Paths) -> None:
 
 def test_detach_allows_ignored_files(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / ".gitignore").write_text("*.log\n")
     git_in_slot(slot, "add", ".gitignore")
@@ -546,7 +546,7 @@ def test_detach_allows_ignored_files(pm_env: Paths) -> None:
 
 def test_detach_allows_stash(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     git_in_slot(slot, "checkout", "-b", "feature-x")
     (slot / "README.md").write_text("stashable\n")
@@ -572,7 +572,7 @@ def test_detach_blocks_on_in_progress_op(
     expected: str,
 ) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     write_git_sentinel(slot, marker)
     with pytest.raises(ProjectError, match=f"{expected} in progress"):
@@ -585,55 +585,55 @@ def test_detach_blocks_on_in_progress_op(
 
 def test_delete_per_wt_blocks_on_dirty(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "README.md").write_text("dirty\n")
     git_in_slot(slot, "add", "README.md")
     with pytest.raises(ProjectError, match="uncommitted changes"):
-        delete_mod.delete(pm_env, "demo", wts=["foo"])
+        remove_mod.remove(pm_env, "demo", wts=["foo"])
     assert _db_rows(pm_env, "demo") == [("foo", "foo", _current_uuid(pm_env, "demo", "foo"))]
     assert _forward(pm_env, "demo", "foo").is_symlink()
 
 
 def test_delete_whole_blocks_on_dirty(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "README.md").write_text("dirty\n")
     git_in_slot(slot, "add", "README.md")
     with pytest.raises(ProjectError, match="uncommitted changes"):
-        delete_mod.delete(pm_env, "demo", wts=None)
+        remove_mod.remove(pm_env, "demo", wts=None)
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
     assert _forward(pm_env, "demo", "foo").is_symlink()
 
 
 def test_delete_whole_blocks_on_untracked(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "scratch.log").write_text("noise\n")
     with pytest.raises(ProjectError, match="untracked"):
-        delete_mod.delete(pm_env, "demo", wts=None)
+        remove_mod.remove(pm_env, "demo", wts=None)
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
 
 
 def test_delete_whole_blocks_on_in_progress_rebase(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     write_git_sentinel(slot, "rebase-merge")
     with pytest.raises(ProjectError, match="rebase in progress"):
-        delete_mod.delete(pm_env, "demo", wts=None)
+        remove_mod.remove(pm_env, "demo", wts=None)
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
 
 
-# --- dry-run: plan_detach, plan_delete ---
+# --- dry-run: plan_detach, plan_remove ---
 
 
 def test_plan_detach_clean_project(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     plan = detach_mod.plan_detach(pm_env, "demo", wts=None)
     assert not plan.has_blocker
     kinds = {a.wt: a.kind for a in plan.actions}
@@ -646,7 +646,7 @@ def test_plan_detach_clean_project(pm_env: Paths) -> None:
 def test_plan_detach_reports_blockers_without_mutating(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
     foo_slot = _forward(pm_env, "demo", "foo").resolve()
     (foo_slot / "scratch.log").write_text("noise\n")
     bar_slot = _forward(pm_env, "demo", "bar").resolve()
@@ -664,7 +664,7 @@ def test_plan_detach_reports_blockers_without_mutating(pm_env: Paths) -> None:
 
 def test_plan_detach_noop_for_already_detached(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     detach_mod.detach(pm_env, "demo", wts=None)
     plan = detach_mod.plan_detach(pm_env, "demo", wts=None)
     assert not plan.has_blocker
@@ -672,11 +672,11 @@ def test_plan_detach_noop_for_already_detached(pm_env: Paths) -> None:
     assert plan.actions[0].blocker is None
 
 
-def test_plan_delete_whole_reports_extras(pm_env: Paths) -> None:
+def test_plan_remove_whole_reports_extras(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     (pm_env.projects / "demo" / "notes.txt").write_text("hi")
-    plan = delete_mod.plan_delete(pm_env, "demo", wts=None)
+    plan = remove_mod.plan_remove(pm_env, "demo", wts=None)
     assert plan.has_blocker
     assert any(p.name == "notes.txt" for p in plan.extras)
     assert plan.remove_readme
@@ -685,10 +685,10 @@ def test_plan_delete_whole_reports_extras(pm_env: Paths) -> None:
     assert (pm_env.projects / "demo" / "notes.txt").exists()
 
 
-def test_plan_delete_whole_clean(pm_env: Paths) -> None:
+def test_plan_remove_whole_clean(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
-    plan = delete_mod.plan_delete(pm_env, "demo", wts=None)
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
+    plan = remove_mod.plan_remove(pm_env, "demo", wts=None)
     assert not plan.has_blocker
     assert plan.whole
     assert plan.drop_rows == ["foo"]
@@ -698,11 +698,11 @@ def test_plan_delete_whole_clean(pm_env: Paths) -> None:
     assert (pm_env.projects / "demo" / ".pm.db").is_file()
 
 
-def test_plan_delete_per_wt(pm_env: Paths) -> None:
+def test_plan_remove_per_wt(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
     git_pool(pm_env, "bar", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo", "bar"]))
-    plan = delete_mod.plan_delete(pm_env, "demo", wts=["foo"])
+    add_mod.add(pm_env, "demo", _just_repos(["foo", "bar"]))
+    plan = remove_mod.plan_remove(pm_env, "demo", wts=["foo"])
     assert not plan.whole
     assert plan.drop_rows == ["foo"]
     assert not plan.remove_readme
@@ -716,7 +716,7 @@ def test_plan_delete_per_wt(pm_env: Paths) -> None:
 
 def test_cli_wt_detach_dry_run_exits_zero_when_clean(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     from project_manager.cli._shared import ProjectFlag, WtSelection
 
     rc = cli_wt_detach(
@@ -733,7 +733,7 @@ def test_cli_wt_detach_dry_run_exits_one_on_blocker(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     slot = _forward(pm_env, "demo", "foo").resolve()
     (slot / "scratch.log").write_text("noise\n")
     from project_manager.cli._shared import ProjectFlag, WtSelection
@@ -751,7 +751,7 @@ def test_cli_wt_detach_dry_run_exits_one_on_blocker(
 
 def test_cli_project_delete_dry_run_exits_one_on_extras(pm_env: Paths) -> None:
     git_pool(pm_env, "foo", n=1)
-    create_mod.create(pm_env, "demo", _just_repos(["foo"]))
+    add_mod.add(pm_env, "demo", _just_repos(["foo"]))
     (pm_env.projects / "demo" / "notes.txt").write_text("hi")
     rc = cli_project_delete("demo", dry_run=True)
     assert rc == 1

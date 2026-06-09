@@ -8,7 +8,7 @@ from project_manager.paths import Paths
 from project_manager.pool import add as add_mod
 from project_manager.pool import ls as ls_mod
 from project_manager.pool import worktree as wt_mod
-from project_manager.project import create as create_mod
+from project_manager.project import add as project_add_mod
 
 
 def _init_repo(path: Path, branch: str = "main") -> None:
@@ -64,7 +64,7 @@ def test_pool_ls_free_and_claimed(pm_env: Paths) -> None:
     # Fresh pool slots are checked out in detached HEAD state.
     assert all(r.branch == "(detached)" for r in rows_before)
 
-    create_mod.create(pm_env, "demo", [("foo", "foo")])
+    project_add_mod.add(pm_env, "demo", [("foo", "foo")])
     rows_after = ls_mod.ls(pm_env, "foo")
     statuses = sorted(r.status for r in rows_after)
     assert statuses == ["FREE", "demo"]

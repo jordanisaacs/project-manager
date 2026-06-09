@@ -6,7 +6,7 @@ from cyclopts import Parameter
 
 from project_manager import config, render
 from project_manager.cli._shared import ProjectFlag
-from project_manager.project import create as create_mod
+from project_manager.project import add as add_mod
 from project_manager.project import current
 from project_manager.project.spec import parse_wt_spec
 
@@ -28,6 +28,6 @@ def add(
     paths = config.load()
     project = current.resolve_project(paths, flag.project)
     items = parse_wt_spec(spec)
-    claimed = create_mod.create(paths, project, items)
-    render.emit_rows(claimed, create_mod.CREATED_COLUMNS, as_json=json)
+    claimed = add_mod.add(paths, project, items)
+    render.emit_rows(claimed, add_mod.ADDED_COLUMNS, as_json=json)
     return 0

@@ -25,12 +25,12 @@ def _is_pm_symlink(entry: Path, worktrees_root: Path) -> bool:
     return True
 
 
-def delete(paths: Paths, project: str, wts: list[str] | None) -> None:
-    """Delete worktree(s) from a project.
+def remove(paths: Paths, project: str, wts: list[str] | None) -> None:
+    """Remove worktree(s) from a project.
 
-    - `wts is None`: whole-project delete. Project-level extras check, then
-      per-wt delete for every wt, then remove README + drop db + rmdir.
-    - `wts is not None`: per-wt delete. Detach (inherits cleanliness
+    - `wts is None`: whole-project removal. Project-level extras check, then
+      per-wt removal for every wt, then remove README + drop db + rmdir.
+    - `wts is not None`: per-wt removal. Detach (inherits cleanliness
       protections), then drop the db row. Saved branch is lost.
     """
     project_dir = paths.project(project)
@@ -39,18 +39,18 @@ def delete(paths: Paths, project: str, wts: list[str] | None) -> None:
         raise ProjectError(f"project '{project}' does not exist")
 
     if wts is None:
-        _delete_whole(paths, project, project_dir, db_path)
+        _remove_whole(paths, project, project_dir, db_path)
     else:
-        _delete_wts(paths, project, wts, db_path)
+        _remove_wts(paths, project, wts, db_path)
 
 
-def _delete_wts(
+def _remove_wts(
     paths: Paths,
     project: str,
     wts: list[str],
     db_path: Path,
 ) -> None:
-    """Per-wt delete helper. Detach each wt (cleanliness-checked), drop rows."""
+    """Per-wt removal helper. Detach each wt (cleanliness-checked), drop rows."""
     with db.transaction(db_path) as conn:
         known = {name for name, _, _ in db.list_wts(conn)}
         missing = [w for w in wts if w not in known]
@@ -61,7 +61,7 @@ def _delete_wts(
             db.remove_wt(conn, w)
 
 
-def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) -> None:
+def _remove_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) -> None:
     extras = [
         str(entry)
         for entry in project_dir.iterdir()
@@ -76,7 +76,7 @@ def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) 
     with db.transaction(db_path) as conn:
         all_wts = [name for name, _, _ in db.list_wts(conn)]
     if all_wts:
-        _delete_wts(paths, project, all_wts, db_path)
+        _remove_wts(paths, project, all_wts, db_path)
 
     with contextlib.suppress(FileNotFoundError):
         (project_dir / _README_FILENAME).unlink()
@@ -89,7 +89,7 @@ def _delete_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) 
 
 
 @dataclass(frozen=True)
-class DeletePlan:
+class RemovePlan:
     project: str
     whole: bool
     extras: list[Path]
@@ -117,12 +117,12 @@ class DeletePlan:
         }
 
 
-def plan_delete(
+def plan_remove(
     paths: Paths,
     project: str,
     wts: list[str] | None,
-) -> DeletePlan:
-    """Describe what `delete` would do without mutating state."""
+) -> RemovePlan:
+    """Describe what `remove` would do without mutating state."""
     project_dir = paths.project(project)
     db_path = paths.project_db(project)
     if not db_path.is_file():
@@ -143,7 +143,7 @@ def plan_delete(
         planned_wts = list(wts)
 
     detach_plan = detach_mod.plan_detach(paths, project, planned_wts)
-    return DeletePlan(
+    return RemovePlan(
         project=project,
         whole=whole,
         extras=extras,
