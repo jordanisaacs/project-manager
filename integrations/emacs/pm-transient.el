@@ -101,11 +101,11 @@
   (interactive)
   (pm-project-status (pm--ds-container-name)))
 
-(transient-define-suffix pm-project-dispatch--wt-create ()
+(transient-define-suffix pm-project-dispatch--wt-add ()
   "Add a worktree to the bound project."
   :description "new"
   (interactive)
-  (pm-wt-create (pm--ds-container-name)))
+  (pm-wt-add (pm--ds-container-name)))
 
 (transient-define-suffix pm-project-dispatch--wt-attach ()
   "Attach worktrees in the bound project, honoring infix args."
@@ -159,12 +159,12 @@
                           (message "pm: %s"
                                    (if dry-run "detach (dry-run)" "detached")))))))))
 
-(transient-define-suffix pm-project-dispatch--wt-delete ()
-  "Delete worktrees from the bound project, honoring infix args."
+(transient-define-suffix pm-project-dispatch--wt-remove ()
+  "Remove worktrees from the bound project, honoring infix args."
   :description
   (lambda ()
     (let ((args (pm--dispatch-args)))
-      (pm--decorate-desc "delete" (and (member "--all" args) "all"))))
+      (pm--decorate-desc "remove" (and (member "--all" args) "all"))))
   (interactive)
   (let* ((args (pm--dispatch-args))
          (all (and (member "--all" args) t))
@@ -172,15 +172,15 @@
          (wts (unless all
                 (mapconcat #'identity
                            (pm--read-worktrees-multi
-                            "Delete which: " name)
+                            "Remove which: " name)
                            ","))))
     (when (pm--maybe-confirm
-           (format "Permanently delete %s in %s? "
+           (format "Permanently remove %s in %s? "
                    (if all "all worktrees" wts) name))
-      (pm--wt-delete name wts all
+      (pm--wt-remove name wts all
                      (lambda (_)
                        (pm-refresh
-                        (lambda (_) (message "pm: deleted"))))))))
+                        (lambda (_) (message "pm: removed"))))))))
 
 (transient-define-suffix pm-project-dispatch--delete ()
   "Delete the bound project."
@@ -270,10 +270,10 @@ suffix behavior and our body then sets up the child."
   [["Inspect"
     ("s" pm-project-dispatch--status)]
    ["Worktrees"
-    ("n" pm-project-dispatch--wt-create)
+    ("n" pm-project-dispatch--wt-add)
     ("a" pm-project-dispatch--wt-attach)
     ("D" pm-project-dispatch--wt-detach)
-    ("X" pm-project-dispatch--wt-delete)]
+    ("X" pm-project-dispatch--wt-remove)]
    ["Navigate"
     :if pm--ds-inside-worktree-p
     ("p" pm-project-dispatch--jump-parent)

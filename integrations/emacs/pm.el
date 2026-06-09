@@ -50,7 +50,7 @@ Each container is `<pm-projects-dir>/<name>/' and contains a
 ;;;###autoload
 (defcustom pm-confirm-destructive t
   "When non-nil, confirm destructive pm operations.
-Applies to `project delete', `wt detach --all', `wt delete', etc."
+Applies to `project delete', `wt detach --all', `wt remove', etc."
   :type 'boolean
   :group 'pm)
 
@@ -98,10 +98,10 @@ when set, else the user's home directory."
 (autoload 'pm-project-create "pm-ui" nil t)
 (autoload 'pm-project-delete "pm-ui" nil t)
 (autoload 'pm-project-switch "pm-ui" nil t)
-(autoload 'pm-wt-create "pm-ui" nil t)
+(autoload 'pm-wt-add "pm-ui" nil t)
 (autoload 'pm-wt-attach "pm-ui" nil t)
 (autoload 'pm-wt-detach "pm-ui" nil t)
-(autoload 'pm-wt-delete "pm-ui" nil t)
+(autoload 'pm-wt-remove "pm-ui" nil t)
 (autoload 'pm-pool-add "pm-ui" nil t)
 (autoload 'pm-repo-pull "pm-ui" nil t)
 (autoload 'pm-project-status "pm-status" nil t)

@@ -145,7 +145,7 @@
 ;;;; Worktree commands
 
 ;;;###autoload
-(defun pm-wt-create (name)
+(defun pm-wt-add (name)
   "Add a worktree to project NAME."
   (interactive (list (pm--read-project "Add worktree to: ")))
   (pm--repo-ls
@@ -156,14 +156,14 @@
                      "Worktrees (repos, comma-sep): " repo-names nil t)))
        (when (null chosen) (user-error "Aborted"))
        (let ((spec (pm--build-spec chosen)))
-         (pm--wt-create
+         (pm--wt-add
           name spec
           (lambda (_)
             (pm-refresh
              (lambda (_) (message "pm: added wt(s) to %s" name))))))))))
 
 (defun pm--wt-action (action verb name)
-  "Common skeleton for attach/detach/delete on worktrees in NAME.
+  "Common skeleton for attach/detach/remove on worktrees in NAME.
 ACTION is the wrapper symbol; VERB is the user-visible name."
   (let* ((all (y-or-n-p (format "%s ALL worktrees in %s? " verb name)))
          (wts (unless all
@@ -171,7 +171,7 @@ ACTION is the wrapper symbol; VERB is the user-visible name."
                            (pm--read-worktrees-multi
                             (format "%s which worktrees: " verb) name)
                            ","))))
-    (when (and (member verb '("Detach" "Delete"))
+    (when (and (member verb '("Detach" "Remove"))
                (not (pm--maybe-confirm
                      (format "%s %s in %s? "
                              verb (if all "all worktrees" wts) name))))
@@ -185,11 +185,11 @@ ACTION is the wrapper symbol; VERB is the user-visible name."
                                          (lambda (_)
                                            (pm-refresh
                                             (lambda (_) (message "pm: detached"))))))
-     ((eq action 'delete) (pm--wt-delete name wts all
+     ((eq action 'remove) (pm--wt-remove name wts all
                                          (lambda (_)
                                            (pm-refresh
-                                            (lambda (_) (message "pm: deleted"))))))
-     ((eq action 'create) (error "Use pm-wt-create directly")))))
+                                            (lambda (_) (message "pm: removed"))))))
+     ((eq action 'add) (error "Use pm-wt-add directly")))))
 
 ;;;###autoload
 (defun pm-wt-attach (name)
@@ -202,9 +202,9 @@ ACTION is the wrapper symbol; VERB is the user-visible name."
   (pm--wt-action 'detach "Detach" name))
 
 ;;;###autoload
-(defun pm-wt-delete (name)
-  (interactive (list (pm--read-project "Delete worktrees in: ")))
-  (pm--wt-action 'delete "Delete" name))
+(defun pm-wt-remove (name)
+  (interactive (list (pm--read-project "Remove worktrees in: ")))
+  (pm--wt-action 'remove "Remove" name))
 
 ;;;; Pool / repo verbs (the listing buffers live in `pm-pool', `pm-repo')
 

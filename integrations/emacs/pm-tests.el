@@ -769,7 +769,7 @@ in `pm--project-dispatch-menu' ignores the bound project:
 the transient scope.  In step 3 it sees alpha (the original
 buffer's container) and silently lists alpha's sessions.
 
-Every other project-dispatch suffix (status, wt-create, wt-attach,
+Every other project-dispatch suffix (status, wt-add, wt-attach,
 agent-launch, …) already reads `(pm--ds-container-name)' /
 `(transient-scope)' for exactly this reason — see the comment
 \"The bound project travels through the transient via `:scope'…\"

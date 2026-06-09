@@ -1,4 +1,4 @@
-"""`pm project wt delete`."""
+"""`pm project wt remove`."""
 
 from typing import Annotated
 
@@ -14,14 +14,14 @@ from . import wt_app
 
 
 @wt_app.command
-def delete(
+def remove(
     flag: ProjectFlag = ProjectFlag(),
     sel: WtSelection = WtSelection(),
     *,
     dry_run: bool = False,
     json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
-    """Delete worktree row(s) from a project.
+    """Remove worktree row(s) from a project.
 
     --dry-run prints the plan without mutating state; exits 1 if any blocker.
     """

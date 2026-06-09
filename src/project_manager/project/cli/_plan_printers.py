@@ -1,4 +1,4 @@
-"""Shared dry-run plan printers for project/wt delete and detach."""
+"""Shared dry-run plan printers for project delete, wt remove, and detach."""
 
 import sys
 

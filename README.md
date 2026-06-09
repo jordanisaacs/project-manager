@@ -41,10 +41,10 @@ projects = "~/.projects"    # project dirs (db + forward symlinks)
 # project — named working sets
 pm project create <name> --repos r1,r2     # create a project, claim slots, link
 pm project ls | status <name>
-pm project wt create <name> --repos …      # add worktrees to an existing project
+pm project wt add <name> --repos …         # add worktrees to an existing project
 pm project wt attach <name> {--repos … | --all}
 pm project wt detach <name> {--repos … | --all}
-pm project wt delete <name> [--repos …]
+pm project wt remove <name> [--repos …]
 pm project delete <name> [--repos …]       # per-repo or whole project
 
 # pool — worktree slots

@@ -19,7 +19,7 @@ _pm() {
         'project:manage projects'
         'repo:manage canonical repos under ~/.repos'
         'stacker:branch-stack tracking against pm'\''s pool'
-        'cd:Print the path of a project, or one of its worktrees.'
+        'cd:Change directory to a project, or one of its worktrees.'
         'check:Verify invariants across pool and projects.'
       )
       _describe -t commands 'command' commands
@@ -49,10 +49,10 @@ _pm() {
               case $words[1] in
                 ls)
                   _arguments \
-                    '1:limit to one project' \
+                    '1:project name (defaults to current project)' \
                     '2:every project' \
-                    '-p[limit to one project]:p' \
-                    '--project[limit to one project]:project' \
+                    '-p[project name (defaults to current project)]:p:_pm_projects' \
+                    '--project[project name (defaults to current project)]:project:_pm_projects' \
                     '--all[every project]' \
                     '-n[-n]:n' \
                     '--limit[-n]:limit' \
@@ -67,8 +67,8 @@ _pm() {
                 claude)
                   _arguments \
                     '*:ARGS' \
-                    '-p[-p]:p' \
-                    '--project[-p]:project' \
+                    '-p[project name (defaults to current project)]:p:_pm_projects' \
+                    '--project[project name (defaults to current project)]:project:_pm_projects' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -77,8 +77,8 @@ _pm() {
                 codex)
                   _arguments \
                     '*:ARGS' \
-                    '-p[-p]:p' \
-                    '--project[-p]:project' \
+                    '-p[project name (defaults to current project)]:p:_pm_projects' \
+                    '--project[project name (defaults to current project)]:project:_pm_projects' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -87,8 +87,8 @@ _pm() {
                 cursor)
                   _arguments \
                     '*:ARGS' \
-                    '-p[-p]:p' \
-                    '--project[-p]:project' \
+                    '-p[project name (defaults to current project)]:p:_pm_projects' \
+                    '--project[project name (defaults to current project)]:project:_pm_projects' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -129,8 +129,9 @@ _pm() {
                   ;;
                 ls)
                   _arguments \
-                    '1:repo:_pm_repos' \
-                    '--repo[--repo]:repo:_pm_repos' \
+                    '1:limit to one repo (default\: all repos)' \
+                    '-r[limit to one repo (default\: all repos)]:r' \
+                    '--repo[limit to one repo (default\: all repos)]:repo' \
                     '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
@@ -196,8 +197,9 @@ _pm() {
                   ;;
                 status)
                   _arguments \
-                    '1:project:_pm_projects' \
-                    '--project[--project]:project:_pm_projects' \
+                    '1:project name (defaults to current project)' \
+                    '-p[project name (defaults to current project)]:p:_pm_projects' \
+                    '--project[project name (defaults to current project)]:project:_pm_projects' \
                     '--json[--json]' \
                     '-s[comma-separated subset\: worktrees,prs,stacker,sessions]:s' \
                     '--section[comma-separated subset\: worktrees,prs,stacker,sessions]:section' \
@@ -218,15 +220,28 @@ _pm() {
                     cmds)
                       local -a commands
                       commands=(
+                        'add:Add worktree(s) to an existing project.'
                         'attach:Re-attach worktrees (best-effort slot reclaim).'
-                        'create:Add worktree(s) to an existing project.'
-                        'delete:Delete worktree row(s) from a project.'
                         'detach:Detach worktrees\: unlink forward + release pool row.'
+                        'remove:Remove worktree row(s) from a project.'
                       )
                       _describe -t commands 'command' commands
                       ;;
                     args)
                       case $words[1] in
+                        add)
+                          _arguments \
+                            '1:repo:_pm_repos' \
+                            '2:project name (defaults to current project)' \
+                            '--spec[--spec]:spec' \
+                            '-p[project name (defaults to current project)]:p:_pm_projects' \
+                            '--project[project name (defaults to current project)]:project:_pm_projects' \
+                            '--json[--json]' \
+                            '--help[Display this message and exit.]' \
+                            '-h[Display this message and exit.]' \
+                            '--version[Display application version.]'
+
+                          ;;
                         attach)
                           _arguments \
                             '1:project name (defaults to current project)' \
@@ -243,27 +258,14 @@ _pm() {
                             '--version[Display application version.]'
 
                           ;;
-                        create)
-                          _arguments \
-                            '1:repo:_pm_repos' \
-                            '2:project name (defaults to current project)' \
-                            '--spec[--spec]:spec' \
-                            '-p[project name (defaults to current project)]:p:_pm_projects' \
-                            '--project[project name (defaults to current project)]:project:_pm_projects' \
-                            '--json[--json]' \
-                            '--help[Display this message and exit.]' \
-                            '-h[Display this message and exit.]' \
-                            '--version[Display application version.]'
-
-                          ;;
-                        delete)
+                        detach)
                           _arguments \
                             '1:project name (defaults to current project)' \
                             '2:comma-separated worktree names' \
                             '3:every worktree in the project' \
                             '-p[project name (defaults to current project)]:p:_pm_projects' \
                             '--project[project name (defaults to current project)]:project:_pm_projects' \
-                            '--wt[comma-separated worktree names]:wt:_pm_wt_all' \
+                            '--wt[comma-separated worktree names]:wt:_pm_wt_detachable' \
                             '--all[every worktree in the project]' \
                             '--dry-run[--dry-run]' \
                             '--no-dry-run[--dry-run]' \
@@ -273,14 +275,14 @@ _pm() {
                             '--version[Display application version.]'
 
                           ;;
-                        detach)
+                        remove)
                           _arguments \
                             '1:project name (defaults to current project)' \
                             '2:comma-separated worktree names' \
                             '3:every worktree in the project' \
                             '-p[project name (defaults to current project)]:p:_pm_projects' \
                             '--project[project name (defaults to current project)]:project:_pm_projects' \
-                            '--wt[comma-separated worktree names]:wt:_pm_wt_detachable' \
+                            '--wt[comma-separated worktree names]:wt:_pm_wt_all' \
                             '--all[every worktree in the project]' \
                             '--dry-run[--dry-run]' \
                             '--no-dry-run[--dry-run]' \
@@ -329,7 +331,8 @@ _pm() {
                   ;;
                 maintenance)
                   _arguments \
-                    '--repo[--repo]:repo:_pm_repos' \
+                    '-r[comma-separated repo list (defaults to every repo)]:r' \
+                    '--repo[comma-separated repo list (defaults to every repo)]:repo' \
                     '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
@@ -338,7 +341,8 @@ _pm() {
                   ;;
                 pull)
                   _arguments \
-                    '--repo[--repo]:repo:_pm_repos' \
+                    '-r[comma-separated repo list (defaults to every repo)]:r' \
+                    '--repo[comma-separated repo list (defaults to every repo)]:repo' \
                     '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
@@ -384,8 +388,9 @@ _pm() {
               case $words[1] in
                 abort)
                   _arguments \
-                    '1:defaults to the cwd'\''s pm slot' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '1:repo name (defaults to the cwd'\''s pm slot)' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -394,9 +399,10 @@ _pm() {
                 absorb)
                   _arguments \
                     '1:--branch' \
-                    '2:defaults to the cwd'\''s pm slot' \
+                    '2:repo name (defaults to the cwd'\''s pm slot)' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--continue[resume a paused absorb]' \
                     '--abort[abort the paused op]' \
                     '--help[Display this message and exit.]' \
@@ -410,7 +416,8 @@ _pm() {
                     '2:--value' \
                     '--key[--key]:key' \
                     '--value[--value]:value' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--list[list all set keys]' \
                     '--unset[remove a key]' \
                     '--json[--json]' \
@@ -421,8 +428,9 @@ _pm() {
                   ;;
                 continue)
                   _arguments \
-                    '1:defaults to the cwd'\''s pm slot' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '1:repo name (defaults to the cwd'\''s pm slot)' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -432,7 +440,8 @@ _pm() {
                   _arguments \
                     '1:--branch' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--on[--on]:on' \
                     '--copy[--copy]:copy' \
                     '--replace[--replace]' \
@@ -474,9 +483,10 @@ _pm() {
                 log)
                   _arguments \
                     '1:--branch' \
-                    '2:defaults to the cwd'\''s pm slot' \
+                    '2:repo name (defaults to the cwd'\''s pm slot)' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -485,13 +495,14 @@ _pm() {
                 ls)
                   _arguments \
                     '1:--branch' \
-                    '2:defaults to the cwd'\''s pm slot' \
+                    '2:repo name (defaults to the cwd'\''s pm slot)' \
                     '3:every tracked branch in the repo (default\: current lineage)' \
                     '4:exclude ancestors from the walk' \
                     '5:exclude descendants from the walk' \
                     '6:start the walk from this branch' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '-a[every tracked branch in the repo (default\: current lineage)]' \
                     '--all[every tracked branch in the repo (default\: current lineage)]' \
                     '--skip-ancestors[exclude ancestors from the walk]' \
@@ -535,9 +546,10 @@ _pm() {
                         refresh)
                           _arguments \
                             '1:--branch' \
-                            '2:defaults to the cwd'\''s pm slot' \
+                            '2:repo name (defaults to the cwd'\''s pm slot)' \
                             '--branch[--branch]:branch' \
-                            '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                            '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                            '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                             '--help[Display this message and exit.]' \
                             '-h[Display this message and exit.]' \
                             '--version[Display application version.]'
@@ -546,9 +558,10 @@ _pm() {
                         unlink)
                           _arguments \
                             '1:--branch' \
-                            '2:defaults to the cwd'\''s pm slot' \
+                            '2:repo name (defaults to the cwd'\''s pm slot)' \
                             '--branch[--branch]:branch' \
-                            '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                            '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                            '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                             '--all[clear PR links for every branch]' \
                             '--help[Display this message and exit.]' \
                             '-h[Display this message and exit.]' \
@@ -562,13 +575,14 @@ _pm() {
                 push)
                   _arguments \
                     '1:--branch' \
-                    '2:defaults to the cwd'\''s pm slot' \
+                    '2:repo name (defaults to the cwd'\''s pm slot)' \
                     '3:every tracked branch in the repo (default\: current lineage)' \
                     '4:exclude ancestors from the walk' \
                     '5:exclude descendants from the walk' \
                     '6:start the walk from this branch' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '-a[every tracked branch in the repo (default\: current lineage)]' \
                     '--all[every tracked branch in the repo (default\: current lineage)]' \
                     '--skip-ancestors[exclude ancestors from the walk]' \
@@ -587,9 +601,10 @@ _pm() {
                 remove)
                   _arguments \
                     '1:--branch' \
-                    '2:defaults to the cwd'\''s pm slot' \
+                    '2:repo name (defaults to the cwd'\''s pm slot)' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--force[--force]' \
                     '--parent[--parent]' \
                     '--keep-branch[--keep-branch]' \
@@ -603,7 +618,8 @@ _pm() {
                     '1:--new-name' \
                     '--new-name[--new-name]:new-name' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -614,7 +630,8 @@ _pm() {
                     '1:--base-ref' \
                     '--base-ref[--base-ref]:base-ref' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -625,9 +642,13 @@ _pm() {
                     '1:--new-parent' \
                     '--new-parent[--new-parent]:new-parent' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--continue[resume a paused cherry-pick]' \
                     '--abort[abort the paused op]' \
+                    '--allow-drop-parent-modifications[drop out-of-band history changes below the stack range and replay only working …]' \
+                    '--allow-drop-merge[when a descendant'\''s PR is merged but its squash is not on its parent, drop the …]' \
+                    '--offline[skip the PR-state refresh; use cached pr_state for the merged-PR collapse.]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -640,7 +661,8 @@ _pm() {
                     '--new-name[--new-name]:new-name' \
                     '--commit[--commit]:commit' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '--stay[--stay]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
@@ -650,13 +672,14 @@ _pm() {
                 sync)
                   _arguments \
                     '1:--branch' \
-                    '2:defaults to the cwd'\''s pm slot' \
+                    '2:repo name (defaults to the cwd'\''s pm slot)' \
                     '3:every tracked branch in the repo (default\: current lineage)' \
                     '4:exclude ancestors from the walk' \
                     '5:exclude descendants from the walk' \
                     '6:start the walk from this branch' \
                     '--branch[--branch]:branch' \
-                    '--repo[defaults to the cwd'\''s pm slot]:repo:_pm_repos' \
+                    '-r[repo name (defaults to the cwd'\''s pm slot)]:r' \
+                    '--repo[repo name (defaults to the cwd'\''s pm slot)]:repo:_pm_repos' \
                     '-a[every tracked branch in the repo (default\: current lineage)]' \
                     '--all[every tracked branch in the repo (default\: current lineage)]' \
                     '--skip-ancestors[exclude ancestors from the walk]' \
@@ -664,6 +687,9 @@ _pm() {
                     '--from[start the walk from this branch]:from' \
                     '--continue[resume a paused cherry-pick]' \
                     '--abort[abort the paused op]' \
+                    '--allow-drop-parent-modifications[drop out-of-band history changes below the stack range and replay only the bran…]' \
+                    '--allow-drop-merge[when the branch'\''s PR is merged but the squash isn'\''t on the parent, drop the bra…]' \
+                    '--offline[skip the PR-state refresh; use cached pr_state for the merged-PR collapse decis…]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
                     '--version[Display application version.]'
@@ -679,7 +705,7 @@ _pm() {
             '2:wt:_pm_wt_for_cd' \
             '--project[--project]:project:_pm_projects' \
             '--wt[--wt]:wt:_pm_wt_for_cd' \
-            '--print[print path instead of cd]' \
+            '--print[print the path instead of cd'\''ing (opts out of the shell wrapper)]' \
             '--help[Display this message and exit.]' \
             '-h[Display this message and exit.]' \
             '--version[Display application version.]'

@@ -54,10 +54,10 @@ exactly the requested sections."
 
 ;;;; project wt
 
-(defun pm--wt-create (name spec cb)
+(defun pm--wt-add (name spec cb)
   (pm--run-async
-   (pm--strs "project" "wt" "create" spec "--project" name "--json")
-   cb :tag 'wt-create))
+   (pm--strs "project" "wt" "add" spec "--project" name "--json")
+   cb :tag 'wt-add))
 
 (defun pm--wt-attach (name wts all no-branch cb)
   (pm--run-async
@@ -77,13 +77,13 @@ exactly the requested sections."
              "--json")
    cb :tag 'wt-detach))
 
-(defun pm--wt-delete (name wts all cb)
+(defun pm--wt-remove (name wts all cb)
   (pm--run-async
-   (pm--strs "project" "wt" "delete" name
+   (pm--strs "project" "wt" "remove" name
              (cond (all '("--all"))
                    (wts (list "--wt" wts)))
              "--json")
-   cb :tag 'wt-delete))
+   cb :tag 'wt-remove))
 
 ;;;; pool
 

@@ -176,8 +176,8 @@ _SIMPLE_SUBS: tuple[tuple[str, str], ...] = (
     # --repo (pool add/ls + every stacker command with `--repo`)
     ("'--repo[--repo]:repo'", "'--repo[--repo]:repo:_pm_repos'"),
     (
-        "'--repo[defaults to the cwd'\\''s pm slot]:repo'",
-        "'--repo[defaults to the cwd'\\''s pm slot]:repo:_pm_repos'",
+        "'--repo[repo name (defaults to the cwd'\\''s pm slot)]:repo'",
+        "'--repo[repo name (defaults to the cwd'\\''s pm slot)]:repo:_pm_repos'",
     ),
     # --project / -p flag forms (every wt subcommand uses the descriptive
     # form; project delete/status use the terse form — both get bound).
@@ -191,7 +191,7 @@ _SIMPLE_SUBS: tuple[tuple[str, str], ...] = (
     ),
     # `pm pool {ls,add}` positional → repos.
     ("'1:--repo'", "'1:repo:_pm_repos'"),
-    # `pm project wt create` positional spec defaults to `<repo>` (or
+    # `pm project wt add` positional spec defaults to `<repo>` (or
     # `<wt>:<repo>`). Completing repo names covers the common case.
     ("'1:--spec'", "'1:repo:_pm_repos'"),
     # `pm cd <project> <wt>` — `'2:--wt'` only appears here, and the
@@ -209,7 +209,7 @@ _SIMPLE_SUBS: tuple[tuple[str, str], ...] = (
 #   - `pm project create` has `'1:--project'` and `'--project[--project]:project'`
 #     — both represent a NEW project name; must NOT complete.
 #   - `pm project {delete,status}` use the same strings — DO complete.
-#   - `pm project wt {attach,detach,delete}` all use
+#   - `pm project wt {attach,detach,remove}` all use
 #     `'--wt[comma-separated worktree names]:wt'` but need different helpers
 #     (attachable / detachable / all).
 #
@@ -217,7 +217,7 @@ _SIMPLE_SUBS: tuple[tuple[str, str], ...] = (
 # per-subcommand rewrites for the `--wt` slot inside the wt section.
 
 # Matches the project-level `create)` _arguments block (from the `create)`
-# label through the next `;;`). `'1:--spec'` only appears in wt-create, so
+# label through the next `;;`). `'1:--spec'` only appears in wt-add, so
 # this pattern anchors on the `'1:--project'` line which is unique to the
 # project-level create.
 _PROJECT_CREATE_BLOCK = re.compile(
@@ -228,14 +228,14 @@ _PROJECT_CREATE_BLOCK = re.compile(
 _WT_FLAG_BY_SUB: dict[str, str] = {
     "attach": "_pm_wt_attachable",
     "detach": "_pm_wt_detachable",
-    "delete": "_pm_wt_all",
+    "remove": "_pm_wt_all",
 }
 
 _WT_NEEDLE = "'--wt[comma-separated worktree names]:wt'"
 
 
 def _rewrite_wt_flag_per_sub(script: str, *, warn: list[str]) -> str:
-    """Bind --wt to a different helper per wt subcommand (attach/detach/delete).
+    """Bind --wt to a different helper per wt subcommand (attach/detach/remove).
 
     Walks each `<sub>) _arguments ... ;;` block in turn and substitutes the
     `--wt` slot inside. Blocks that don't contain the slot (e.g. `delete)`

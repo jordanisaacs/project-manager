@@ -1,4 +1,4 @@
-"""`pm project wt create`."""
+"""`pm project wt add`."""
 
 from typing import Annotated
 
@@ -14,7 +14,7 @@ from . import wt_app
 
 
 @wt_app.command
-def create(
+def add(
     spec: str,
     flag: ProjectFlag = ProjectFlag(),
     *,

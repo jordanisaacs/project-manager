@@ -1,6 +1,6 @@
 {
   "name": "pm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "pm CLI workflow — projects, pooled worktree slots, and cherry-pick-based stacked PRs",
   "author": {
     "name": "Jordan Isaacs",

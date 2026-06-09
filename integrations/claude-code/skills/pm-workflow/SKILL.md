@@ -24,11 +24,11 @@ When you detach a worktree the symlink disappears but the slot stays in the pool
 ## Critical Rules
 
 1. **Always pass `--json` when reading state.** `pm project ls`, `pm project status`, `pm pool ls`, `pm repo ls`, `pm agent ls`, `pm check`, and the `pm project wt` plan-output commands all support `--json`. Use it for any inspection — the human-readable output uses tree/table rendering meant for terminals.
-2. **Don't edit symlinks under `~/.projects/<name>/` by hand.** Always go through `pm project wt create | attach | detach | delete`. Hand-edits desync the project's `.pm.db` and the pool.
+2. **Don't edit symlinks under `~/.projects/<name>/` by hand.** Always go through `pm project wt add | attach | detach | remove`. Hand-edits desync the project's `.pm.db` and the pool.
 3. **Don't `git init` or commit inside a project directory.** Projects are not git repos; they're folders of symlinks. Run git commands inside the worktree (e.g. `~/.projects/foo/frontend/`), not the project root.
 4. **`pm cd` only works if the zsh wrapper is sourced.** It needs `source <pm install>/integrations/pm-cd.zsh` in the user's zshrc. Without the wrapper, `pm cd` prints help. Use `pm cd --print <proj> [<wt>]` if you just need the path for scripting.
 5. **Use `pm check --fix` to repair drift**, never manual surgery on symlinks or the pool db.
-6. **Don't create projects or worktrees** unless the user asked. `pm project create` and `pm project wt create` are durable, user-visible state.
+6. **Don't create projects or worktrees** unless the user asked. `pm project create` and `pm project wt add` are durable, user-visible state.
 
 ## Command Reference
 
@@ -45,10 +45,10 @@ When you detach a worktree the symlink disappears but the slot stays in the pool
 
 | Command | Description | `--json` |
 |---|---|---|
-| `pm project wt create <repo> [-p <proj>] [--spec <spec>]` | Add worktrees to a project | ✓ |
+| `pm project wt add <repo> [-p <proj>] [--spec <spec>]` | Add worktrees to a project | ✓ |
 | `pm project wt attach [-p <proj>] [--wt a,b \| --all]` | Re-attach worktrees, reclaim slots from the pool | ✓ |
 | `pm project wt detach [-p <proj>] [--wt a,b \| --all] [--dry-run]` | Unlink the symlinks but keep the slots warm in the pool | ✓ |
-| `pm project wt delete [-p <proj>] [--wt a,b \| --all] [--dry-run]` | Remove worktrees from the project entirely | ✓ |
+| `pm project wt remove [-p <proj>] [--wt a,b \| --all] [--dry-run]` | Remove worktrees from the project entirely | ✓ |
 
 `-p/--project` is optional — if omitted, `pm` infers the project from the cwd.
 
@@ -109,9 +109,9 @@ pm cd other-project frontend      # straight to a specific worktree
 ### Adding a worktree to an existing project
 
 ```bash
-pm project wt create frontend -p my-feature
+pm project wt add frontend -p my-feature
 # Inferred project from cwd:
-cd ~/.projects/my-feature && pm project wt create backend
+cd ~/.projects/my-feature && pm project wt add backend
 ```
 
 ### Detach / re-attach (parking a slot without losing the branch)
@@ -127,8 +127,8 @@ Detach preserves the branch (saved in `.pm.db`); attach restores it.
 ### Cleaning up
 
 ```bash
-pm project wt delete -p my-feature --wt scratch --dry-run   # preview
-pm project wt delete -p my-feature --wt scratch
+pm project wt remove -p my-feature --wt scratch --dry-run   # preview
+pm project wt remove -p my-feature --wt scratch
 # Or wipe the whole project:
 pm project delete my-feature --dry-run
 pm project delete my-feature
@@ -172,12 +172,12 @@ pm stacker ls --json     # see the pm-stacker-workflow skill
 
 | Footgun | What happens | Right move |
 |---|---|---|
-| Editing symlinks under `~/.projects/<n>/` by hand | Project `.pm.db` and pool drift | `pm project wt {attach,detach,delete}`, then `pm check --fix` |
+| Editing symlinks under `~/.projects/<n>/` by hand | Project `.pm.db` and pool drift | `pm project wt {attach,detach,remove}`, then `pm check --fix` |
 | `git init` or committing inside a project root | The project becomes a broken pseudo-repo | Run git inside the worktree (e.g. `~/.projects/p/frontend/`), never the project root |
 | Detach refuses with "uncommitted changes" or "in-progress operation" | Slot has dirty state or a paused stacker op | Resolve in the worktree first (commit/stash, or `pm stacker continue`/`abort`) |
 | `pm cd` prints help instead of cd'ing | The zsh wrapper isn't sourced | Source `<install>/integrations/pm-cd.zsh` in zshrc; or use `pm cd --print` for the path |
 | `PoolExhaustedError` on create/attach | No free slots for that repo and the pool can't grow on demand | `pm pool add <repo>` to mint a slot, or `pm project wt detach` an unused worktree to free one |
-| "slot busy" on detach/delete | Slot has a paused `pm stacker` operation holding it | `pm stacker continue` or `pm stacker abort` in the affected worktree first |
+| "slot busy" on detach/remove | Slot has a paused `pm stacker` operation holding it | `pm stacker continue` or `pm stacker abort` in the affected worktree first |
 
 ## Output Samples (for parsing)
 
