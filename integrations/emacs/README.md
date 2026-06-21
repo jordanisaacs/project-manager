@@ -122,6 +122,29 @@ All listing / status surfaces are `magit-section` buffers. Movement
 (`n`/`p`/`M-n`/`M-p`), folding (`TAB`/`S-TAB`), and section ancestry
 behave exactly like in magit.
 
+#### Theming
+
+Every buffer renders through a shared, magit-styled vocabulary
+(`pm-table.el` + `pm-faces.el`) so they look consistent and pick up
+your theme:
+
+- **Banner** (`pm-buffer-title`) → **section heading** with a dim
+  `(N)` count (`pm-section-heading` + `pm-count`) → **group heading**
+  for a repo/project (`pm-group-heading`) → **column header**
+  (`pm-column-header`, a quiet dim ruler) → rows. The column header is
+  now its own face rather than reusing the section-heading face, so the
+  hierarchy reads clearly.
+- **Value columns are themed**, not just labels: worktree rows colored
+  by `kind`; repo `dirty`/`ahead`/`behind` warn/heal/dim by state;
+  pool & project `status` colored via `pm-faces-status`
+  (FREE/OPS/DRIFT/…); session IDs as `pm-id`, timestamps dimmed, agent
+  names colored.
+- **Empty sections** show a dim `(none)` instead of a bare header.
+
+All faces live in `pm-faces.el` and inherit from built-ins / magit
+faces where possible — override any of them with `M-x customize-group
+RET pm-faces` or a `set-face-attribute` in your config.
+
 #### `*pm-status: <name>*` (`M-x pm-project-status`)
 
 Sections: **Worktrees** (grouped by repo), **PRs**, **Stacker** (rich
@@ -147,6 +170,11 @@ the section the user wants up-to-date.
 Sections per project; rows per session, agent name styled. `RET`
 hands the row off to `pm-agent-dispatch-function`. Prefix arg prompts
 for a project; double-prefix forces `--all`.
+
+The all-projects view uses the bare `*pm-agent-ls*` name; a
+single-project view (prefix arg, or `l` from `pm-project-dispatch`)
+is suffixed as `*pm-agent-ls: <project>*` so per-project lists get
+their own buffer instead of clobbering each other or the all view.
 
 #### Project / pool / repo
 

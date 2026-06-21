@@ -200,6 +200,17 @@ under the hood); repeated launches of the same agent/project get
 
 ;;;; Buffer + mode
 
+(defun pm-agent-list--buffer-name (project all)
+  "Return the agent-list buffer name for scope PROJECT / ALL.
+
+The all-projects view keeps the bare `*pm-agent-ls*' name.  A
+single-project view is suffixed with the project name so each
+per-project list gets its own buffer instead of clobbering the
+all-projects view (and the other per-project lists)."
+  (if (and project (not all))
+      (format "*pm-agent-ls: %s*" project)
+    "*pm-agent-ls*"))
+
 (defvar-local pm-agent-list--scope nil
   "Cons (PROJECT . ALL-FLAG) the current `*pm-agent-ls*' buffer was opened with.
 PROJECT is a project name string or nil; ALL-FLAG is t to force the
@@ -238,33 +249,27 @@ magit-section's post-command hook."
     (erase-buffer)
     (magit-insert-section (pm-agent-list nil)
       ;; Root has no heading — see pm-status for the rationale.
-      (insert (propertize (format "Recent agent sessions (%d)" (length rows))
-                          'face 'bold))
+      (insert (pm-table-banner "Recent agent sessions" (length rows)))
       (insert "\n")
-      (let* ((groups (pm-agent-list--group-by-project rows))
-             (cell-rows
-              (cons '("Agent" "Session" "Title" "Last Active")
-                    (mapcar #'pm-agent-list--cells rows)))
-             (widths (pm-table-widths cell-rows)))
-        (insert (propertize (pm-table-row (car cell-rows) widths)
-                            'face 'magit-section-heading))
-        (insert "\n")
-        (dolist (group groups)
-          (let ((project (car group))
-                (group-rows (cdr group)))
-            (magit-insert-section (pm-agent-project project)
-              (magit-insert-heading
-                (propertize project 'face 'pm-stacker-repo))
-              (dolist (row group-rows)
-                (let* ((cells (pm-agent-list--cells row))
-                       (agent-face (pm-faces-agent (alist-get 'agent row)))
-                       (line-text (pm-table-row cells widths))
-                       (agent-cell (car cells))
-                       (after (substring line-text (length agent-cell))))
-                  (magit-insert-section (pm-session row)
-                    (insert (propertize agent-cell 'face agent-face))
-                    (insert after)
-                    (insert "\n")))))))))
+      (if (null rows)
+          (pm-table-insert-empty)
+        (let* ((groups (pm-agent-list--group-by-project rows))
+               (header '("Agent" "Session" "Title" "Last Active"))
+               (cell-rows (cons header (mapcar #'pm-agent-list--cells rows)))
+               (widths (pm-table-widths cell-rows)))
+          (pm-table-insert-column-header header widths)
+          (dolist (group groups)
+            (let ((project (car group))
+                  (group-rows (cdr group)))
+              (magit-insert-section (pm-agent-project project)
+                (magit-insert-heading
+                  (pm-propertize-face project 'pm-group-heading))
+                (dolist (row group-rows)
+                  (let ((cells (pm-agent-list--cells row))
+                        (faces (pm-faces-session-cells row)))
+                    (magit-insert-section (pm-session row)
+                      (insert (pm-table-row-faced cells widths faces))
+                      (insert "\n"))))))))))
     (pm-table-cover-root-section)
     (pm-table-show-root-section)
     (goto-char (point-min))
@@ -365,7 +370,7 @@ project to scope to."
    (cond
     (current-prefix-arg (list (pm--read-project "Sessions for: ") nil))
     (t                  (list nil t))))
-  (let ((buf (get-buffer-create "*pm-agent-ls*")))
+  (let ((buf (get-buffer-create (pm-agent-list--buffer-name project all))))
     (with-current-buffer buf
       (pm-agent-list-mode)
       (setq pm-agent-list--scope (cons project (and all t)))

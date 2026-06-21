@@ -395,6 +395,78 @@ buffer-level value and only :scope can carry the answer."
          (line (pm-table-row '("a" "bb" "ccc") widths)))
     (should (string= line "a      bb     ccc"))))
 
+(ert-deftest pm-test--propertize-face-sets-font-lock-face ()
+  "`pm-propertize-face' must set BOTH `face' and `font-lock-face'.
+
+`magit-section-mode' leaves font-lock enabled, and jit-lock strips
+the plain `face' property on display — only `font-lock-face'
+survives.  So every themed string must carry `font-lock-face' or it
+renders unthemed (the bug behind \"I don't see any theming\").
+Mirrors magit's own `magit--propertize-face'."
+  (let ((s (pm-propertize-face "x" 'pm-row-warn)))
+    (should (eq 'pm-row-warn (get-text-property 0 'face s)))
+    (should (eq 'pm-row-warn (get-text-property 0 'font-lock-face s)))))
+
+(ert-deftest pm-test--table-row-faced-matches-plain-text ()
+  "`pm-table-row-faced' must lay out identically to `pm-table-row'.
+
+Theming only adds `face' / `font-lock-face' text properties; the
+visible characters (layout, padding, separators) must be
+byte-for-byte the same so column alignment and substring lookups
+are unaffected."
+  (let* ((widths '(5 5 5))
+         (cells '("a" "bb" "ccc"))
+         (faces '(pm-row-warn nil pm-id))
+         (faced (pm-table-row-faced cells widths faces)))
+    (should (string= (substring-no-properties faced)
+                     (pm-table-row cells widths)))
+    ;; First cell ("a    ") carries its face on both properties; the
+    ;; unfaced middle cell ("bb   ", at column 7) carries neither; the
+    ;; faced last cell does.
+    (should (eq 'pm-row-warn (get-text-property 0 'face faced)))
+    (should (eq 'pm-row-warn (get-text-property 0 'font-lock-face faced)))
+    (should (null (get-text-property 7 'face faced)))
+    (should (null (get-text-property 7 'font-lock-face faced)))
+    (should (eq 'pm-id (get-text-property (1- (length faced)) 'face faced)))
+    (should (eq 'pm-id (get-text-property (1- (length faced))
+                                          'font-lock-face faced)))))
+
+(ert-deftest pm-test--table-row-faced-tolerates-short-faces ()
+  "A FACES list shorter than CELLS treats the missing tail as nil."
+  (let ((line (pm-table-row-faced '("a" "b" "c") '(3 3 3) '(pm-id))))
+    (should (string= (substring-no-properties line)
+                     (pm-table-row '("a" "b" "c") '(3 3 3))))
+    (should (eq 'pm-id (get-text-property 0 'face line)))))
+
+(ert-deftest pm-test--table-heading-dims-the-count ()
+  "Section headings carry the label face on the label and `pm-count'
+on the parenthesized count."
+  (let ((h (pm-table-heading "Worktrees" 3)))
+    (should (string= (substring-no-properties h) "Worktrees (3)"))
+    (should (eq 'pm-section-heading (get-text-property 0 'face h)))
+    (should (eq 'pm-section-heading (get-text-property 0 'font-lock-face h)))
+    ;; The "(3)" tail is dimmed (on both face properties).
+    (should (eq 'pm-count (get-text-property (1- (length h)) 'face h)))
+    (should (eq 'pm-count (get-text-property (1- (length h)) 'font-lock-face h)))))
+
+(ert-deftest pm-test--table-banner-optional-count ()
+  "`pm-table-banner' appends a dim count only when one is given."
+  (should (string= (substring-no-properties (pm-table-banner "Repos" 2))
+                   "Repos (2)"))
+  (should (string= (substring-no-properties (pm-table-banner "pm: demo"))
+                   "pm: demo")))
+
+(ert-deftest pm-test--faces-status-maps-known-tokens ()
+  "`pm-faces-status' maps state tokens case-insensitively and returns
+nil for free-form values (e.g. a claiming project name)."
+  (should (eq 'pm-row-active (pm-faces-status "FREE")))
+  (should (eq 'pm-row-active (pm-faces-status "free")))
+  (should (eq 'pm-row-info   (pm-faces-status "OPS")))
+  (should (eq 'pm-row-warn   (pm-faces-status "drift")))
+  (should (eq 'pm-row-error  (pm-faces-status "stale")))
+  (should (null (pm-faces-status "demo-project")))
+  (should (null (pm-faces-status nil))))
+
 ;;;; Agent argv + dispatch
 
 (when pm-test--has-magit-section
@@ -727,6 +799,24 @@ be `(nil . t)' (project nil, all t) so the CLI is invoked as
       (should (equal captured-scope (cons nil t)))
       (should (equal captured-args (list nil t nil)))))
 
+  (ert-deftest pm-test--agent-list-buffer-name-scoped-by-project ()
+    "Per-project agent lists must not share one buffer.
+
+The all-projects view keeps the bare `*pm-agent-ls*' name; each
+single-project view is suffixed with its project so opening
+sessions for project A then project B yields two distinct
+buffers instead of clobbering each other."
+    ;; All-projects view (project nil, or all explicitly t).
+    (should (equal (pm-agent-list--buffer-name nil t) "*pm-agent-ls*"))
+    (should (equal (pm-agent-list--buffer-name nil nil) "*pm-agent-ls*"))
+    ;; Per-project views are distinct from each other and from `all'.
+    (should (equal (pm-agent-list--buffer-name "alpha" nil)
+                   "*pm-agent-ls: alpha*"))
+    (should (equal (pm-agent-list--buffer-name "beta" nil)
+                   "*pm-agent-ls: beta*"))
+    ;; An explicit ALL flag wins even when a project is named.
+    (should (equal (pm-agent-list--buffer-name "alpha" t) "*pm-agent-ls*")))
+
   (ert-deftest pm-test--agent-list-prefix-prompts-for-project ()
     "With a prefix arg, `pm-agent-list' prompts for a project name.
 
@@ -742,7 +832,10 @@ Scope must be `(<chosen> . nil)' so the CLI runs with `--project
                 ((symbol-function 'pop-to-buffer) #'identity))
         (let ((current-prefix-arg '(4)))
           (call-interactively #'pm-agent-list))
-        (when-let ((buf (get-buffer "*pm-agent-ls*")))
+        ;; Per-project view gets a project-suffixed buffer name so it
+        ;; doesn't clobber the all-projects view (see
+        ;; `pm-agent-list--buffer-name').
+        (when-let ((buf (get-buffer "*pm-agent-ls: alpha*")))
           (with-current-buffer buf
             (setq captured-scope pm-agent-list--scope))
           (kill-buffer buf)))
@@ -792,7 +885,7 @@ oversight."
                      (error "must not prompt — scope is bound to beta"))))
           (unwind-protect
               (call-interactively #'pm-agent-list-current-project)
-            (when-let ((buf (get-buffer "*pm-agent-ls*")))
+            (when-let ((buf (get-buffer "*pm-agent-ls: beta*")))
               (kill-buffer buf))))
         (should (equal captured-project "beta")))))
 

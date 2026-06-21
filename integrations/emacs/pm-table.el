@@ -54,6 +54,60 @@ the CLI's `padding=(0, 2)')."
              do (push (if (= i last) cell (format (format "%%-%ds" w) cell)) out))
     (string-join (nreverse out) "  ")))
 
+(defun pm-table-row-faced (cells widths faces)
+  "Like `pm-table-row' but apply a face per column.
+
+FACES is a list parallel to CELLS; each element is a face symbol
+\(or nil to leave that column in its existing face).  A cell's
+padding inherits the same face, so the column reads as one block.
+When a cell is already propertized (e.g. a UUID carrying `pm-id'),
+pass nil for its column so its own face survives.  FACES shorter
+than CELLS is fine — missing entries are treated as nil."
+  (let ((last (1- (length cells)))
+        out)
+    (cl-loop for cell in cells
+             for w in widths
+             for i from 0
+             do (let* ((text (if (= i last) cell (format (format "%%-%ds" w) cell)))
+                       (face (nth i faces)))
+                  (push (if face (pm-propertize-face text face) text) out)))
+    (string-join (nreverse out) "  ")))
+
+;;;; Themed heading / header / banner helpers
+
+(defun pm-table-banner (label &optional count)
+  "Return the top-of-buffer banner string for LABEL with optional COUNT.
+
+LABEL gets `pm-buffer-title'; a non-nil COUNT is appended as a dim
+\"(N)\" via `pm-count'."
+  (concat (pm-propertize-face label 'pm-buffer-title)
+          (and count (concat " " (pm-propertize-face (format "(%d)" count)
+                                                     'pm-count)))))
+
+(defun pm-table-heading (label count)
+  "Return a section-heading string: LABEL plus a dim \"(COUNT)\".
+
+LABEL gets `pm-section-heading'; the parenthesized COUNT gets
+`pm-count', mirroring magit's muted child counts.  Pass to
+`magit-insert-heading'."
+  (concat (pm-propertize-face label 'pm-section-heading)
+          " "
+          (pm-propertize-face (format "(%d)" count) 'pm-count)))
+
+(defun pm-table-insert-column-header (cells widths)
+  "Insert the column-header row for CELLS padded to WIDTHS, then a newline.
+
+Styled with `pm-column-header' so the header is visually distinct
+from the bold section / group headings around it."
+  (insert (pm-propertize-face (pm-table-row cells widths) 'pm-column-header))
+  (insert "\n"))
+
+(defun pm-table-insert-empty (&optional text)
+  "Insert a dim placeholder line (TEXT, default \"(none)\") then a newline.
+Used in place of a column header + rows when a section is empty."
+  (insert (pm-propertize-face (or text "(none)") 'pm-dim))
+  (insert "\n"))
+
 ;;;; Grouping
 
 (defun pm-table-group-by (rows key)
@@ -109,6 +163,21 @@ future windows that display the buffer get the margin too."
     (pm-section-set-window-margin window))
   (add-hook 'window-configuration-change-hook
             #'pm-section-set-window-margin nil t))
+
+;;;; Face application
+
+(defun pm-propertize-face (string face)
+  "Return STRING themed with FACE for a `magit-section' buffer.
+
+Sets both `face' and `font-lock-face', mirroring magit's own
+`magit--propertize-face'.  `magit-section-mode' leaves font-lock
+enabled (`font-lock-defaults' is `(nil t)'), and jit-lock's
+unfontify pass strips the `face' property on display — so a face
+applied only via `face' silently vanishes.  `font-lock-face'
+survives (font-lock treats it as the source it maps to `face'),
+which is exactly why magit themes everything through it.  We set
+`face' too so the text still themes if a user disables font-lock."
+  (propertize string 'face face 'font-lock-face face))
 
 ;;;; Section state reset
 

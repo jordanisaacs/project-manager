@@ -24,6 +24,13 @@
   :group 'pm
   :group 'faces)
 
+(defface pm-buffer-title
+  '((t :inherit magit-section-heading))
+  "Top-of-buffer banner (e.g., \"pm: <project>\", \"Repos\").
+Inherits from `magit-section-heading' so the whole buffer reads as
+one themed surface; override to taste."
+  :group 'pm-faces)
+
 (defface pm-section-heading
   '((t :inherit magit-section-heading))
   "Section heading face (e.g., \"Worktrees\").
@@ -34,6 +41,20 @@ the user's magit theme; override to taste."
 (defface pm-group-heading
   '((t :inherit magit-section-secondary-heading))
   "Group heading face (e.g., a repo or project name within a section)."
+  :group 'pm-faces)
+
+(defface pm-column-header
+  '((t :inherit shadow))
+  "Table column-header row (e.g., \"Worktree  Kind  Branch …\").
+Deliberately quiet — a dim ruler that sits below the bold section
+and group headings, the way magit's column alignments read as
+secondary to their section titles."
+  :group 'pm-faces)
+
+(defface pm-count
+  '((t :inherit shadow))
+  "Dim parenthesized counts in headings (e.g., the \"(3)\" in
+\"Worktrees (3)\").  Mirrors magit's muted child counts."
   :group 'pm-faces)
 
 (defface pm-row-active
@@ -133,6 +154,31 @@ the user's magit theme; override to taste."
   "Return the face for a worktree KIND string, or `default' if unknown."
   (or (cdr (assoc kind pm-faces--kind-alist)) 'default))
 
+(defconst pm-faces--status-alist
+  '(("free"           . pm-row-active)
+    ("active"         . pm-row-active)
+    ("ops"            . pm-row-info)
+    ("ops_owned"      . pm-row-info)
+    ("detached"       . pm-row-dim)
+    ("drift"          . pm-row-warn)
+    ("stale"          . pm-row-error)
+    ("broken"         . pm-row-error)
+    ("orphan_forward" . pm-row-error)
+    ("orphan_owner"   . pm-row-error))
+  "Map a lowercased status / claim token to a face.
+
+Used for the free-form status columns in the project, pool, and
+repo lists, where the value is a state token (FREE / OPS / DRIFT
+/ …) rather than a structured `kind'.")
+
+(defun pm-faces-status (status)
+  "Return a face for a STATUS / claim string, or nil if not a known token.
+
+Unknown values — e.g. a claiming project name in the pool's status
+column — return nil so the caller leaves them in the default face."
+  (and status
+       (cdr (assoc (downcase status) pm-faces--status-alist))))
+
 (defconst pm-faces--agent-alist
   '(("claude" . pm-agent-claude)
     ("codex"  . pm-agent-codex)
@@ -142,6 +188,19 @@ the user's magit theme; override to taste."
 (defun pm-faces-agent (agent)
   "Return the face for an AGENT name string, or `default' if unknown."
   (or (cdr (assoc agent pm-faces--agent-alist)) 'default))
+
+(defun pm-faces-session-cells (row)
+  "Return the per-column face list for a session ROW (alist from JSON).
+
+Parallel to the session columns Agent / Session / Title / Last
+Active: the agent name is colored by agent, the session id reads
+as a stable identifier (`pm-id'), the title stays default for
+readability, and the timestamp is dimmed.  Shared by the status
+and agent-list session tables so they theme identically."
+  (list (pm-faces-agent (alist-get 'agent row))
+        'pm-id
+        nil
+        'pm-dim))
 
 (defun pm-faces-pr (pr)
   "Return the face for a PR plist (`alist' from JSON), or nil if no PR.

@@ -47,18 +47,19 @@
     (erase-buffer)
     (magit-insert-section (pm-repos nil)
       ;; Root has no heading — see pm-status for the rationale.
-      (insert (propertize (format "Repos (%d)" (length rows)) 'face 'bold))
+      (insert (pm-table-banner "Repos" (length rows)))
       (insert "\n")
-      (let* ((header '("Repo" "Branch" "Dirty" "Ahead" "Behind" "Submods"))
-             (cell-rows (cons header (mapcar #'pm-repo--cells rows)))
-             (widths (pm-table-widths cell-rows)))
-        (insert (propertize (pm-table-row header widths)
-                            'face 'magit-section-heading))
-        (insert "\n")
-        (dolist (row rows)
-          (magit-insert-section (pm-repo row)
-            (insert (pm-table-row (pm-repo--cells row) widths))
-            (insert "\n")))))
+      (if (null rows)
+          (pm-table-insert-empty)
+        (let* ((header '("Repo" "Branch" "Dirty" "Ahead" "Behind" "Submods"))
+               (cell-rows (cons header (mapcar #'pm-repo--cells rows)))
+               (widths (pm-table-widths cell-rows)))
+          (pm-table-insert-column-header header widths)
+          (dolist (row rows)
+            (magit-insert-section (pm-repo row)
+              (insert (pm-table-row-faced (pm-repo--cells row) widths
+                                          (pm-repo--faces row)))
+              (insert "\n"))))))
     (pm-table-cover-root-section)
     (pm-table-show-root-section)
     (goto-char (point-min))
@@ -71,6 +72,22 @@
         (format "%s" (or (alist-get 'ahead row) 0))
         (format "%s" (or (alist-get 'behind row) 0))
         (or (alist-get 'submodules row) "")))
+
+(defun pm-repo--faces (row)
+  "Return the per-column face list for a repo ROW (alist from JSON).
+
+Parallel to Repo / Branch / Dirty / Ahead / Behind / Submods: a
+dirty tree warns, local-ahead commits read as healthy/green,
+behind commits warn, and zero counts dim so the eye lands on the
+repos that actually need attention."
+  (let ((ahead  (or (alist-get 'ahead row) 0))
+        (behind (or (alist-get 'behind row) 0)))
+    (list nil
+          nil
+          (if (eq (alist-get 'dirty row) t) 'pm-row-warn 'pm-dim)
+          (if (and (integerp ahead) (> ahead 0)) 'pm-row-active 'pm-dim)
+          (if (and (integerp behind) (> behind 0)) 'pm-row-warn 'pm-dim)
+          nil)))
 
 (defun pm-repo-refresh ()
   "Refetch `pm repo ls --json' and re-render."

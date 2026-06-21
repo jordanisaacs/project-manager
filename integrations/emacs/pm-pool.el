@@ -49,32 +49,35 @@
     (erase-buffer)
     (magit-insert-section (pm-pool nil)
       ;; Root has no heading — see pm-status for the rationale.
-      (insert (propertize (format "Pool slots (%d repo%s)"
-                                  (length groups)
-                                  (if (= 1 (length groups)) "" "s"))
-                          'face 'bold))
+      (insert (pm-table-banner
+               (format "Pool slots (%d repo%s)"
+                       (length groups)
+                       (if (= 1 (length groups)) "" "s"))))
       (insert "\n")
-      (let* ((all-cells
-              (mapcan
-               (lambda (group)
-                 (mapcar #'pm-pool--slot-cells (alist-get 'slots group)))
-               groups))
-             (header '("UUID" "Branch" "Status"))
-             (cell-rows (cons header all-cells))
-             (widths (pm-table-widths cell-rows)))
-        (insert (propertize (pm-table-row header widths)
-                            'face 'magit-section-heading))
-        (insert "\n")
-        (dolist (group groups)
-          (magit-insert-section (pm-pool-repo group)
-            (magit-insert-heading
-              (propertize (or (alist-get 'repo group) "")
-                          'face 'pm-stacker-repo))
-            (dolist (slot (alist-get 'slots group))
-              (let ((cells (pm-pool--slot-cells slot)))
-                (magit-insert-section (pm-pool-slot slot)
-                  (insert (pm-table-row cells widths))
-                  (insert "\n"))))))))
+      (if (null groups)
+          (pm-table-insert-empty)
+        (let* ((all-cells
+                (mapcan
+                 (lambda (group)
+                   (mapcar #'pm-pool--slot-cells (alist-get 'slots group)))
+                 groups))
+               (header '("UUID" "Branch" "Status"))
+               (cell-rows (cons header all-cells))
+               (widths (pm-table-widths cell-rows)))
+          (pm-table-insert-column-header header widths)
+          (dolist (group groups)
+            (magit-insert-section (pm-pool-repo group)
+              (magit-insert-heading
+                (propertize (or (alist-get 'repo group) "")
+                            'face 'pm-group-heading))
+              (dolist (slot (alist-get 'slots group))
+                (let ((cells (pm-pool--slot-cells slot))
+                      ;; UUID keeps its own `pm-id'; color only Status.
+                      (faces (list nil nil
+                                   (pm-faces-status (alist-get 'status slot)))))
+                  (magit-insert-section (pm-pool-slot slot)
+                    (insert (pm-table-row-faced cells widths faces))
+                    (insert "\n")))))))))
     (pm-table-cover-root-section)
     (pm-table-show-root-section)
     (goto-char (point-min))
@@ -86,7 +89,7 @@
 The CLI's slot shape carries `uuid', `branch', and `status' (the
 status is the claiming project name, or `FREE'/`OPS' for unclaimed
 slots) — see `project_manager.pool.ls'."
-  (list (propertize (or (alist-get 'uuid slot) "") 'face 'pm-id)
+  (list (pm-propertize-face (or (alist-get 'uuid slot) "") 'pm-id)
         (or (alist-get 'branch slot) "")
         (or (alist-get 'status slot) "")))
 
