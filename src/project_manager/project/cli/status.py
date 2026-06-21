@@ -5,7 +5,6 @@ from typing import Annotated
 
 from cyclopts import Parameter
 
-from project_manager import check as check_mod
 from project_manager import config, render
 from project_manager.agent import ls as agent_ls
 from project_manager.agent.sources import REGISTRY
@@ -138,10 +137,11 @@ def status(
         _emit_json(ps, sessions_rows, selected)
     else:
         _emit_text(ps, sessions_rows, selected)
-    # Exit code reflects worktree health only when worktrees were asked
-    # for — a sessions-only call shouldn't fail the shell pipeline just
-    # because some unrelated worktree is in DRIFT.
-    if StatusSection.WORKTREES in selected:
-        non_healthy = [r for r in ps.worktrees if r.finding.kind != check_mod.Kind.ACTIVE]
-        return 1 if non_healthy else 0
+    # `status` is a report, not a health gate: it exits 0 on success
+    # regardless of worktree health.  Non-ACTIVE kinds (DETACHED is
+    # intentional, DRIFT is informational, OPS_OWNED is mid-op) are
+    # states to surface, not command failures.  Genuine errors — unknown
+    # project, IO — raise and exit non-zero via the central CLI handler.
+    # (`pm check` remains the linter-style gate whose exit code tracks
+    # health.)
     return 0
