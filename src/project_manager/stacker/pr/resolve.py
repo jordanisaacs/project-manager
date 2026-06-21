@@ -77,8 +77,8 @@ def pr_base_for_current_branch(
     current_repo: gh.RepoInfo,
 ) -> str:
     # Deferred: find.py imports target_repo_slug from here, so a top-level
-    # `from .find import find_open_pr` would cycle on module load.
-    from project_manager.stacker.pr.find import find_open_pr  # noqa: PLC0415
+    # `from .find import find_pr` would cycle on module load.
+    from project_manager.stacker.pr.find import find_pr  # noqa: PLC0415
 
     if config.mode == "repo-pr":
         return config.trunk_branch
@@ -88,8 +88,14 @@ def pr_base_for_current_branch(
     parent_label = selectors.selector_for(tracked.parent_repo_name, tracked.parent_branch)
     if not parent_tracked:
         raise git.GitError(f"Direct parent {parent_label} must already have an open PR.")
-    parent_pr = find_open_pr(ctx, parent_tracked, config, current_repo)
-    if not parent_pr:
+    parent_pr = find_pr(ctx, parent_tracked, config, current_repo)
+    if parent_pr is not None and parent_pr.state == "MERGED":
+        # A merged parent is transparent: sync collapsed it to a no-commit
+        # branch and its commits now live on its own base, so the child's
+        # PR targets whatever the parent would have targeted (trunk once
+        # every merged ancestor is skipped).
+        return pr_base_for_current_branch(ctx, parent_tracked, config, current_repo)
+    if parent_pr is None or parent_pr.state != "OPEN":
         raise git.GitError(f"Direct parent {parent_label} must already have an open PR.")
     # Use the gh-supplied head ref instead of `remote_branch_name`, which
     # reads worktree-local `branch.<name>.merge` config and so requires the

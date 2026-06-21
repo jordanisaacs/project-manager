@@ -63,6 +63,20 @@ def init_submodules(main_repo: Path, worktree: Path) -> None:
         main_sub = main_repo / path
         worktree_sub = worktree / path
         if not (main_sub / ".git").exists():
+            # Orphan gitlink: gitlink in HEAD with no `.gitmodules` URL (so it
+            # can never be initialized). Common when a submodule was removed
+            # in the upstream tree but the gitlink entry survived. Skip it —
+            # `git submodule update --init` would fail too.
+            gitmodules_url = _git(
+                main_repo,
+                "config",
+                "--file",
+                ".gitmodules",
+                f"submodule.{path}.url",
+                check=False,
+            )
+            if gitmodules_url.returncode != 0 or not gitmodules_url.stdout.strip():
+                continue
             raise CommandError(
                 f"submodule '{path}' is not initialized in main repo {main_repo}; "
                 f"run `git -C {main_repo} submodule update --init --recursive` first"

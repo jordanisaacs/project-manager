@@ -119,6 +119,112 @@ def test_pr_pr_mode_uses_parent_pr_head_ref_when_parent_not_in_worktree(
     assert base == "jordan-isaacs_data/feat-a"
 
 
+def test_pr_pr_mode_with_merged_parent_redirects_to_trunk(
+    service: StackerService,
+    backend: RecordingPRBackend,
+) -> None:
+    # Repro of the live failure: the parent's PR merged, sync collapsed the
+    # parent to a no-commit branch, and push then errored with "must already
+    # have an open PR". A merged parent is transparent — its commits are on
+    # its own base now — so the child's PR must retarget that base (trunk).
+    parent = _tracked("feat-a", "main")
+    child = _tracked("feat-b", "feat-a")
+    service.db.upsert_branch(parent)
+    service.db.upsert_branch(child)
+
+    parent_pr_url = "https://github.com/acme/widgets/pull/44"
+    backend.prs_by_head[("acme/widgets", "jordan-isaacs_data/feat-a")] = gh.PullRequest(
+        number=44,
+        url=parent_pr_url,
+        title="parent pr",
+        body="",
+        head_ref_name="jordan-isaacs_data/feat-a",
+        base_ref_name="main",
+        state="MERGED",
+        is_draft=False,
+    )
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name="demo",
+            branch="feat-a",
+            pr_url=parent_pr_url,
+            state="MERGED",
+            merged=True,
+        ),
+    )
+
+    base = pr_base_for_current_branch(
+        service.ctx,
+        child,
+        _config("pr-pr"),
+        _repo_info(),
+    )
+    assert base == "main"
+
+
+def test_pr_pr_mode_with_merged_parent_chain_uses_open_grandparent(
+    service: StackerService,
+    backend: RecordingPRBackend,
+) -> None:
+    # main ← feat-a (open) ← feat-b (merged) ← feat-c: the merged middle
+    # branch is skipped and feat-c's base resolves to feat-a's head ref.
+    grandparent = _tracked("feat-a", "main")
+    parent = _tracked("feat-b", "feat-a")
+    child = _tracked("feat-c", "feat-b")
+    service.db.upsert_branch(grandparent)
+    service.db.upsert_branch(parent)
+    service.db.upsert_branch(child)
+
+    grandparent_pr_url = "https://github.com/acme/widgets/pull/45"
+    backend.prs_by_head[("acme/widgets", "jordan-isaacs_data/feat-a")] = gh.PullRequest(
+        number=45,
+        url=grandparent_pr_url,
+        title="grandparent pr",
+        body="",
+        head_ref_name="jordan-isaacs_data/feat-a",
+        base_ref_name="main",
+        state="OPEN",
+        is_draft=False,
+    )
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name="demo",
+            branch="feat-a",
+            pr_url=grandparent_pr_url,
+            state="OPEN",
+        ),
+    )
+
+    parent_pr_url = "https://github.com/acme/widgets/pull/46"
+    backend.prs_by_head[("acme/widgets", "jordan-isaacs_data/feat-b")] = gh.PullRequest(
+        number=46,
+        url=parent_pr_url,
+        title="parent pr",
+        body="",
+        head_ref_name="jordan-isaacs_data/feat-b",
+        base_ref_name="jordan-isaacs_data/feat-a",
+        state="MERGED",
+        is_draft=False,
+    )
+    service.db.upsert_pr_state(
+        PRState(
+            repo_name="demo",
+            branch="feat-b",
+            pr_url=parent_pr_url,
+            state="MERGED",
+            merged=True,
+        ),
+    )
+
+    base = pr_base_for_current_branch(
+        service.ctx,
+        child,
+        _config("pr-pr"),
+        _repo_info(),
+    )
+    assert base == "jordan-isaacs_data/feat-a"
+
+
 def test_pr_pr_mode_errors_if_parent_pr_has_empty_head_ref(
     service: StackerService,
     backend: RecordingPRBackend,
