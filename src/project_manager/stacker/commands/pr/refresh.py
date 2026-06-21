@@ -1,5 +1,9 @@
 """`pm stacker pr refresh` — re-discover the GitHub PR for a tracked branch."""
 
+from typing import Annotated
+
+from cyclopts import Parameter
+
 from project_manager import config, render
 from project_manager.cli._shared import RepoFlag
 from project_manager.stacker.commands import _common
@@ -10,6 +14,8 @@ from project_manager.stacker.commands.pr import pr_app
 def refresh(
     branch: str | None = None,
     flag: RepoFlag = RepoFlag(),
+    *,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Look up the current GitHub PR for a tracked branch and cache it.
 
@@ -22,18 +28,23 @@ def refresh(
     paths = config.load()
     svc = _common.service(paths)
     target = _common.target(flag.repo, branch, paths)
-    out = render.console()
     pr = svc.refresh_pr(target)
-    if pr is None:
-        out.print(
-            f"No open PR found for '{target.branch}'.",
-            markup=False,
-            highlight=False,
-        )
-        return 1
-    out.print(
-        f"Linked '{target.branch}' to {pr.url}",
-        markup=False,
-        highlight=False,
+    found = pr is not None
+    message = (
+        f"Linked '{target.branch}' to {pr.url}"
+        if found
+        else f"No open PR found for '{target.branch}'."
     )
-    return 0
+    if json:
+        return _common.emit_result(
+            message,
+            json=True,
+            command="pr-refresh",
+            repo=target.repo_name,
+            branch=target.branch,
+            paths=paths,
+            ok=found,
+            code=0 if found else 1,
+        )
+    render.console().print(message, markup=False, highlight=False)
+    return 0 if found else 1

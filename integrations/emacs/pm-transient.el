@@ -30,6 +30,21 @@
 (declare-function pm-project-status            "pm-status" (name))
 (declare-function pm-agent-list-current-project "pm-agent" ())
 (declare-function pm-agent-launch              "pm-agent" (agent &optional project))
+(declare-function pm-stacker-list              "pm-stacker" (&optional project))
+(declare-function pm-stacker--after-action     "pm-stacker" (buf))
+(declare-function pm-stacker-absorb            "pm-stacker" ())
+(declare-function pm-stacker-create            "pm-stacker" ())
+(declare-function pm-stacker-rename            "pm-stacker" ())
+(declare-function pm-stacker-reparent          "pm-stacker" ())
+(declare-function pm-stacker-split             "pm-stacker" ())
+(declare-function pm-stacker-repair            "pm-stacker" ())
+(declare-function pm-stacker-continue          "pm-stacker" ())
+(declare-function pm-stacker-abort             "pm-stacker" ())
+(declare-function pm-stacker-pr-refresh        "pm-stacker" ())
+(declare-function pm-stacker-pr-unlink         "pm-stacker" ())
+(declare-function pm-stacker-log-at-point      "pm-stacker" ())
+(declare-function pm-stacker-visit-worktree    "pm-stacker" ())
+(declare-function pm-stacker-browse-pr         "pm-stacker" ())
 
 (defvar pm-projects-dir)
 (defvar pm-confirm-destructive)
@@ -100,6 +115,12 @@
   :description "status"
   (interactive)
   (pm-project-status (pm--ds-container-name)))
+
+(transient-define-suffix pm-project-dispatch--stacker ()
+  "Open the interactive stacker tree for the bound project."
+  :description "stacker"
+  (interactive)
+  (pm-stacker-list (pm--ds-container-name)))
 
 (transient-define-suffix pm-project-dispatch--wt-add ()
   "Add a worktree to the bound project."
@@ -268,7 +289,8 @@ suffix behavior and our body then sets up the child."
     ("-n" "Skip branch restore"     "--no-branch")
     ("-d" "Dry run"                 "--dry-run")]]
   [["Inspect"
-    ("s" pm-project-dispatch--status)]
+    ("s" pm-project-dispatch--status)
+    ("k" pm-project-dispatch--stacker)]
    ["Worktrees"
     ("n" pm-project-dispatch--wt-add)
     ("a" pm-project-dispatch--wt-attach)
@@ -342,6 +364,127 @@ available."
   (transient-setup 'pm--agent-launch-dispatch-menu nil nil
                    :scope (pm--resolve-dispatch-path arg)))
 
+;;;; Stacker sub-dispatch (branch-scoped)
+;;
+;; Reached via RET on a branch row in `*pm-stacker:*' / the status
+;; buffer's Stacker section (`pm-stacker-act-at-point').  Unlike the
+;; other dispatches the `:scope' is a plist `(:project :repo :branch)'
+;; identifying the branch the user pressed RET on — suffixes read it
+;; rather than `default-directory'.  Push/sync/remove read infix flags;
+;; the prompt-driven verbs delegate to the `pm-stacker-*' commands,
+;; which act on the same branch (point is still on its row).
+
+(defun pm-stacker--scope (key)
+  "Return KEY from the stacker dispatch scope plist."
+  (plist-get (transient-scope) key))
+
+(defun pm-stacker--dispatch-header ()
+  (format "stacker: %s:%s"
+          (or (pm-stacker--scope :repo) "?")
+          (or (pm-stacker--scope :branch) "?")))
+
+(defun pm-stacker--dispatch-args ()
+  (transient-args 'pm-stacker-dispatch))
+
+(transient-define-suffix pm-stacker-dispatch--push ()
+  "Force-push + PR for the scoped branch, honoring infix flags."
+  :description
+  (lambda ()
+    (let ((a (pm-stacker--dispatch-args)))
+      (pm--decorate-desc "push"
+                         (and (member "--all" a) "all")
+                         (and (member "--draft" a) "draft")
+                         (and (member "--publish" a) "publish"))))
+  (interactive)
+  (let* ((a (pm-stacker--dispatch-args))
+         (all (and (member "--all" a) t)))
+    (pm--stacker-push (pm-stacker--scope :repo)
+                      (unless all (pm-stacker--scope :branch))
+                      all
+                      (and (member "--draft" a) t)
+                      (and (member "--publish" a) t)
+                      (pm-stacker--after-action (current-buffer)))))
+
+(transient-define-suffix pm-stacker-dispatch--sync ()
+  "Sync the scoped branch onto its parent, honoring infix flags."
+  :description
+  (lambda ()
+    (let ((a (pm-stacker--dispatch-args)))
+      (pm--decorate-desc "sync"
+                         (and (member "--all" a) "all")
+                         (and (member "--offline" a) "offline"))))
+  (interactive)
+  (let* ((a (pm-stacker--dispatch-args))
+         (all (and (member "--all" a) t)))
+    (pm--stacker-sync (pm-stacker--scope :repo)
+                      (unless all (pm-stacker--scope :branch))
+                      all
+                      (and (member "--offline" a) t)
+                      (and (member "--allow-drop-parent-modifications" a) t)
+                      (and (member "--allow-drop-merge" a) t)
+                      (pm-stacker--after-action (current-buffer)))))
+
+(transient-define-suffix pm-stacker-dispatch--remove ()
+  "Remove the scoped branch, honoring `--parent' / `--keep-branch'."
+  :description
+  (lambda ()
+    (let ((a (pm-stacker--dispatch-args)))
+      (pm--decorate-desc "remove"
+                         (and (member "--parent" a) "parents")
+                         (and (member "--keep-branch" a) "keep"))))
+  (interactive)
+  (let* ((a (pm-stacker--dispatch-args))
+         (branch (pm-stacker--scope :branch)))
+    (when (pm--maybe-confirm (format "Remove tracked branch %s? " branch))
+      (pm--stacker-remove (pm-stacker--scope :repo) branch
+                          (and (member "--parent" a) t)
+                          (and (member "--keep-branch" a) t)
+                          t
+                          (pm-stacker--after-action (current-buffer))))))
+
+(transient-define-suffix pm-stacker-dispatch--refresh ()
+  "Refresh the buffer the dispatch was invoked from."
+  :description "refresh"
+  (interactive)
+  (when (derived-mode-p 'magit-section-mode)
+    (revert-buffer nil t)))
+
+;;;###autoload (autoload 'pm-stacker-dispatch "pm-transient" nil t)
+(transient-define-prefix pm-stacker-dispatch ()
+  "pm stacker: act on the branch at point."
+  [:description pm-stacker--dispatch-header
+   ["Arguments"
+    ("-a" "All branches in repo"        "--all")
+    ("-o" "Offline (skip PR refresh)"   "--offline")
+    ("-d" "Draft PR"                    "--draft")
+    ("-u" "Publish PR"                  "--publish")
+    ("-P" "Also remove parents"         "--parent")
+    ("-k" "Keep git branch"             "--keep-branch")
+    ("-m" "Allow drop merged"           "--allow-drop-merge")
+    ("-r" "Allow drop parent mods"      "--allow-drop-parent-modifications")]]
+  [["Sync / PR"
+    ("p" pm-stacker-dispatch--push)
+    ("y" pm-stacker-dispatch--sync)
+    ("a" "absorb"     pm-stacker-absorb)
+    ("f" "pr refresh" pm-stacker-pr-refresh)
+    ("U" "pr unlink"  pm-stacker-pr-unlink)]
+   ["Edit stack"
+    ("c" "create"   pm-stacker-create)
+    ("r" "rename"   pm-stacker-rename)
+    ("R" "reparent" pm-stacker-reparent)
+    ("S" "split"    pm-stacker-split)
+    ("x" pm-stacker-dispatch--remove)]
+   ["Operation"
+    ("C" "continue" pm-stacker-continue)
+    ("A" "abort"    pm-stacker-abort)
+    ("F" "repair"   pm-stacker-repair)]]
+  [["Inspect"
+    ("L" "log"            pm-stacker-log-at-point)
+    ("w" "visit worktree" pm-stacker-visit-worktree)
+    ("b" "browse PR"      pm-stacker-browse-pr)]
+   ["System"
+    ("g" pm-stacker-dispatch--refresh)]])
+
 ;;;; Global dispatch
 ;;
 ;; Grouped by noun (Project / Pool / Repos / Agent), not by verb, so
@@ -356,7 +499,8 @@ available."
    ["Project"
     ("c" "create"  pm-project-create :if pm--no-create-inflight)
     ("p" "switch"  pm-project-switch)
-    ("l" "list"    pm-project-list)]
+    ("l" "list"    pm-project-list)
+    ("k" "stacker" pm-stacker-list)]
    ["Pool"
     ("+" "add"     pm-pool-add)
     ("o" "list"    pm-pool-list)]

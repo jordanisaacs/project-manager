@@ -230,6 +230,38 @@ def test_stacker_section_unions_arms_across_worktrees_same_repo(pm_env: Paths) -
     assert "arm-b" in info
 
 
+def test_status_structured_stacker_emits_tree(pm_env: Paths) -> None:
+    """`stacker_structured=True` swaps the markup `info` for a node tree.
+
+    Drives the `--json` path: each StackerRow carries `branches`
+    (recursive node dicts), `current_branch`, and `operation` instead of
+    the pre-rendered `info` blob.
+    """
+    git_pool(pm_env, "foo", n=1)
+    add_mod.add(pm_env, "demo", _just(["foo"]))
+    _checkout_branch(pm_env.projects / "demo" / "foo", "feat")
+    StackerDB(pm_env.stacker_db()).upsert_branch(_tracked("foo", "feat", "main"))
+
+    ps = status_mod.status(pm_env, "demo", stacker_structured=True)
+    assert len(ps.stacker) == 1
+    row = ps.stacker[0]
+    # Structured mode skips the text render to stay at one prefetch.
+    assert row.info == ""
+    assert row.operation is None
+    assert [b["branch"] for b in row.branches] == ["feat"]
+    node = row.branches[0]
+    assert node["repo_name"] == "foo"
+    assert node["parent_branch"] == "main"
+    assert node["is_root"] is True
+    assert node["children"] == []
+
+    payload = row.__pm_json__()
+    assert set(payload) == {"repo", "info", "branches", "current_branch", "operation"}
+    assert payload["branches"] == row.branches
+    assert payload["current_branch"] == row.current_branch
+    assert payload["operation"] is None
+
+
 def test_worktree_columns_do_not_expose_path() -> None:
     titles = [c.title for c in status_mod.WORKTREE_COLUMNS]
     assert "Path" not in titles

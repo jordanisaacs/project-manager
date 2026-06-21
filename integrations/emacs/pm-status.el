@@ -25,6 +25,7 @@
 (require 'pm-table)
 (require 'pm-commands)
 (require 'pm-ui)  ; for `pm--read-project'
+(require 'pm-stacker)  ; shared stacker tree renderer + branch actions
 
 ;; Forward declaration — defined in pm-agent.el to keep the dispatch
 ;; defcustom alongside the agent-list buffer.  The autoload at the
@@ -135,20 +136,16 @@ Updated by full and per-section refreshes; renderers read from here.")
         (or (alist-get 'pr_url row) "")))
 
 (defun pm-status--insert-stacker ()
-  "Render the Stacker section from `pm-status--data'."
+  "Render the Stacker section from `pm-status--data'.
+
+Delegates to the shared `pm-stacker--insert-repos' so the section is
+the same interactive branch tree as the dedicated `*pm-stacker:*'
+buffer — RET on a branch opens the action transient."
   (let ((rows (alist-get 'stacker pm-status--data)))
     (when rows
       (magit-insert-section (pm-stacker nil)
         (magit-insert-heading (pm-table-heading "Stacker" (length rows)))
-        (dolist (row rows)
-          (let ((repo (or (alist-get 'repo row) ""))
-                (info (or (alist-get 'info row) "")))
-            (magit-insert-section (pm-stacker-row row)
-              (magit-insert-heading
-                (propertize repo 'face 'pm-stacker-repo))
-              (insert (pm-table-render-rich-markup info))
-              (insert "\n"))))
-        (insert "\n")))))
+        (pm-stacker--insert-repos rows)))))
 
 (defun pm-status--insert-sessions ()
   "Render the Recent Sessions section from `pm-status--data'."
@@ -276,11 +273,13 @@ before re-rendering, mirroring `magit-refresh-buffer'."
   (interactive)
   (let* ((sec (magit-current-section))
          (target (pm-section-ancestor-of-type
-                  sec '(pm-worktree pm-pr pm-session))))
+                  sec '(pm-worktree pm-pr pm-session pm-stacker-branch))))
     (unless target
       (user-error "No actionable row at point"))
     (let ((value (oref target value)))
       (pcase (oref target type)
+        ('pm-stacker-branch
+         (pm-stacker-act-at-point))
         ('pm-worktree
          (let* ((wt (alist-get 'wt value))
                 (forward (alist-get 'forward_path value))

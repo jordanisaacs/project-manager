@@ -19,6 +19,7 @@ def unlink(
         bool,
         Parameter(name="--all", negative="", help="clear PR links for every branch"),
     ] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Clear the cached PR association for a branch (or --all branches).
 
@@ -30,22 +31,24 @@ def unlink(
     paths = config.load()
     svc = _common.service(paths)
     repo_name = _common.resolve_repo(flag.repo, paths)
-    out = render.console()
     if all_:
         n = svc.delete_all_pr_state(repo_name)
-        out.print(f"Cleared {n} PR link(s).", markup=False, highlight=False)
-        return 0
-    target_branch = _common.resolve_branch(branch, paths)
-    if svc.delete_pr_state(repo_name, target_branch):
-        out.print(
-            f"Cleared PR link for '{target_branch}'.",
-            markup=False,
-            highlight=False,
-        )
+        message, target_branch = f"Cleared {n} PR link(s).", None
     else:
-        out.print(
-            f"Branch '{target_branch}' has no PR link to clear.",
-            markup=False,
-            highlight=False,
+        target_branch = _common.resolve_branch(branch, paths)
+        message = (
+            f"Cleared PR link for '{target_branch}'."
+            if svc.delete_pr_state(repo_name, target_branch)
+            else f"Branch '{target_branch}' has no PR link to clear."
         )
+    if json:
+        return _common.emit_result(
+            message,
+            json=True,
+            command="pr-unlink",
+            repo=repo_name,
+            branch=target_branch,
+            paths=paths,
+        )
+    render.console().print(message, markup=False, highlight=False)
     return 0

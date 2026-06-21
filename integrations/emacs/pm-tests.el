@@ -33,7 +33,8 @@
   (require 'pm-list)
   (require 'pm-pool)
   (require 'pm-repo)
-  (require 'pm-agent))
+  (require 'pm-agent)
+  (require 'pm-stacker))
 
 (defmacro pm-test--with-fixture (var &rest body)
   "Bind VAR to a temp pm-projects-dir and evaluate BODY.
@@ -941,6 +942,115 @@ sessions: [...])' groups) into the refresh path."
             (should (string-prefix-p pm-projects-dir
                                      (plist-get captured :cwd))))
         (delete-directory pm-projects-dir t)))))
+
+;;;; Stacker
+
+(ert-deftest pm-test--stacker-status-faces ()
+  "`pm-faces-stacker-status' maps tokens to (SYMBOL . FACE), mirroring graph.py."
+  (should (equal (pm-faces-stacker-status "pr_open") '("●" . pm-pr-open)))
+  (should (equal (pm-faces-stacker-status "pr_approved") '("✓" . pm-row-active)))
+  (should (equal (pm-faces-stacker-status "pr_open_comments") '("⚑" . pm-row-error)))
+  (should (equal (pm-faces-stacker-status "merged") '("■" . pm-pr-merged)))
+  ;; no_pr has no color: cdr is ("○" . nil) == ("○").
+  (should (equal (pm-faces-stacker-status "no_pr") '("○")))
+  ;; Unknown / nil falls back to a dim dot.
+  (should (equal (pm-faces-stacker-status "bogus") '("·" . pm-dim)))
+  (should (equal (pm-faces-stacker-status nil) '("·" . pm-dim))))
+
+(when pm-test--has-magit-section
+
+  (defun pm-test--stacker-fixture ()
+    "A two-repo `stacker' payload: a 2-deep arm + a merged solo + a paused op."
+    '(((repo . "foo")
+       (current_branch . "feat")
+       (operation . ((op_type . "sync") (status . "paused")
+                     (branch . "feat") (error_message . "cherry-pick conflict")))
+       (branches
+        . (((repo_name . "foo") (branch . "root") (parent_branch . "main")
+            (is_root . t) (status . "pr_open") (commit_count . 2)
+            (needs_sync . t) (ahead_of_remote . 1)
+            (pr_url . "https://example.com/1") (merged . nil)
+            (children
+             . (((repo_name . "foo") (branch . "feat") (parent_branch . "root")
+                 (is_root . nil) (status . "pr_approved") (commit_count . 1)
+                 (needs_sync . nil) (ahead_of_remote . 0)
+                 (pr_url . "https://example.com/2") (merged . nil)
+                 (children . nil))))))))
+      ((repo . "bar")
+       (current_branch . nil)
+       (operation . nil)
+       (branches
+        . (((repo_name . "bar") (branch . "solo") (parent_branch . "main")
+            (is_root . t) (status . "merged") (commit_count . 0)
+            (needs_sync . nil) (ahead_of_remote . 0)
+            (pr_url . nil) (merged . t) (children . nil)))))))
+
+  (defmacro pm-test--with-rendered-stacker (&rest body)
+    "Render the stacker fixture in a `pm-stacker-mode' buffer, run BODY in it."
+    (declare (indent 0))
+    `(let ((buf (generate-new-buffer "*pm-test-stacker*")))
+       (unwind-protect
+           (with-current-buffer buf
+             (pm-stacker-mode)
+             (setq pm-stacker--project "demo")
+             (setq pm-stacker--data (pm-test--stacker-fixture))
+             (pm-stacker--render)
+             ,@body)
+         (kill-buffer buf))))
+
+  (ert-deftest pm-test--stacker-render-tree ()
+    "The stacker tree renders repos, nested branches, icons, markers, and the
+paused-op banner — and every position resolves to a non-nil section."
+    (pm-test--with-rendered-stacker
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "stacker: demo" text))
+        (dolist (s '("foo" "bar" "root" "feat" "solo"))
+          (should (string-match-p s text)))
+        ;; Status icons (pr_open / pr_approved / merged).
+        (dolist (icon '("●" "✓" "■"))
+          (should (string-match-p icon text)))
+        ;; Commit-group markers.
+        (should (string-match-p "(2)" text))   ; commit_count
+        (should (string-match-p "!" text))     ; needs_sync
+        (should (string-match-p "↑1" text))    ; ahead_of_remote
+        ;; Paused-operation banner.
+        (should (string-match-p "paused" text))
+        (should (string-match-p "cherry-pick conflict" text)))
+      (should-not (pm-test--every-pos-has-section-p))))
+
+  (ert-deftest pm-test--stacker-act-at-point-scopes-to-branch ()
+    "RET on a branch sets the action transient's `:scope' to that branch."
+    (pm-test--with-rendered-stacker
+      (goto-char (point-min))
+      (should (search-forward "feat" nil t))
+      (let ((scope (pm-test--capture-dispatch-scope
+                    (pm-stacker-act-at-point))))
+        (should (equal (plist-get scope :project) "demo"))
+        (should (equal (plist-get scope :repo) "foo"))
+        (should (equal (plist-get scope :branch) "feat")))))
+
+  (ert-deftest pm-test--stacker-wrapper-argv ()
+    "The stacker wrappers build `pm stacker <verb> … --repo R --json' argv."
+    (let (argv)
+      (cl-letf (((symbol-function 'pm--run-async)
+                 (lambda (args &rest _) (setq argv args))))
+        (pm--stacker-push "kms" "feat" nil nil nil #'ignore)
+        (should (equal argv '("stacker" "push" "feat" "--repo" "kms" "--json")))
+        ;; `--all' drops the positional branch (the caller passes nil).
+        (pm--stacker-sync "kms" nil t t nil nil #'ignore)
+        (should (equal argv
+                       '("stacker" "sync" "--repo" "kms" "--all" "--offline" "--json")))
+        (pm--stacker-remove "kms" "feat" t nil t #'ignore)
+        (should (equal argv
+                       '("stacker" "remove" "feat" "--repo" "kms"
+                         "--parent" "--force" "--json")))
+        (pm--stacker-rename "kms" "feat" "feat2" #'ignore)
+        (should (equal argv
+                       '("stacker" "rename" "feat2" "--branch" "feat"
+                         "--repo" "kms" "--json")))
+        (pm--stacker-pr-unlink "kms" nil t #'ignore)
+        (should (equal argv
+                       '("stacker" "pr" "unlink" "--all" "--repo" "kms" "--json")))))))
 
 (provide 'pm-tests)
 

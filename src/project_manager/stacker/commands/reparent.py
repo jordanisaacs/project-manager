@@ -49,6 +49,7 @@ def reparent(
             help="skip the PR-state refresh; use cached pr_state for the merged-PR collapse.",
         ),
     ] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Move current branch onto a new parent; cherry-pick descendants.
 
@@ -62,14 +63,21 @@ def reparent(
             raise git.GitError(
                 "--allow-drop-* and --offline cannot be combined with --continue or --abort.",
             )
-        if continue_:
-            return _common.emit(svc.continue_operation(_common.resolve_repo(flag.repo, paths)))
-        return _common.emit(svc.abort_operation(_common.resolve_repo(flag.repo, paths)))
+        repo = _common.resolve_repo(flag.repo, paths)
+        result = svc.continue_operation(repo) if continue_ else svc.abort_operation(repo)
+        return _common.emit_result(
+            result,
+            json=json,
+            command="continue" if continue_ else "abort",
+            repo=repo,
+            branch=None,
+            paths=paths,
+        )
     if not new_parent:
         raise ValueError("reparent requires <new-parent> (or --continue / --abort).")
     target = _common.target(flag.repo, branch, paths)
     parent = _common.resolve_on_spec(paths, target.repo_name, new_parent)
-    return _common.emit(
+    return _common.emit_result(
         svc.reparent(
             target,
             parent,
@@ -78,5 +86,10 @@ def reparent(
                 allow_drop_merge=allow_drop_merge,
                 offline=offline,
             ),
-        )
+        ),
+        json=json,
+        command="reparent",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
     )

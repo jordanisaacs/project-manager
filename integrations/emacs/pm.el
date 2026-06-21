@@ -105,6 +105,8 @@ when set, else the user's home directory."
 (autoload 'pm-pool-add "pm-ui" nil t)
 (autoload 'pm-repo-pull "pm-ui" nil t)
 (autoload 'pm-project-status "pm-status" nil t)
+(autoload 'pm-stacker-list "pm-stacker" nil t)
+(autoload 'pm-stacker-dispatch "pm-transient" nil t)
 (autoload 'pm-project-list "pm-list" nil t)
 (autoload 'pm-pool-list "pm-pool" nil t)
 (autoload 'pm-repo-list "pm-repo" nil t)

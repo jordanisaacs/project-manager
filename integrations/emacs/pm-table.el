@@ -282,7 +282,8 @@ Falls back to the raw string on parse failure."
     ("magenta"  . pm-agent-cursor)
     ("yellow"   . pm-row-warn)
     ("red"      . pm-row-error)
-    ("cyan"     . pm-row-info))
+    ("cyan"     . pm-row-info)
+    ("strike"   . pm-stacker-merged))
   "Map a single Rich style word to an Emacs face.
 
 Multi-word styles (e.g. \"bold blue\") are split and each word

@@ -1,6 +1,6 @@
 """Single-project status: per-worktree findings joined with branch + PR + stacker state."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from project_manager.stacker import locate as stacker_locate
 from project_manager.stacker.ctx import StackerCtx
 from project_manager.stacker.models import PRState, TrackedBranch
 from project_manager.stacker.render import graph
-from project_manager.stacker.render.ls import LsOptions, RenderOptions
+from project_manager.stacker.render.ls import LsOptions, RenderOptions, arm_branch_set, ls_structure
 from project_manager.stacker.render.ls import ls_text as render_ls_text
 
 
@@ -127,9 +127,18 @@ class StackerRow:
 
     repo: str
     info: str
+    branches: list[dict] = field(default_factory=list)
+    current_branch: str | None = None
+    operation: dict | None = None
 
     def __pm_json__(self) -> dict:
-        return {"repo": self.repo, "info": self.info}
+        return {
+            "repo": self.repo,
+            "info": self.info,
+            "branches": self.branches,
+            "current_branch": self.current_branch,
+            "operation": self.operation,
+        }
 
 
 @dataclass(frozen=True)
@@ -326,11 +335,45 @@ def _current_position(paths: Paths) -> tuple[str, str] | None:
     return slot.repo_name, branch
 
 
+def _stacker_row_structured(
+    ctx: StackerCtx,
+    repo: str,
+    roots: list[TrackedBranch],
+    current: tuple[str, str] | None,
+) -> StackerRow:
+    """Structured `StackerRow` for one repo: the arm tree + paused-op state.
+
+    The arm is the union of each root's lineage (`scope="current"`), the
+    same selection the text renderer walks — so the structured tree
+    matches the text arm. `info` is left empty: `--json` consumers read
+    `branches`, and skipping the text render keeps this to one prefetch.
+    """
+    arm: list[TrackedBranch] = []
+    seen: set[tuple[str, str]] = set()
+    for root in roots:
+        for b in arm_branch_set(ctx, repo, root.branch, "current"):
+            key = (b.repo_name, b.branch)
+            if key not in seen:
+                seen.add(key)
+                arm.append(b)
+    tree = ls_structure(ctx, arm, "status-counts", current)
+    op = ctx.db.get_operation(repo)
+    return StackerRow(
+        repo=repo,
+        info="",
+        branches=tree["branches"],
+        current_branch=tree["current_branch"],
+        operation=op.__pm_json__() if op is not None else None,
+    )
+
+
 def _gather_stacker(
     ctx: StackerCtx,
     paths: Paths,
     tracked_checked_out_per_repo: dict[str, list[TrackedBranch]],
     wt_labels: dict[tuple[str, str], str],
+    *,
+    structured: bool = False,
 ) -> list[StackerRow]:
     """Render the stacker arms for each repo with at least one tracked checkout.
 
@@ -356,6 +399,10 @@ def _gather_stacker(
         for b in branches:
             root = _find_root(ctx, b)
             roots.setdefault(root.branch, root)
+        sorted_roots = [root for _, root in sorted(roots.items())]
+        if structured:
+            rows.append(_stacker_row_structured(ctx, repo, sorted_roots, current))
+            continue
         segments = [
             render_ls_text(
                 ctx,
@@ -368,7 +415,7 @@ def _gather_stacker(
                     wt_labels=wt_labels,
                 ),
             )
-            for _, root in sorted(roots.items())
+            for root in sorted_roots
         ]
         rows.append(StackerRow(repo=repo, info="\n".join(segments)))
     return rows
@@ -378,6 +425,8 @@ def status(
     paths: Paths,
     project: str,
     sections: frozenset[StatusSection] = ALL_STATUS_SECTIONS,
+    *,
+    stacker_structured: bool = False,
 ) -> ProjectStatus:
     """Gather worktree findings + branch + cached PR state + stacker arms.
 
@@ -450,5 +499,9 @@ def status(
         if want_stacker and f.wt is not None and repo is not None and branch is not None:
             wt_labels[(repo, branch)] = f.wt
     prs.sort(key=lambda r: (r.repo, r.wt))
-    stacker = _gather_stacker(ctx, paths, tracked_per_repo, wt_labels) if want_stacker else []
+    stacker = (
+        _gather_stacker(ctx, paths, tracked_per_repo, wt_labels, structured=stacker_structured)
+        if want_stacker
+        else []
+    )
     return ProjectStatus(worktrees=worktrees, prs=prs, stacker=stacker)

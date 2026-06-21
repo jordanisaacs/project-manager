@@ -141,3 +141,16 @@ class OperationState:
     error_message: str | None = None
     allow_drop_parent_modifications: bool = False
     allow_drop_merge: bool = False
+
+    def __pm_json__(self) -> dict:
+        """Focused view for `--json` consumers (status banner + action results).
+
+        Only the fields a UI needs to surface a paused/conflicted op; the
+        cherry-pick bookkeeping (queue, indices, heads) stays internal.
+        """
+        return {
+            "op_type": self.op_type,
+            "status": self.status,
+            "branch": self.branch,
+            "error_message": self.error_message,
+        }

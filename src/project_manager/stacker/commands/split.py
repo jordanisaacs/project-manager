@@ -18,6 +18,7 @@ def split(
     branch: str | None = None,
     flag: RepoFlag = RepoFlag(),
     stay: Annotated[bool, Parameter(negative="")] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Move commits [<commit>..HEAD] onto a new child branch.
 
@@ -25,6 +26,12 @@ def split(
     """
     paths = config.load()
     svc = _common.service(paths)
-    return _common.emit(
-        svc.split(_common.target(flag.repo, branch, paths), new_name, commit, stay=stay)
+    target = _common.target(flag.repo, branch, paths)
+    return _common.emit_result(
+        svc.split(target, new_name, commit, stay=stay),
+        json=json,
+        command="split",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
     )

@@ -271,5 +271,67 @@ local source path; otherwise the `:load-path` form just works.
 
 ## Stacker
 
-Stacker commands are deliberately omitted. Run them from the shell
-(`pm stacker ...`) or send a PR adding a `pm-stacker.el` module.
+`pm-stacker.el` provides an interactive, multi-repo view of the stacker
+plus the full action surface. Open it with `M-x pm-stacker-list`, via
+`C-x p .` → `k`, or `C-x p P` → `k`. The same tree also renders as the
+**Stacker** section of `*pm-status:*` (RET on a branch there opens the
+same action menu).
+
+Both surfaces consume the structured tree that `pm project status
+--json` now emits (`StackerRow.branches` / `current_branch` /
+`operation`); the dedicated buffer fetches it in one call via
+`pm project status -s worktrees,stacker --json`.
+
+### `*pm-stacker: <project>*`
+
+One foldable branch tree per tracked repo. Each row shows the status
+icon (mirroring the CLI: `· ○ ● ▼ ✓ ⚑ ◼ ■`), the branch name (the
+current branch bold, merged branches struck through), and commit-group
+markers (`(N)` commits, `!` needs-sync, `↑N` ahead of remote). A
+paused/conflicted operation shows a `⚠` banner under its repo.
+
+Movement / folding (`n`/`p`/`TAB`/`S-TAB`) are inherited from
+`magit-section`.
+
+| Key   | Action                                                      |
+| ----- | ----------------------------------------------------------- |
+| `RET` | Open the branch-scoped action transient                     |
+| `w`   | Visit the branch's worktree (falls back to its PR)          |
+| `b`   | Browse the branch's PR                                       |
+| `L`   | `pm stacker log` for the branch                             |
+| `p` / `y` / `a` | push / sync / absorb                              |
+| `c` / `r` / `R` / `S` / `x` | create / rename / reparent / split / remove |
+| `C` / `A` / `F` | continue / abort / repair                         |
+| `P` / `U` | pr refresh / pr unlink                                  |
+| `g`   | Refresh                                                     |
+| `q`   | Quit                                                        |
+
+### Action transient
+
+`RET` on a branch opens `pm-stacker-dispatch`, scoped to that branch.
+Infix arguments (`--all`, `--draft`/`--publish`, `--offline`,
+`--allow-drop-*`, `--parent`/`--keep-branch`) drive `push` / `sync` /
+`remove`; suffix descriptions live-update as you toggle them. The
+prompt-driven verbs (create / rename / reparent / split / repair) and
+the operation verbs (continue / abort) act on the same branch.
+
+Every action runs `pm stacker <verb> --json` and refreshes the buffer
+on completion. Because the JSON envelope carries the post-command
+`operation` state, a sync/absorb/reparent that pauses on a conflict
+re-renders with the `⚠` banner so `C` (continue) / `A` (abort) are one
+key away. Destructive verbs (remove, reparent, split, repair, pr
+unlink) confirm first when `pm-confirm-destructive` is set.
+
+### CLI: `--json` on every stacker verb
+
+Every `pm stacker` subcommand — not just `ls`/`config` — accepts
+`--json`. Mutating verbs emit a uniform envelope:
+
+```json
+{"ok": true, "command": "sync", "repo": "kms", "branch": "feat",
+ "message": "<rich-markup result>", "operation": null}
+```
+
+`message` is the human result (rendered from Rich markup by the Emacs
+client); `operation` is the repo's paused-op state after the command
+(or `null`). Without `--json` the human output is unchanged.

@@ -137,6 +137,17 @@ secondary to their section titles."
   "Stable identifiers (session UUIDs, slot UUIDs)."
   :group 'pm-faces)
 
+(defface pm-stacker-current
+  '((t :inherit bold))
+  "The current branch (cwd slot's branch) in the stacker tree."
+  :group 'pm-faces)
+
+(defface pm-stacker-merged
+  '((t :inherit shadow :strike-through t))
+  "Merged branch in the stacker tree — dim + struck through, like the CLI.
+Also the target of the Rich `strike' markup token."
+  :group 'pm-faces)
+
 ;;;; Mapping helpers
 
 (defconst pm-faces--kind-alist
@@ -213,6 +224,29 @@ trumps closed trumps draft trumps open."
      ((string= (alist-get 'state pr) "CLOSED") 'pm-pr-closed)
      ((alist-get 'is_draft pr)          'pm-pr-draft)
      (t                                  'pm-pr-open))))
+
+(defconst pm-faces--stacker-status-alist
+  '(("local_only"          "·" . pm-dim)
+    ("no_pr"               "○" . nil)
+    ("pr_open"             "●" . pm-pr-open)
+    ("pr_draft"            "▼" . pm-pr-draft)
+    ("pr_approved"         "✓" . pm-row-active)
+    ("pr_open_comments"    "⚑" . pm-row-error)
+    ("pr_approved_comments" "◼" . pm-row-error)
+    ("merged"              "■" . pm-pr-merged))
+  "Map a stacker `status' token to (SYMBOL . FACE).
+Mirrors `_SYMBOL' / `_ICON_COLOR' in `stacker/render/graph.py' — the
+status strings are exactly the `_STATUS_JSON' values emitted by
+`stacker ls --json'.")
+
+(defun pm-faces-stacker-status (status)
+  "Return (SYMBOL . FACE) for a stacker STATUS token.
+
+FACE may be nil (no color).  Unknown or nil STATUS — e.g. when
+`ls --details' was below `status' so no token was emitted — falls
+back to a dim placeholder dot."
+  (or (cdr (assoc status pm-faces--stacker-status-alist))
+      (cons "·" 'pm-dim)))
 
 (provide 'pm-faces)
 

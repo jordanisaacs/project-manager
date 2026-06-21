@@ -24,6 +24,7 @@ from project_manager.stacker.service import StackerService
 # keep working; canonical definitions live in `cli._params`.
 __all__ = [
     "emit",
+    "emit_result",
     "resolve_branch",
     "resolve_on_spec",
     "resolve_repo",
@@ -124,3 +125,44 @@ def emit(result: str) -> int:
     """Print a service result string (rich markup resolved) and return 0."""
     render.emit_markup(result)
     return 0
+
+
+def emit_result(
+    result: str,
+    *,
+    json: bool,
+    command: str,
+    repo: str | None,
+    branch: str | None,
+    paths: Paths,
+    ok: bool = True,
+    code: int = 0,
+) -> int:
+    """Emit a service RESULT as markup text, or as a uniform JSON envelope.
+
+    Every stacker verb routes through here so it supports `--json`. The
+    envelope is `{ok, command, repo, branch, message, operation}` where
+    `message` is the raw rich-markup result (clients render it) and
+    `operation` is the post-command paused-op state (or None) — so a
+    client can surface a conflict/pause and offer continue/abort.
+
+    `ok`/`code` let a command report a non-fatal negative outcome (e.g.
+    `pr refresh` finding no PR) as `{ok: false}` with the same exit code
+    it would return in text mode. Markup-emitting commands call this for
+    both modes (text → `emit`); plain-`print` commands call it only on
+    their `--json` path so their text output is unchanged.
+    """
+    if not json:
+        return emit(result)
+    op = service(paths).db.get_operation(repo) if repo else None
+    render.emit_json(
+        {
+            "ok": ok,
+            "command": command,
+            "repo": repo,
+            "branch": branch,
+            "message": result,
+            "operation": op.__pm_json__() if op is not None else None,
+        }
+    )
+    return code

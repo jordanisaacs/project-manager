@@ -278,13 +278,13 @@ _STATUS_JSON: dict[str, str] = {
 }
 
 
-def _ls_json(
+def ls_structure(
     ctx: StackerCtx,
     branches: list[TrackedBranch],
     details: Details,
     current: tuple[str, str] | None,
-) -> str:
-    """Hierarchical JSON: `{current_branch, branches: [root...with children]}`.
+) -> dict[str, object]:
+    """Hierarchical structure: `{current_branch, branches: [root...with children]}`.
 
     Tiered fields mirror `--details`: `none` only structural fields,
     `status` adds status/needs_sync/ahead_of_remote, `status-counts`
@@ -357,10 +357,32 @@ def _ls_json(
         [b for b in branches if (b.parent_repo_name, b.parent_branch) not in tracked_keys],
         key=lambda b: (b.repo_name, b.branch),
     )
-    return json.dumps(
-        {
-            "current_branch": current[1] if current is not None else None,
-            "branches": [node(r) for r in roots],
-        },
-        indent=2,
-    )
+    return {
+        "current_branch": current[1] if current is not None else None,
+        "branches": [node(r) for r in roots],
+    }
+
+
+def _ls_json(
+    ctx: StackerCtx,
+    branches: list[TrackedBranch],
+    details: Details,
+    current: tuple[str, str] | None,
+) -> str:
+    """Serialize `ls_structure` as indented JSON (the `--json` output)."""
+    return json.dumps(ls_structure(ctx, branches, details, current), indent=2)
+
+
+def arm_branch_set(
+    ctx: StackerCtx,
+    repo_name: str,
+    target_branch: str,
+    scope: Scope = "current",
+) -> list[TrackedBranch]:
+    """Public wrapper over `_ls_branch_set` for cross-module reuse.
+
+    `project.status._gather_stacker` needs the exact branch set the text
+    arm renders so its structured tree matches; expose the selector
+    rather than re-deriving lineage there.
+    """
+    return _ls_branch_set(ctx, repo_name, target_branch, scope)

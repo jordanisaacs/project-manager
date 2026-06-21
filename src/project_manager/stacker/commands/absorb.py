@@ -23,6 +23,7 @@ def absorb(
         bool,
         Parameter(negative="", help="abort the paused op"),
     ] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Cherry-pick the current branch's new commits onto its parent.
 
@@ -32,9 +33,23 @@ def absorb(
     """
     paths = config.load()
     svc = _common.service(paths)
-    if continue_:
-        return _common.emit(svc.continue_operation(_common.resolve_repo(scope.repo, paths)))
-    if abort:
-        return _common.emit(svc.abort_operation(_common.resolve_repo(scope.repo, paths)))
+    if continue_ or abort:
+        repo = _common.resolve_repo(scope.repo, paths)
+        result = svc.continue_operation(repo) if continue_ else svc.abort_operation(repo)
+        return _common.emit_result(
+            result,
+            json=json,
+            command="continue" if continue_ else "abort",
+            repo=repo,
+            branch=None,
+            paths=paths,
+        )
     target = _common.target(scope.repo, branch, paths)
-    return _common.emit(svc.absorb(target))
+    return _common.emit_result(
+        svc.absorb(target),
+        json=json,
+        command="absorb",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
+    )

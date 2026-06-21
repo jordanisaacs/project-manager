@@ -49,6 +49,7 @@ def sync(
             "merged-PR collapse decision.",
         ),
     ] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Cherry-pick branches onto their parents.
 
@@ -81,11 +82,26 @@ def sync(
             raise git.GitError(
                 "--allow-drop-* and --offline cannot be combined with --continue or --abort.",
             )
+        repo = _common.resolve_repo(scope.repo, paths)
         if continue_:
-            return _common.emit(svc.continue_operation(_common.resolve_repo(scope.repo, paths)))
-        return _common.emit(svc.abort_operation(_common.resolve_repo(scope.repo, paths)))
+            return _common.emit_result(
+                svc.continue_operation(repo),
+                json=json,
+                command="continue",
+                repo=repo,
+                branch=None,
+                paths=paths,
+            )
+        return _common.emit_result(
+            svc.abort_operation(repo),
+            json=json,
+            command="abort",
+            repo=repo,
+            branch=None,
+            paths=paths,
+        )
     target = _common.target(scope.repo, branch, paths)
-    return _common.emit(
+    return _common.emit_result(
         svc.sync(
             target,
             _common.scope_spec(scope),
@@ -94,5 +110,10 @@ def sync(
                 allow_drop_merge=allow_drop_merge,
                 offline=offline,
             ),
-        )
+        ),
+        json=json,
+        command="sync",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
     )

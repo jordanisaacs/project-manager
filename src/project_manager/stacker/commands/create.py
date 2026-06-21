@@ -21,6 +21,7 @@ def create(
     copy: str | None = None,
     replace: Annotated[bool, Parameter(negative="")] = False,
     no_checkout: Annotated[bool, Parameter(negative="")] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Create or adopt a tracked branch (optionally in a pool slot).
 
@@ -39,15 +40,29 @@ def create(
         on_spec,
         fallback_branch=branch if replace else None,
     )
+
+    def done(result: str) -> int:
+        # `create` prints a plain selector/path (no markup) in text mode; only
+        # the --json path routes through the envelope so text output is unchanged.
+        if json:
+            return _common.emit_result(
+                result,
+                json=True,
+                command="create",
+                repo=repo_name,
+                branch=branch,
+                paths=paths,
+            )
+        print(result)
+        return 0
+
     if replace:
         target = SelectorTarget(repo_name=repo_name, branch=branch)
         tracked = svc.track(target, parent)
-        print(selectors.selector_for(tracked.repo_name, tracked.branch))
-        return 0
+        return done(selectors.selector_for(tracked.repo_name, tracked.branch))
     if no_checkout:
         svc.create_tracked_branch(repo_name, branch, parent, copy_from=copy)
-        print(selectors.selector_for(repo_name, branch))
-        return 0
+        return done(selectors.selector_for(repo_name, branch))
     acquired = slot.reserve_for_new_branch(svc.ctx, repo_name)
     try:
         svc.init_new_branch(
@@ -62,8 +77,7 @@ def create(
     except Exception:
         slot.release_if_owned(svc.ctx, acquired)
         raise
-    print(acquired.path)
-    return 0
+    return done(str(acquired.path))
 
 
 def _on_spec_for_create(on: str | None, replace: bool) -> str:

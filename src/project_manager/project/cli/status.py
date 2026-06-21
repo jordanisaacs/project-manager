@@ -124,7 +124,9 @@ def status(
     paths = config.load()
     resolved = current.resolve_project(paths, project)
     selected = _parse_sections(sections)
-    ps = status_mod.status(paths, resolved, selected)
+    # `--json` consumers read the structured stacker tree (`branches`);
+    # the text path keeps the pre-rendered markup arm in `info`.
+    ps = status_mod.status(paths, resolved, selected, stacker_structured=json)
     sessions_rows = (
         asyncio.run(
             agent_ls.ls(paths, [resolved], _SESSIONS_LIMIT, frozenset(REGISTRY)),

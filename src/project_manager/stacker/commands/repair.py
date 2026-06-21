@@ -1,5 +1,9 @@
 """`pm stacker repair`."""
 
+from typing import Annotated
+
+from cyclopts import Parameter
+
 from project_manager import config
 from project_manager.cli._shared import RepoFlag
 
@@ -12,6 +16,7 @@ def repair(
     *,
     branch: str | None = None,
     flag: RepoFlag = RepoFlag(),
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Reset stored managed-base / last-synced / last-clean-head to match git.
 
@@ -19,4 +24,12 @@ def repair(
     """
     paths = config.load()
     svc = _common.service(paths)
-    return _common.emit(svc.repair(_common.target(flag.repo, branch, paths), base_ref))
+    target = _common.target(flag.repo, branch, paths)
+    return _common.emit_result(
+        svc.repair(target, base_ref),
+        json=json,
+        command="repair",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
+    )

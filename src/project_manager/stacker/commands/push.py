@@ -20,6 +20,7 @@ def push(
     draft: Annotated[bool, Parameter(negative="")] = False,
     publish: Annotated[bool, Parameter(negative="")] = False,
     create_pr: bool = True,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Force-push + create/update PRs for a scope.
 
@@ -36,4 +37,12 @@ def push(
         publish=publish,
         create_pr=create_pr,
     )
-    return _common.emit(svc.push(_common.target(scope.repo, branch, paths), options))
+    target = _common.target(scope.repo, branch, paths)
+    return _common.emit_result(
+        svc.push(target, options),
+        json=json,
+        command="push",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
+    )

@@ -120,6 +120,107 @@ nil omits the flag and lets the CLI pick a default."
              "--json")
    cb))
 
+;;;; stacker
+;;
+;; Every `pm stacker' verb supports `--json' and returns the uniform
+;; envelope `((ok . t) (command . VERB) (repo . R) (branch . B)
+;; (message . MARKUP) (operation . OP-OR-NIL))'.  Each wrapper passes
+;; `--repo' + the target branch explicitly so it is cwd-independent.
+
+(defun pm--stacker-push (repo branch all draft publish cb)
+  (pm--run-async
+   (pm--strs "stacker" "push" branch "--repo" repo
+             (and all '("--all"))
+             (and draft '("--draft"))
+             (and publish '("--publish"))
+             "--json")
+   cb :tag 'stacker-push))
+
+(defun pm--stacker-sync (repo branch all offline drop-parent drop-merge cb)
+  (pm--run-async
+   (pm--strs "stacker" "sync" branch "--repo" repo
+             (and all '("--all"))
+             (and offline '("--offline"))
+             (and drop-parent '("--allow-drop-parent-modifications"))
+             (and drop-merge '("--allow-drop-merge"))
+             "--json")
+   cb :tag 'stacker-sync))
+
+(defun pm--stacker-absorb (repo branch cb)
+  (pm--run-async
+   (pm--strs "stacker" "absorb" branch "--repo" repo "--json")
+   cb :tag 'stacker-absorb))
+
+(defun pm--stacker-remove (repo branch parent keep-branch force cb)
+  (pm--run-async
+   (pm--strs "stacker" "remove" branch "--repo" repo
+             (and parent '("--parent"))
+             (and keep-branch '("--keep-branch"))
+             (and force '("--force"))
+             "--json")
+   cb :tag 'stacker-remove))
+
+(defun pm--stacker-rename (repo branch new-name cb)
+  (pm--run-async
+   (pm--strs "stacker" "rename" new-name "--branch" branch "--repo" repo "--json")
+   cb :tag 'stacker-rename))
+
+(defun pm--stacker-reparent (repo branch new-parent offline drop-parent drop-merge cb)
+  (pm--run-async
+   (pm--strs "stacker" "reparent" new-parent "--branch" branch "--repo" repo
+             (and offline '("--offline"))
+             (and drop-parent '("--allow-drop-parent-modifications"))
+             (and drop-merge '("--allow-drop-merge"))
+             "--json")
+   cb :tag 'stacker-reparent))
+
+(defun pm--stacker-split (repo branch new-name commit stay cb)
+  (pm--run-async
+   (pm--strs "stacker" "split" new-name commit "--branch" branch "--repo" repo
+             (and stay '("--stay"))
+             "--json")
+   cb :tag 'stacker-split))
+
+(defun pm--stacker-create (repo new-branch on no-checkout cb)
+  (pm--run-async
+   (pm--strs "stacker" "create" new-branch "--repo" repo
+             (and on (list "--on" on))
+             (and no-checkout '("--no-checkout"))
+             "--json")
+   cb :tag 'stacker-create))
+
+(defun pm--stacker-repair (repo branch base-ref cb)
+  (pm--run-async
+   (pm--strs "stacker" "repair" base-ref "--branch" branch "--repo" repo "--json")
+   cb :tag 'stacker-repair))
+
+(defun pm--stacker-continue (repo cb)
+  (pm--run-async
+   (pm--strs "stacker" "continue" "--repo" repo "--json")
+   cb :tag 'stacker-continue))
+
+(defun pm--stacker-abort (repo cb)
+  (pm--run-async
+   (pm--strs "stacker" "abort" "--repo" repo "--json")
+   cb :tag 'stacker-abort))
+
+(defun pm--stacker-pr-refresh (repo branch cb)
+  (pm--run-async
+   (pm--strs "stacker" "pr" "refresh" branch "--repo" repo "--json")
+   cb :tag 'stacker-pr))
+
+(defun pm--stacker-pr-unlink (repo branch all cb)
+  (pm--run-async
+   (pm--strs "stacker" "pr" "unlink"
+             (if all '("--all") branch)
+             "--repo" repo "--json")
+   cb :tag 'stacker-pr))
+
+(defun pm--stacker-log (repo branch cb)
+  (pm--run-async
+   (pm--strs "stacker" "log" branch "--repo" repo "--json")
+   cb))
+
 (provide 'pm-commands)
 
 ;;; pm-commands.el ends here

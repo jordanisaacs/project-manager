@@ -18,6 +18,7 @@ def remove(
     force: Annotated[bool, Parameter(negative="")] = False,
     parent: Annotated[bool, Parameter(negative="")] = False,
     keep_branch: Annotated[bool, Parameter(negative="")] = False,
+    json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
     """Untrack a branch (optionally delete it); reparent children.
 
@@ -26,11 +27,17 @@ def remove(
     """
     paths = config.load()
     svc = _common.service(paths)
-    return _common.emit(
+    target = _common.target(flag.repo, branch, paths)
+    return _common.emit_result(
         svc.remove(
-            _common.target(flag.repo, branch, paths),
+            target,
             keep_branch=keep_branch,
             parent_cascade=parent,
             force=force,
-        )
+        ),
+        json=json,
+        command="remove",
+        repo=target.repo_name,
+        branch=target.branch,
+        paths=paths,
     )
