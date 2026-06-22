@@ -211,3 +211,70 @@ def test_limit_applies_to_top_n_by_mtime(
         os.utime(f, (1000 + i, 1000 + i))
     entries = asyncio.run(claude.fetch({cwd}, 2))
     assert [e.session_id for e in entries] == ["s4", "s3"]
+
+
+def test_ai_title_beats_summary_and_first_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    cwd = Path("/proj/a")
+    f = home / ".claude" / "projects" / _encoded(cwd) / "ai.jsonl"
+    _write_jsonl(
+        f,
+        [
+            {"type": "user", "message": {"role": "user", "content": "original prompt"}},
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "model": "<synthetic>",
+                    "content": [{"type": "text", "text": "Summary:\n\ncompaction"}],
+                },
+            },
+            {"type": "ai-title", "aiTitle": "Wire up the SSE sidebar"},
+        ],
+    )
+    entries = asyncio.run(claude.fetch({cwd}, 5))
+    assert entries[0].title == "Wire up the SSE sidebar"
+
+
+def test_custom_title_beats_ai_title(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = _home(tmp_path, monkeypatch)
+    cwd = Path("/proj/a")
+    f = home / ".claude" / "projects" / _encoded(cwd) / "ct.jsonl"
+    _write_jsonl(
+        f,
+        [
+            {"type": "user", "message": {"role": "user", "content": "first prompt"}},
+            {"type": "ai-title", "aiTitle": "auto generated"},
+            {"type": "custom-title", "customTitle": "My Renamed Session"},
+        ],
+    )
+    entries = asyncio.run(claude.fetch({cwd}, 5))
+    assert entries[0].title == "My Renamed Session"
+
+
+def test_skips_non_typed_user_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A user record that isn't a genuine typed prompt (promptSource != typed)
+    # is not a title source; with nothing else, the session is skipped.
+    home = _home(tmp_path, monkeypatch)
+    cwd = Path("/proj/a")
+    f = home / ".claude" / "projects" / _encoded(cwd) / "nt.jsonl"
+    _write_jsonl(
+        f,
+        [
+            {
+                "type": "user",
+                "promptSource": "tool_result",
+                "message": {"role": "user", "content": "tool output, not a prompt"},
+            },
+        ],
+    )
+    assert asyncio.run(claude.fetch({cwd}, 5)) == []

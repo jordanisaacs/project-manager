@@ -8,5 +8,7 @@ agent_app = root.command(
     App(name="agent", help="list recent coding-agent sessions"),
 )
 
+from . import install_hooks as _install_hooks  # noqa: F401,E402
 from . import ls as _ls  # noqa: F401,E402
 from . import run as _run  # noqa: F401,E402
+from . import serve as _serve  # noqa: F401,E402

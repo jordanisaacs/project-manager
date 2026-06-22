@@ -55,6 +55,33 @@ class Agents:
     commands: dict[str, str]
 
 
+DEFAULT_SERVE_PORT = 8787
+DEFAULT_FORWARD_ENV_PREFIX = "PM_META_"
+DEFAULT_FALLBACK_INTERVAL = 5.0
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
+
+@dataclass(frozen=True)
+class Serve:
+    """`[serve]` knobs for the `pm agent serve` session-tracking daemon.
+
+    `port` is the fixed loopback port the daemon binds and that hooks
+    POST to (discovered by clients from config, not a lockfile, since the
+    daemon is systemd-managed and always up). `db_path` is the ephemeral
+    WAL store, recreated on each serve start — it holds working state for
+    the lifetime of the process, not durable history. `forward_env_prefix`
+    is the env-var prefix hooks forward into a session's `meta` (so a
+    client can tag/filter, e.g. `PM_META_SOURCE=emacs`). `fallback_interval`
+    is the Tier-2 transcript-poll cadence in seconds.
+    """
+
+    port: int = DEFAULT_SERVE_PORT
+    db_path: Path = Path("~/.pm/serve.db")
+    forward_env_prefix: str = DEFAULT_FORWARD_ENV_PREFIX
+    fallback_interval: float = DEFAULT_FALLBACK_INTERVAL
+
+
 def _expand(value: str) -> Path:
     return Path(os.path.expandvars(value)).expanduser()
 
@@ -173,3 +200,40 @@ def agents() -> Agents:
             )
         commands[str(key)] = value
     return Agents(commands=commands)
+
+
+def serve() -> Serve:
+    """Load the `[serve]` section. Same lazy-read pattern as `display()`.
+
+    Schema:
+        [serve]
+        port = 8787
+        db_path = "~/.pm/serve.db"
+        forward_env_prefix = "PM_META_"
+        fallback_interval = 5.0
+    """
+    config_path = _resolve_config_path()
+    if config_path is None:
+        return Serve(db_path=_expand(str(Serve.db_path)))
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    section = data.get("serve", {})
+
+    port = section.get("port", Serve.port)
+    if not isinstance(port, int) or isinstance(port, bool) or not (_MIN_PORT <= port <= _MAX_PORT):
+        raise ValueError(
+            f"[serve].port must be a port number ({_MIN_PORT}-{_MAX_PORT}), got {port!r}"
+        )
+
+    interval = section.get("fallback_interval", Serve.fallback_interval)
+    if not isinstance(interval, (int, float)) or isinstance(interval, bool) or interval <= 0:
+        raise ValueError(f"[serve].fallback_interval must be a positive number, got {interval!r}")
+
+    db_path = section.get("db_path")
+    prefix = section.get("forward_env_prefix", Serve.forward_env_prefix)
+    return Serve(
+        port=port,
+        db_path=_expand(db_path) if db_path else _expand(str(Serve.db_path)),
+        forward_env_prefix=str(prefix),
+        fallback_interval=float(interval),
+    )
