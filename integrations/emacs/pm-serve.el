@@ -293,7 +293,10 @@ otherwise wedge the whole daemon)."
       (setq pm-serve--proc
             (make-network-process
              :name "pm-serve-sse" :host "127.0.0.1" :service pm-serve-port
-             :coding 'utf-8 :nowait t :filter #'pm-serve--proc-filter
+             ;; `:noquery t' keeps this background stream out of the "Active
+             ;; processes exist; kill them?" exit prompt, so Emacs closes
+             ;; cleanly without asking about the sidebar connection.
+             :coding 'utf-8 :nowait t :noquery t :filter #'pm-serve--proc-filter
              :sentinel #'pm-serve--sentinel))
     (error (setq pm-serve--proc nil)
            (pm-serve--schedule-reconnect))))
