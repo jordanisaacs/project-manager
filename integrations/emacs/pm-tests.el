@@ -25,7 +25,8 @@
 (require 'pm-table)
 
 ;; magit-section is required for `pm-status', `pm-list', `pm-pool',
-;; `pm-repo', `pm-agent'.  Tests that touch those modules guard on it.
+;; `pm-repo', `pm-agent', `pm-serve'.  Tests that touch those modules guard
+;; on it.
 (defconst pm-test--has-magit-section
   (require 'magit-section nil t))
 (when pm-test--has-magit-section
@@ -34,6 +35,7 @@
   (require 'pm-pool)
   (require 'pm-repo)
   (require 'pm-agent)
+  (require 'pm-serve)
   (require 'pm-stacker))
 
 (defmacro pm-test--with-fixture (var &rest body)
@@ -1051,6 +1053,68 @@ paused-op banner — and every position resolves to a non-nil section."
         (pm--stacker-pr-unlink "kms" nil t #'ignore)
         (should (equal argv
                        '("stacker" "pr" "unlink" "--all" "--repo" "kms" "--json")))))))
+
+;;;; pm-serve sidebar
+
+(when pm-test--has-magit-section
+  (ert-deftest pm-test--serve-filter-query-scopes-to-instance ()
+    "The SSE filter pins SOURCE and the launching Emacs instance (EMACS)."
+    (let* ((pm-agent-serve-source "emacs")
+           (q (pm-serve--filter-query)))
+      (should (string-match-p "meta\\.SOURCE=emacs" q))
+      (should (string-match-p (format "meta\\.EMACS=%d" (emacs-pid)) q))))
+
+  (ert-deftest pm-test--serve-session-key ()
+    "Sessions are keyed by agent + NUL + vendor id; missing fields are empty."
+    (should (equal (pm-serve--session-key '((agent . "claude") (vendor_session_id . "s1")))
+                   (concat "claude" "\0" "s1")))
+    (should (equal (pm-serve--session-key '((agent . "codex") (vendor_session_id . "x")))
+                   (concat "codex" "\0" "x")))
+    (should (equal (pm-serve--session-key '()) (concat "" "\0" ""))))
+
+  (ert-deftest pm-test--serve-handle-snapshot-populates ()
+    "A snapshot clears and repopulates the session table."
+    (cl-letf (((symbol-function 'pm-serve--render) #'ignore))
+      (let ((pm-serve--sessions (make-hash-table :test 'equal)))
+        (puthash "stale" '((agent . "x")) pm-serve--sessions)
+        (pm-serve--handle
+         (concat "{\"type\":\"snapshot\",\"sessions\":["
+                 "{\"agent\":\"claude\",\"vendor_session_id\":\"s1\"},"
+                 "{\"agent\":\"codex\",\"vendor_session_id\":\"s2\"}]}"))
+        (should (= 2 (hash-table-count pm-serve--sessions)))
+        (should (gethash (concat "claude" "\0" "s1") pm-serve--sessions))
+        (should (gethash (concat "codex" "\0" "s2") pm-serve--sessions))
+        (should-not (gethash "stale" pm-serve--sessions)))))
+
+  (ert-deftest pm-test--serve-handle-update-upserts ()
+    "An update inserts then replaces the same key in place (no duplicates)."
+    (cl-letf (((symbol-function 'pm-serve--render) #'ignore))
+      (let ((pm-serve--sessions (make-hash-table :test 'equal))
+            (key (concat "claude" "\0" "s1")))
+        (pm-serve--handle
+         "{\"type\":\"update\",\"session\":{\"agent\":\"claude\",\"vendor_session_id\":\"s1\",\"status\":\"working\"}}")
+        (should (equal (alist-get 'status (gethash key pm-serve--sessions)) "working"))
+        (pm-serve--handle
+         "{\"type\":\"update\",\"session\":{\"agent\":\"claude\",\"vendor_session_id\":\"s1\",\"status\":\"idle\"}}")
+        (should (= 1 (hash-table-count pm-serve--sessions)))
+        (should (equal (alist-get 'status (gethash key pm-serve--sessions)) "idle")))))
+
+  (ert-deftest pm-test--serve-handle-remove-deletes ()
+    "A remove event drops the session keyed by its top-level agent/vendor id."
+    (cl-letf (((symbol-function 'pm-serve--render) #'ignore))
+      (let ((pm-serve--sessions (make-hash-table :test 'equal)))
+        (pm-serve--handle
+         "{\"type\":\"update\",\"session\":{\"agent\":\"claude\",\"vendor_session_id\":\"s1\"}}")
+        (should (= 1 (hash-table-count pm-serve--sessions)))
+        (pm-serve--handle "{\"type\":\"remove\",\"agent\":\"claude\",\"vendor_session_id\":\"s1\"}")
+        (should (= 0 (hash-table-count pm-serve--sessions))))))
+
+  (ert-deftest pm-test--serve-fit-pads-and-truncates ()
+    "`pm-serve--fit' returns exactly WIDTH chars: pad short, ellipsize long."
+    (let ((short (pm-serve--fit "hi" 6)))
+      (should (= (length short) 6))
+      (should (string-prefix-p "hi" short)))
+    (should (= (length (pm-serve--fit "abcdefghij" 5)) 5))))
 
 (provide 'pm-tests)
 
