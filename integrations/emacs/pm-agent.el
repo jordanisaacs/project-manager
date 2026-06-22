@@ -27,7 +27,7 @@
 ;; Independently of the dispatchers, `pm-agent-setup-ghostel' (run
 ;; automatically once `ghostel' loads) installs a `ghostel-pre-spawn-hook'
 ;; that injects the PM_META_* launch seeds into *every* ghostel session, so
-;; an agent started by hand in any ghostel buffer is tracked by `pm-serve'
+;; an agent started by hand in any ghostel buffer is tracked by `pm-sidebar'
 ;; just the same.
 
 ;;; Code:
@@ -81,7 +81,7 @@ emulator."
 ;;;; Session seeds injected into launched agents
 ;;
 ;; `pm agent serve' forwards every `PM_META_*' env var into the session's
-;; metadata.  We seed two on launch so the `pm-serve' sidebar can both filter
+;; metadata.  We seed two on launch so the `pm-sidebar' sidebar can both filter
 ;; to this Emacs's agents and act on the exact buffer:
 ;;   PM_META_SOURCE — a tag (default "emacs") to filter on
 ;;   PM_META_BUF    — a stable per-buffer id (not the mutable buffer name)
@@ -89,14 +89,14 @@ emulator."
 ;;;###autoload
 (defcustom pm-agent-serve-source "emacs"
   "Value injected as `PM_META_SOURCE' into agents launched from Emacs.
-Lets the `pm-serve' sidebar filter to sessions this Emacs started
+Lets the `pm-sidebar' sidebar filter to sessions this Emacs started
 \(meta.SOURCE = this value)."
   :type 'string
   :group 'pm)
 
 (defvar-local pm-agent-buffer-id nil
   "Stable id of this agent buffer, also injected as `PM_META_BUF'.
-Lets the `pm-serve' sidebar map a session row back to its buffer without
+Lets the `pm-sidebar' sidebar map a session row back to its buffer without
 relying on the mutable, possibly-duplicated buffer name.  Set once at
 launch and never changed, so it survives the terminal renaming itself.")
 
@@ -105,7 +105,7 @@ launch and never changed, so it survives the terminal renaming itself.")
 
 (defun pm-agent--emacs-id ()
   "Identifier for this Emacs instance, injected as `PM_META_EMACS'.
-The `pm-serve' sidebar filters on it so it shows only the sessions *this*
+The `pm-sidebar' sidebar filters on it so it shows only the sessions *this*
 Emacs launched — not those of other Emacs instances that share the daemon
 \(they all tag `PM_META_SOURCE' the same, so SOURCE alone can't tell them
 apart).  The process id is unique per running Emacs, which is exactly the
@@ -142,7 +142,7 @@ Written for `ghostel-pre-spawn-hook', which runs in the buffer that will
 host the new process with `process-environment' dynamically bound to the
 child's env.  Unlike the per-dispatch seeding, this tags *every* ghostel
 session — including a `pm agent' a user starts by hand in any ghostel
-buffer — so the `pm-serve' sidebar still sees it and can map it back to
+buffer — so the `pm-sidebar' sidebar still sees it and can map it back to
 its buffer:
   PM_META_SOURCE — `pm-agent-serve-source', the tag the sidebar filters on
   PM_META_EMACS  — this Emacs instance, so the sidebar shows only its own
@@ -157,7 +157,7 @@ the buffer keeps a single identity across restarts."
 
 ;;;###autoload
 (defun pm-agent-setup-ghostel ()
-  "Tag every ghostel session with PM_META_* for the `pm-serve' sidebar.
+  "Tag every ghostel session with PM_META_* for the `pm-sidebar' sidebar.
 Adds `pm-agent--seed-ghostel-environment' to `ghostel-pre-spawn-hook'.
 Idempotent, and run automatically once `ghostel' loads (see end of file);
 exposed so you can wire or unwire it explicitly."
@@ -517,7 +517,7 @@ project to scope to."
       (pm-agent-list name nil))))
 
 ;; Tag every ghostel session (not just `pm-agent-launch' dispatches) so
-;; hand-started agents are tracked by the `pm-serve' sidebar too.
+;; hand-started agents are tracked by the `pm-sidebar' sidebar too.
 (with-eval-after-load 'ghostel (pm-agent-setup-ghostel))
 
 (provide 'pm-agent)

@@ -25,7 +25,7 @@
 (require 'pm-table)
 
 ;; magit-section is required for `pm-status', `pm-list', `pm-pool',
-;; `pm-repo', `pm-agent', `pm-serve'.  Tests that touch those modules guard
+;; `pm-repo', `pm-agent', `pm-sidebar'.  Tests that touch those modules guard
 ;; on it.
 (defconst pm-test--has-magit-section
   (require 'magit-section nil t))
@@ -35,7 +35,7 @@
   (require 'pm-pool)
   (require 'pm-repo)
   (require 'pm-agent)
-  (require 'pm-serve)
+  (require 'pm-sidebar)
   (require 'pm-stacker))
 
 (defmacro pm-test--with-fixture (var &rest body)
@@ -1054,67 +1054,91 @@ paused-op banner — and every position resolves to a non-nil section."
         (should (equal argv
                        '("stacker" "pr" "unlink" "--all" "--repo" "kms" "--json")))))))
 
-;;;; pm-serve sidebar
+;;;; pm-sidebar sidebar
 
 (when pm-test--has-magit-section
-  (ert-deftest pm-test--serve-filter-query-scopes-to-instance ()
+  (ert-deftest pm-test--sidebar-filter-query-scopes-to-instance ()
     "The SSE filter pins SOURCE and the launching Emacs instance (EMACS)."
     (let* ((pm-agent-serve-source "emacs")
-           (q (pm-serve--filter-query)))
+           (q (pm-sidebar--filter-query)))
       (should (string-match-p "meta\\.SOURCE=emacs" q))
       (should (string-match-p (format "meta\\.EMACS=%d" (emacs-pid)) q))))
 
-  (ert-deftest pm-test--serve-session-key ()
+  (ert-deftest pm-test--sidebar-session-key ()
     "Sessions are keyed by agent + NUL + vendor id; missing fields are empty."
-    (should (equal (pm-serve--session-key '((agent . "claude") (vendor_session_id . "s1")))
+    (should (equal (pm-sidebar--session-key '((agent . "claude") (vendor_session_id . "s1")))
                    (concat "claude" "\0" "s1")))
-    (should (equal (pm-serve--session-key '((agent . "codex") (vendor_session_id . "x")))
+    (should (equal (pm-sidebar--session-key '((agent . "codex") (vendor_session_id . "x")))
                    (concat "codex" "\0" "x")))
-    (should (equal (pm-serve--session-key '()) (concat "" "\0" ""))))
+    (should (equal (pm-sidebar--session-key '()) (concat "" "\0" ""))))
 
-  (ert-deftest pm-test--serve-handle-snapshot-populates ()
+  (ert-deftest pm-test--sidebar-handle-snapshot-populates ()
     "A snapshot clears and repopulates the session table."
-    (cl-letf (((symbol-function 'pm-serve--render) #'ignore))
-      (let ((pm-serve--sessions (make-hash-table :test 'equal)))
-        (puthash "stale" '((agent . "x")) pm-serve--sessions)
-        (pm-serve--handle
+    (cl-letf (((symbol-function 'pm-sidebar--render) #'ignore))
+      (let ((pm-sidebar--sessions (make-hash-table :test 'equal)))
+        (puthash "stale" '((agent . "x")) pm-sidebar--sessions)
+        (pm-sidebar--handle
          (concat "{\"type\":\"snapshot\",\"sessions\":["
                  "{\"agent\":\"claude\",\"vendor_session_id\":\"s1\"},"
                  "{\"agent\":\"codex\",\"vendor_session_id\":\"s2\"}]}"))
-        (should (= 2 (hash-table-count pm-serve--sessions)))
-        (should (gethash (concat "claude" "\0" "s1") pm-serve--sessions))
-        (should (gethash (concat "codex" "\0" "s2") pm-serve--sessions))
-        (should-not (gethash "stale" pm-serve--sessions)))))
+        (should (= 2 (hash-table-count pm-sidebar--sessions)))
+        (should (gethash (concat "claude" "\0" "s1") pm-sidebar--sessions))
+        (should (gethash (concat "codex" "\0" "s2") pm-sidebar--sessions))
+        (should-not (gethash "stale" pm-sidebar--sessions)))))
 
-  (ert-deftest pm-test--serve-handle-update-upserts ()
+  (ert-deftest pm-test--sidebar-handle-update-upserts ()
     "An update inserts then replaces the same key in place (no duplicates)."
-    (cl-letf (((symbol-function 'pm-serve--render) #'ignore))
-      (let ((pm-serve--sessions (make-hash-table :test 'equal))
+    (cl-letf (((symbol-function 'pm-sidebar--render) #'ignore))
+      (let ((pm-sidebar--sessions (make-hash-table :test 'equal))
             (key (concat "claude" "\0" "s1")))
-        (pm-serve--handle
+        (pm-sidebar--handle
          "{\"type\":\"update\",\"session\":{\"agent\":\"claude\",\"vendor_session_id\":\"s1\",\"status\":\"working\"}}")
-        (should (equal (alist-get 'status (gethash key pm-serve--sessions)) "working"))
-        (pm-serve--handle
+        (should (equal (alist-get 'status (gethash key pm-sidebar--sessions)) "working"))
+        (pm-sidebar--handle
          "{\"type\":\"update\",\"session\":{\"agent\":\"claude\",\"vendor_session_id\":\"s1\",\"status\":\"idle\"}}")
-        (should (= 1 (hash-table-count pm-serve--sessions)))
-        (should (equal (alist-get 'status (gethash key pm-serve--sessions)) "idle")))))
+        (should (= 1 (hash-table-count pm-sidebar--sessions)))
+        (should (equal (alist-get 'status (gethash key pm-sidebar--sessions)) "idle")))))
 
-  (ert-deftest pm-test--serve-handle-remove-deletes ()
+  (ert-deftest pm-test--sidebar-handle-remove-deletes ()
     "A remove event drops the session keyed by its top-level agent/vendor id."
-    (cl-letf (((symbol-function 'pm-serve--render) #'ignore))
-      (let ((pm-serve--sessions (make-hash-table :test 'equal)))
-        (pm-serve--handle
+    (cl-letf (((symbol-function 'pm-sidebar--render) #'ignore))
+      (let ((pm-sidebar--sessions (make-hash-table :test 'equal)))
+        (pm-sidebar--handle
          "{\"type\":\"update\",\"session\":{\"agent\":\"claude\",\"vendor_session_id\":\"s1\"}}")
-        (should (= 1 (hash-table-count pm-serve--sessions)))
-        (pm-serve--handle "{\"type\":\"remove\",\"agent\":\"claude\",\"vendor_session_id\":\"s1\"}")
-        (should (= 0 (hash-table-count pm-serve--sessions))))))
+        (should (= 1 (hash-table-count pm-sidebar--sessions)))
+        (pm-sidebar--handle "{\"type\":\"remove\",\"agent\":\"claude\",\"vendor_session_id\":\"s1\"}")
+        (should (= 0 (hash-table-count pm-sidebar--sessions))))))
 
-  (ert-deftest pm-test--serve-fit-pads-and-truncates ()
-    "`pm-serve--fit' returns exactly WIDTH chars: pad short, ellipsize long."
-    (let ((short (pm-serve--fit "hi" 6)))
+  (ert-deftest pm-test--sidebar-fit-pads-and-truncates ()
+    "`pm-sidebar--fit' returns exactly WIDTH chars: pad short, ellipsize long."
+    (let ((short (pm-sidebar--fit "hi" 6)))
       (should (= (length short) 6))
       (should (string-prefix-p "hi" short)))
-    (should (= (length (pm-serve--fit "abcdefghij" 5)) 5))))
+    (should (= (length (pm-sidebar--fit "abcdefghij" 5)) 5)))
+
+  (ert-deftest pm-test--sidebar-render-preserves-point ()
+    "Re-rendering the sidebar must not yank point back to the top."
+    (let ((pm-sidebar--sessions (make-hash-table :test 'equal)))
+      (puthash "claude\0s1"
+               '((agent . "claude") (vendor_session_id . "s1") (project . "p")
+                 (title . "Alpha") (status . "idle"))
+               pm-sidebar--sessions)
+      (puthash "codex\0s2"
+               '((agent . "codex") (vendor_session_id . "s2") (project . "p")
+                 (title . "Beta") (status . "idle"))
+               pm-sidebar--sessions)
+      (unwind-protect
+          (progn
+            (pm-sidebar--render)
+            (with-current-buffer pm-sidebar-buffer-name
+              (goto-char (point-min))
+              (should (search-forward "Beta" nil t))
+              (let ((saved (point)))
+                (pm-sidebar--render)
+                (should (= (point) saved)))))
+        (when (get-buffer pm-sidebar-buffer-name)
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer pm-sidebar-buffer-name)))))))
 
 (provide 'pm-tests)
 
