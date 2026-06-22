@@ -23,7 +23,10 @@
 
 (require 'pm-faces)
 (require 'pm-table)   ; pm-propertize-face + section reset/cover/show helpers
-(require 'pm-agent)   ; pm-agent-serve-source, pm-agent-buffer-for-id
+(require 'pm-agent)   ; pm-agent-serve-source, pm-agent-buffer-for-id, pm-agent--cwd
+
+;; Autoloaded from pm-transient; called by RET on a project heading.
+(declare-function pm-project-dispatch "pm-transient" (&optional arg))
 
 (defgroup pm-sidebar nil
   "Live agent-session sidebar fed by `pm agent serve'."
@@ -40,6 +43,10 @@
   :group 'pm-sidebar)
 
 (defconst pm-sidebar-buffer-name "*pm-agents*")
+
+;; Heading shown for sessions with no resolved pm project. Kept as a constant
+;; so the render and the RET handler agree on what is *not* a real project.
+(defconst pm-sidebar--no-project "(no project)")
 
 ;; --- faces ------------------------------------------------------------------
 (defface pm-sidebar-working    '((t :inherit success :weight bold)) "Agent is working.")
@@ -173,7 +180,7 @@
               (insert "\n" (pm-propertize-face "no active sessions" 'pm-sidebar-idle) "\n")
             (let ((groups (make-hash-table :test 'equal)) (order '()))
               (maphash (lambda (_k s)
-                         (let ((p (or (alist-get 'project s) "(no project)")))
+                         (let ((p (or (alist-get 'project s) pm-sidebar--no-project)))
                            (unless (gethash p groups) (push p order))
                            (push s (gethash p groups))))
                        pm-sidebar--sessions)
@@ -197,16 +204,28 @@
 
 ;; --- actions ----------------------------------------------------------------
 (defun pm-sidebar-visit ()
-  "Jump to the terminal buffer of the agent session at point.
-Uses the session's `PM_META_BUF' (the launching buffer's builtin id)."
+  "Act on the thing at point.
+On a session row, jump to its terminal buffer (via the session's
+`PM_META_BUF').  On a project heading, open `pm-project-dispatch' scoped to
+that project."
   (interactive)
   (let* ((sec (magit-current-section))
-         (s (and sec (eq (oref sec type) 'pm-sidebar-session) (oref sec value)))
-         (bufid (and s (alist-get 'BUF (alist-get 'meta s))))
-         (buf (pm-agent-buffer-for-id bufid)))
-    (cond (buf (pop-to-buffer buf))
-          (s (user-error "No live buffer for this session (not launched here, or closed)"))
-          (t (user-error "Point is not on a session")))))
+         (type (and sec (oref sec type)))
+         (val (and sec (oref sec value))))
+    (cond
+     ((eq type 'pm-sidebar-session)
+      (let ((buf (pm-agent-buffer-for-id (alist-get 'BUF (alist-get 'meta val)))))
+        (if buf (pop-to-buffer buf)
+          (user-error "No live buffer for this session (not launched here, or closed)"))))
+     ((eq type 'pm-sidebar-project)
+      (when (equal val pm-sidebar--no-project)
+        (user-error "Not a pm project"))
+      ;; Scope the dispatch to this project's container so
+      ;; `pm--resolve-dispatch-path' (which keys off `default-directory') picks
+      ;; it without prompting.
+      (let ((default-directory (pm-agent--cwd val)))
+        (pm-project-dispatch)))
+     (t (user-error "Point is not on a session or project")))))
 
 ;; --- SSE plumbing -----------------------------------------------------------
 (defun pm-sidebar--filter-query ()

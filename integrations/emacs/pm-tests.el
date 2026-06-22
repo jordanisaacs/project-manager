@@ -1138,6 +1138,50 @@ paused-op banner — and every position resolves to a non-nil section."
                 (should (= (point) saved)))))
         (when (get-buffer pm-sidebar-buffer-name)
           (let ((kill-buffer-query-functions nil))
+            (kill-buffer pm-sidebar-buffer-name))))))
+
+  (ert-deftest pm-test--sidebar-visit-project-opens-dispatch ()
+    "RET on a project heading opens `pm-project-dispatch' scoped to it."
+    (let ((pm-sidebar--sessions (make-hash-table :test 'equal))
+          (pm-projects-dir "/tmp/pm-test-projects/")
+          (captured nil))
+      (puthash "claude\0s1"
+               '((agent . "claude") (vendor_session_id . "s1") (project . "alpha")
+                 (title . "A") (status . "idle"))
+               pm-sidebar--sessions)
+      (unwind-protect
+          (cl-letf (((symbol-function 'pm-project-dispatch)
+                     (lambda (&rest _) (setq captured default-directory))))
+            (pm-sidebar--render)
+            (with-current-buffer pm-sidebar-buffer-name
+              (goto-char (point-min))
+              (should (search-forward "alpha" nil t))
+              (beginning-of-line)
+              (pm-sidebar-visit)
+              (should (string= captured
+                               (file-name-as-directory
+                                (expand-file-name "alpha" "/tmp/pm-test-projects/"))))))
+        (when (get-buffer pm-sidebar-buffer-name)
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer pm-sidebar-buffer-name))))))
+
+  (ert-deftest pm-test--sidebar-visit-no-project-errors ()
+    "RET on the placeholder \"(no project)\" heading errors, never dispatches."
+    (let ((pm-sidebar--sessions (make-hash-table :test 'equal)))
+      (puthash "claude\0s1"
+               '((agent . "claude") (vendor_session_id . "s1")
+                 (title . "A") (status . "idle"))
+               pm-sidebar--sessions)
+      (unwind-protect
+          (progn
+            (pm-sidebar--render)
+            (with-current-buffer pm-sidebar-buffer-name
+              (goto-char (point-min))
+              (should (search-forward "(no project)" nil t))
+              (beginning-of-line)
+              (should-error (pm-sidebar-visit) :type 'user-error)))
+        (when (get-buffer pm-sidebar-buffer-name)
+          (let ((kill-buffer-query-functions nil))
             (kill-buffer pm-sidebar-buffer-name)))))))
 
 (provide 'pm-tests)
