@@ -103,6 +103,10 @@ def test_tool_use_tail_stays_working() -> None:
 
 
 def test_trailing_user_prompt_is_working() -> None:
+    # A trailing user prompt is assumed to be a turn in flight (tributary's
+    # `trailing_user_prompt_is_working`). Note: a cancelled turn fires no Claude
+    # hook, so it stays "working" here until the hook row goes stale — see the
+    # note in fallback.py (claude-code#9516).
     text = "\n".join(
         [
             _line(type="assistant", message={"stop_reason": "end_turn"}),

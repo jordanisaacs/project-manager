@@ -71,8 +71,16 @@ def classify_last_record(text: str) -> str | None:
     stop_reason = _stop_reason(last)
     if stop_reason is not None:
         return status_mod.IDLE if stop_reason in _IDLE_STOP_REASONS else status_mod.WORKING
-    # No stop_reason: a trailing user prompt or a mid-stream assistant
-    # record both mean the agent has work in flight.
+    # No stop_reason → working (tributary's `jsonl_status.rs` behaviour). A
+    # trailing user prompt is treated the same: the turn is assumed in flight.
+    #
+    # TODO: this leaves a cancelled/interrupted turn stuck on "working" until
+    # the hook row goes stale, because Claude fires *no* hook on user interrupt
+    # — there is no Stop/Notification event to key off. (Confirmed against
+    # tributary, openui, db-agents: only db-agents catches it, via PTY
+    # scrollback "Interrupted" parsing, which needs PTY ownership we don't have
+    # here.) Revisit if Claude Code adds an interrupt hook:
+    # https://github.com/anthropics/claude-code/issues/9516
     return status_mod.WORKING
 
 
