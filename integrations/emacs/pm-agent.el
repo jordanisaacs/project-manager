@@ -103,20 +103,31 @@ launch and never changed, so it survives the terminal renaming itself.")
 (defvar pm-agent--buffer-seq 0
   "Monotonic counter behind `pm-agent--new-buffer-id'.")
 
+(defun pm-agent--emacs-id ()
+  "Identifier for this Emacs instance, injected as `PM_META_EMACS'.
+The `pm-serve' sidebar filters on it so it shows only the sessions *this*
+Emacs launched — not those of other Emacs instances that share the daemon
+\(they all tag `PM_META_SOURCE' the same, so SOURCE alone can't tell them
+apart).  The process id is unique per running Emacs, which is exactly the
+granularity we want."
+  (number-to-string (emacs-pid)))
+
 (defun pm-agent--new-buffer-id ()
   "Return a fresh agent-buffer id, unique within this Emacs process.
 Generated *before* the buffer exists so it can be injected via
 `process-environment' (no shell `export'); the same value is stamped
 buffer-local as `pm-agent-buffer-id' for the reverse lookup."
-  (format "%d-%d" (emacs-pid) (cl-incf pm-agent--buffer-seq)))
+  (format "%s-%d" (pm-agent--emacs-id) (cl-incf pm-agent--buffer-seq)))
 
 (defun pm-agent--seed-environment (buffer-id)
   "Return `process-environment' with the PM_META_* launch seeds prepended.
 The agent inherits these from its environment (no visible `export'), and
 its hooks report them to `pm agent serve' as session metadata:
   PM_META_SOURCE — `pm-agent-serve-source', a tag the sidebar filters on
+  PM_META_EMACS  — this Emacs instance, so the sidebar shows only its own
   PM_META_BUF    — BUFFER-ID, for mapping a session back to its buffer"
   (append (list (format "PM_META_SOURCE=%s" pm-agent-serve-source)
+                (format "PM_META_EMACS=%s" (pm-agent--emacs-id))
                 (format "PM_META_BUF=%s" buffer-id))
           process-environment))
 
@@ -134,12 +145,14 @@ session — including a `pm agent' a user starts by hand in any ghostel
 buffer — so the `pm-serve' sidebar still sees it and can map it back to
 its buffer:
   PM_META_SOURCE — `pm-agent-serve-source', the tag the sidebar filters on
+  PM_META_EMACS  — this Emacs instance, so the sidebar shows only its own
   PM_META_BUF    — this buffer's stable `pm-agent-buffer-id'
 The id is minted once and reused if the buffer ever respawns its shell, so
 the buffer keeps a single identity across restarts."
   (let ((buffer-id (or pm-agent-buffer-id (pm-agent--new-buffer-id))))
     (setq-local pm-agent-buffer-id buffer-id)
     (setenv "PM_META_SOURCE" pm-agent-serve-source)
+    (setenv "PM_META_EMACS" (pm-agent--emacs-id))
     (setenv "PM_META_BUF" buffer-id)))
 
 ;;;###autoload

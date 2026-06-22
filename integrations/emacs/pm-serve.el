@@ -201,7 +201,12 @@ Uses the session's `PM_META_BUF' (the launching buffer's builtin id)."
 
 ;; --- SSE plumbing -----------------------------------------------------------
 (defun pm-serve--filter-query ()
-  (format "meta.SOURCE=%s" pm-agent-serve-source))
+  ;; Scope to sessions THIS Emacs launched: SOURCE marks "from Emacs",
+  ;; EMACS pins the specific instance (the daemon is shared, so filtering on
+  ;; SOURCE alone would surface other Emacs instances' agents). The daemon
+  ;; ANDs the params.
+  (format "meta.SOURCE=%s&meta.EMACS=%s"
+          pm-agent-serve-source (pm-agent--emacs-id)))
 
 (defun pm-serve--handle (json)
   (when (> (length json) 0)
