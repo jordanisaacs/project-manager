@@ -141,6 +141,8 @@ def poll_once(server: SessionServer) -> int:
     changed = 0
     entry_titles: dict[tuple[str, str], str] = {}
     for project, entry in pairs:
+        if server.is_cleared(entry.agent, entry.session_id):
+            continue
         reading = FallbackReading(
             agent=entry.agent,
             session_id=entry.session_id,

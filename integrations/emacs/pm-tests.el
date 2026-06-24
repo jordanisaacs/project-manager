@@ -1109,6 +1109,19 @@ paused-op banner — and every position resolves to a non-nil section."
         (pm-sidebar--handle "{\"type\":\"remove\",\"agent\":\"claude\",\"vendor_session_id\":\"s1\"}")
         (should (= 0 (hash-table-count pm-sidebar--sessions))))))
 
+  (ert-deftest pm-test--sidebar-handle-codex-clear-replaces-session ()
+    "The remove/update sequence emitted for Codex `/clear' leaves only the new row."
+    (cl-letf (((symbol-function 'pm-sidebar--render) #'ignore))
+      (let ((pm-sidebar--sessions (make-hash-table :test 'equal)))
+        (pm-sidebar--handle
+         "{\"type\":\"update\",\"session\":{\"agent\":\"codex\",\"vendor_session_id\":\"old\",\"status\":\"idle\"}}")
+        (pm-sidebar--handle "{\"type\":\"remove\",\"agent\":\"codex\",\"vendor_session_id\":\"old\"}")
+        (pm-sidebar--handle
+         "{\"type\":\"update\",\"session\":{\"agent\":\"codex\",\"vendor_session_id\":\"new\",\"status\":\"idle\"}}")
+        (should (= 1 (hash-table-count pm-sidebar--sessions)))
+        (should-not (gethash (concat "codex" "\0" "old") pm-sidebar--sessions))
+        (should (gethash (concat "codex" "\0" "new") pm-sidebar--sessions)))))
+
   (ert-deftest pm-test--sidebar-fit-pads-and-truncates ()
     "`pm-sidebar--fit' returns exactly WIDTH chars: pad short, ellipsize long."
     (let ((short (pm-sidebar--fit "hi" 6)))

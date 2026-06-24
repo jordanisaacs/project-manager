@@ -185,6 +185,10 @@ def main():
         # Cursor omits `cwd` on some events but always sends `workspace_roots`.
         "cwd": data.get("cwd") or (data.get("workspace_roots") or [""])[0],
         "hook_event_name": data.get("hook_event_name", ""),
+        # Codex SessionStart includes `source` ("startup", "resume", "clear",
+        # "compact"). `source=clear` is the privacy-preserving signal that a
+        # `/clear` replaced the old thread; do not forward the raw prompt.
+        "source": data.get("source", ""),
         "tool_name": data.get("tool_name", ""),
         "model": data.get("model", ""),
         "transcript_path": data.get("transcript_path", ""),

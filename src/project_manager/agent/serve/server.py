@@ -5,11 +5,14 @@ its own thread, SSE clients hold their handler thread fed by a per-client
 queue, and `Broadcaster.publish` fans a changed session out to every
 client whose subscription filter matches. Endpoints:
 
-    POST /api/status   — ingest one hook event, upsert, broadcast
+    POST /api/status   — ingest one hook event/action, upsert, broadcast
     GET  /api/stream   — SSE: filtered snapshot then per-session deltas
     GET  /api/health   — liveness: bound port, uptime, session count
 
-Pure observer: there are no action endpoints.
+The server does not drive agent processes, but some lifecycle events imply
+local state cleanup. Codex `/clear`, for example, starts a fresh thread in the
+same terminal process and reports `SessionStart` with `source=clear`; the
+daemon removes the replaced session so observers do not keep showing it.
 """
 
 import contextlib
@@ -108,14 +111,23 @@ class SessionServer:
         # so the two don't fight; agents whose transcript we can't parse (e.g.
         # Cursor) stay out of this set and are titled from their source reader.
         self.transcript_titled: set[tuple[str, str]] = set()
+        # Session ids replaced by a Codex `/clear` in this daemon lifetime.
+        # The fallback poller skips these so a stale Codex state-db row cannot
+        # resurrect the cleared thread immediately after we broadcast removal.
+        self.cleared_sessions: set[tuple[str, str]] = set()
 
     def ingest(self, event: dict[str, Any]) -> Session | None:
         """Apply a hook event and broadcast it if it changed a session."""
         if status.is_terminal_event(event.get("hook_event_name")):
             self._remove_for_event(event)
             return None
+        if self._is_stale_cleared_event(event):
+            return None
+        if _is_clear_start_event(event):
+            self._remove_clear_predecessors(event)
         session = self.store.ingest(event, self.paths)
         if session is not None:
+            self.cleared_sessions.discard((session["agent"], session["vendor_session_id"]))
             self.broadcaster.publish(session)
         return session
 
@@ -123,10 +135,45 @@ class SessionServer:
         """Drop the session named by a terminal (SessionEnd) event."""
         agent = str(event.get("agent", ""))
         session_id = str(event.get("session_id", ""))
+        self._remove_session(agent, session_id)
+
+    def _remove_clear_predecessors(self, event: dict[str, Any]) -> None:
+        """Drop sessions replaced by a Codex `/clear` SessionStart event."""
+        agent = str(event.get("agent", "")).strip()
+        session_id = str(event.get("session_id", "")).strip()
+        if not agent or store_mod.is_placeholder_id(session_id):
+            return
+        for prev in self.store.snapshot({"agent": agent}):
+            if prev["vendor_session_id"] == session_id:
+                continue
+            if _same_clear_scope(prev, event):
+                self._remove_session(agent, prev["vendor_session_id"], mark_cleared=True)
+
+    def _remove_session(self, agent: str, session_id: str, *, mark_cleared: bool = False) -> None:
+        """Delete one session and publish a remove event if it existed."""
         prev = self.store.get(agent, session_id)
-        if prev is not None and self.store.delete(agent, session_id):
-            self.transcript_mtimes.pop((agent, session_id), None)
-            self.broadcaster.publish_remove(prev)
+        if prev is None or not self.store.delete(agent, session_id):
+            return
+        key = (agent, session_id)
+        self.transcript_mtimes.pop(key, None)
+        self.transcript_titled.discard(key)
+        if mark_cleared:
+            self.cleared_sessions.add(key)
+        self.broadcaster.publish_remove(prev)
+
+    def is_cleared(self, agent: str, session_id: str) -> bool:
+        """True when a session was replaced by `/clear` in this daemon lifetime."""
+        return (agent, session_id) in self.cleared_sessions
+
+    def _is_stale_cleared_event(self, event: dict[str, Any]) -> bool:
+        """True when EVENT belongs to an id already replaced by `/clear`."""
+        agent = str(event.get("agent", "")).strip()
+        session_id = str(event.get("session_id", "")).strip()
+        if not self.is_cleared(agent, session_id):
+            return False
+        # A real SessionStart means the user explicitly resumed/recreated that
+        # old id; other late hooks are stale noise from the pre-clear session.
+        return str(event.get("hook_event_name") or "") != "SessionStart"
 
     def health(self) -> dict[str, Any]:
         return {
@@ -172,6 +219,36 @@ def _parse_filters(query: str) -> dict[str, str]:
 
 def _sse(payload: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode()
+
+
+def _is_clear_start_event(event: dict[str, Any]) -> bool:
+    """True for Codex's `/clear` lifecycle marker."""
+    return (
+        str(event.get("hook_event_name") or "") == "SessionStart"
+        and str(event.get("source") or "").strip().lower() == "clear"
+    )
+
+
+def _same_clear_scope(session: Session, event: dict[str, Any]) -> bool:
+    """True when SESSION is the old row for EVENT's fresh clear-start row."""
+    raw_meta = event.get("meta")
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    session_meta = session.get("meta") if isinstance(session.get("meta"), dict) else {}
+
+    # Emacs-launched agents carry a stable terminal-buffer id. Prefer it over
+    # pid so a restarted Codex process in the same buffer is still scoped
+    # correctly, while other Emacs instances remain isolated by EMACS.
+    buf = meta.get("BUF")
+    if buf and str(session_meta.get("BUF")) == str(buf):
+        emacs = meta.get("EMACS")
+        return not emacs or str(session_meta.get("EMACS")) == str(emacs)
+
+    # Non-Emacs launches still get the agent pid from our reporter. Codex
+    # `/clear` starts a new thread inside the same process, so the old live row
+    # shares that pid. Fallback-only rows have no pid and are intentionally not
+    # guessed from cwd/project because multiple Codex sessions may share them.
+    pid = event.get("pid")
+    return isinstance(pid, int) and session.get("pid") == pid
 
 
 class _Handler(BaseHTTPRequestHandler):

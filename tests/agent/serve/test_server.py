@@ -140,6 +140,45 @@ def test_session_end_removes_session(server: SessionServer) -> None:
     assert _snapshot(server)["sessions"] == []
 
 
+def test_codex_clear_start_replaces_previous_session(server: SessionServer) -> None:
+    meta = {"SOURCE": "emacs", "EMACS": "42", "BUF": "42-7"}
+    _post(
+        server,
+        {
+            "agent": "codex",
+            "session_id": "old",
+            "status": "running",
+            "hook_event_name": "UserPromptSubmit",
+            "meta": meta,
+            "pid": 1234,
+        },
+    )
+    accepted = _post(
+        server,
+        {
+            "agent": "codex",
+            "session_id": "new",
+            "status": "idle",
+            "hook_event_name": "SessionStart",
+            "source": "clear",
+            "meta": meta,
+            "pid": 1234,
+        },
+    )
+
+    assert accepted == {"ok": True, "accepted": True}
+    sessions = _snapshot(server)["sessions"]
+    assert [s["vendor_session_id"] for s in sessions] == ["new"]
+    assert server.is_cleared("codex", "old")
+
+    stale = _post(
+        server,
+        {"agent": "codex", "session_id": "old", "status": "idle", "hook_event_name": "Stop"},
+    )
+    assert stale == {"ok": True, "accepted": False}
+    assert [s["vendor_session_id"] for s in _snapshot(server)["sessions"]] == ["new"]
+
+
 def test_placeholder_session_id_rejected(server: SessionServer) -> None:
     accepted = _post(server, {"agent": "claude", "session_id": "", "status": "running"})
     assert accepted == {"ok": True, "accepted": False}

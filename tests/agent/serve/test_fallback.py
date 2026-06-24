@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from project_manager.agent.serve import fallback
 from project_manager.agent.serve import status as st
 from project_manager.agent.serve.server import SessionServer
 from project_manager.agent.serve.store import Store
+from project_manager.agent.sources import SessionEntry
 from project_manager.paths import Paths
 
 # Above Linux's pid_max, so `os.kill` reliably reports it gone.
@@ -47,8 +49,12 @@ def test_source_titles_skip_transcript_owned_sessions(server: SessionServer) -> 
     # A session the transcript pass titled (tracked in `transcript_titled`) is
     # owned by `_refresh_titles`; the source-reader title must not touch it.
     server.store.ingest(
-        {"agent": "claude", "session_id": "s1", "status": "running",
-         "hook_event_name": "UserPromptSubmit"},
+        {
+            "agent": "claude",
+            "session_id": "s1",
+            "status": "running",
+            "hook_event_name": "UserPromptSubmit",
+        },
         server.paths,
     )
     server.store.set_title("claude", "s1", "Transcript Title")
@@ -62,8 +68,12 @@ def test_source_titles_set_and_update_when_no_transcript(server: SessionServer) 
     # Cursor-style: no transcript_path → source reader owns the title and
     # updates it when the vendor store is renamed.
     server.store.ingest(
-        {"agent": "cursor", "session_id": "c1", "status": "running",
-         "hook_event_name": "sessionStart"},
+        {
+            "agent": "cursor",
+            "session_id": "c1",
+            "status": "running",
+            "hook_event_name": "sessionStart",
+        },
         server.paths,
     )
     assert fallback._apply_source_reader_titles(server, {("cursor", "c1"): "First"}) == 1
@@ -171,3 +181,30 @@ def test_prune_dead_leaves_pidless_session(server: SessionServer) -> None:
     _ingest(server, "c1", None)
     assert fallback._prune_dead(server) == 0
     assert len(server.store.snapshot()) == 1
+
+
+def test_poll_skips_sessions_replaced_by_clear(
+    server: SessionServer,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entry = SessionEntry(
+        agent="codex",
+        session_id="old",
+        title="stale",
+        last_active=datetime.now(UTC),
+        cwd=server.paths.projects / "alpha",
+    )
+
+    async def collect(
+        _paths: Paths,
+        _projects: list[str],
+        _limit: int,
+    ) -> list[tuple[str, SessionEntry]]:
+        return [("alpha", entry)]
+
+    monkeypatch.setattr(fallback.discovery, "list_project_dbs", lambda _paths: [("alpha", None)])
+    monkeypatch.setattr(fallback, "_collect", collect)
+    server.cleared_sessions.add(("codex", "old"))
+
+    assert fallback.poll_once(server) == 0
+    assert server.store.get("codex", "old") is None
