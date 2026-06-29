@@ -26,14 +26,22 @@ COLUMNS: list[Column] = [
 ]
 
 
-def _precheck_skip(repo_dir: Path) -> str | None:
-    """Return a skip reason if the repo is not pullable, else None."""
+def _precheck_skip(repo_dir: Path) -> tuple[str, bool] | None:
+    """Return ``(reason, ok)`` if the repo is not pullable, else ``None``.
+
+    ``ok`` is the result status to report for the skip. A repo with no
+    upstream is a *benign* skip (``ok=True``): a local-only checkout has
+    nothing to pull, so it must not fail `pm repo pull`'s exit code — and
+    thus the systemd timer that runs it. A detached HEAD or dirty tree is
+    a state the user is expected to resolve, so those stay failures
+    (``ok=False``).
+    """
     if git.current_branch(repo_dir) is None:
-        return "skipped: detached HEAD"
+        return "skipped: detached HEAD", False
     if git.is_dirty(repo_dir):
-        return "skipped: dirty working tree"
+        return "skipped: dirty working tree", False
     if git.upstream_ref(repo_dir) is None:
-        return "skipped: no upstream"
+        return "skipped: no upstream", True
     return None
 
 
@@ -60,7 +68,8 @@ def _pull_one(paths: Paths, repo: str) -> PullResult:
     repo_dir = paths.repo(repo)
     skip = _precheck_skip(repo_dir)
     if skip is not None:
-        return PullResult(repo=repo, ok=False, message=skip)
+        message, ok = skip
+        return PullResult(repo=repo, ok=ok, message=message)
 
     head_before = git.head_sha(repo_dir)
     cmd = [

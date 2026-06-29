@@ -3,6 +3,9 @@ from pathlib import Path
 
 import pytest
 
+# Import for side-effect: registers every sub-app including `repo pull`.
+import project_manager.cli  # noqa: F401
+from project_manager.cli import main
 from project_manager.config import Concurrency
 from project_manager.paths import Paths
 from project_manager.repo import ls as ls_mod
@@ -310,8 +313,21 @@ def test_repo_pull_no_upstream_skipped(pm_env: Paths) -> None:
     _init_repo(repo, branch="main")
 
     results = pull_mod.pull(pm_env, ["foo"])
-    assert results[0].ok is False
+    # A local-only repo (no remote) is a benign skip, not a failure: there
+    # is simply nothing to pull, so it must not be reported as `ok=False`.
+    assert results[0].ok is True
     assert "no upstream" in results[0].message
+
+
+def test_repo_pull_cli_no_upstream_exits_zero(pm_env: Paths) -> None:
+    # `pm repo pull` runs on a systemd timer; a local-only repo with no
+    # upstream must not give it a non-zero exit code (which marks the
+    # service failed). Detached/dirty trees remain failures — see below.
+    repo = pm_env.repo("foo")
+    repo.mkdir()
+    _init_repo(repo, branch="main")
+
+    assert main(["repo", "pull"]) == 0
 
 
 def _setup_parent_with_submodule(tmp_path: Path, local: Path) -> tuple[Path, Path]:
