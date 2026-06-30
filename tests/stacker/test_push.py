@@ -423,3 +423,90 @@ def test_push_resyncs_title_when_existing_matches_bottom_subject(
     push_service.push(target, PushOptions(scope=ScopeSpec(only=True)))
     title_syncs = [req.title for req, _body in backend.edited if req.title is not None]
     assert title_syncs == ["a: first commit"]
+
+
+def _seed_recycled_remote_pr(
+    backend: RecordingPRBackend,
+    branch: str,
+    *,
+    title: str,
+    body: str,
+    number: int = 77,
+) -> gh.PullRequest:
+    """Register an OPEN PR on GitHub for `branch`'s head ref WITHOUT caching it.
+
+    Mirrors the production "recycled fork branch" footgun: the fork head
+    ref `branch` was reused for new work, but an unrelated prior feature's
+    PR is still open on that exact head ref. pm has no `pr_state` row yet,
+    so it discovers this PR via head-ref search — i.e. it *adopts* a PR it
+    never created. Leaving the cache empty is the whole point: this is the
+    fresh-adoption path, distinct from a PR pm already owns.
+    """
+    pr = gh.PullRequest(
+        number=number,
+        url=f"https://github.com/acme/widgets/pull/{number}",
+        title=title,
+        body=body,
+        head_ref_name=branch,
+        base_ref_name="main",
+        state="OPEN",
+        is_draft=False,
+    )
+    backend.prs_by_head[("acme/widgets", branch)] = pr
+    return pr
+
+
+def test_push_resets_title_body_when_adopting_recycled_pr(
+    push_service: StackerService,
+    backend: RecordingPRBackend,
+    tracked_stack: TrackedStack,
+) -> None:
+    """Adopting a recycled PR must claim it for the current branch's work.
+
+    Reproduces the production corruption: a fork head ref was reused for a
+    new feature while an UNRELATED prior feature's PR was still open on
+    that head ref. pm discovered that PR by head-ref search (no `pr_state`
+    cached), then only refreshed the managed stack block — leaving the
+    other feature's title and description intact. The pushed PR ended up
+    titled for the wrong feature, with the wrong body.
+
+    On first adoption pm must set the title to this branch's bottom-commit
+    subject and reset the body's user content to this branch's first
+    commit, exactly as it would for a PR it just created. (A PR pm already
+    owns — one with a cached `pr_state` row — keeps the conservative
+    preserve-manual-edits behavior; that contract is covered separately.)
+    """
+    stale_title = "[AUTH-5322] Add login Dicer slicelet target (#2141218)"
+    stale_body = (
+        "## What did you change\n\nUnrelated login/dbns dicer config work.\n\n"
+        "Co-authored-by: Christopher Gravel <chrisgravel-db@example.com>\n"
+    )
+    _seed_recycled_remote_pr(
+        backend,
+        "a",
+        title=stale_title,
+        body=stale_body,
+    )
+    # Critical: no pr_state row — this is a fresh head-ref-search adoption.
+    assert push_service.db.get_pr_state(tracked_stack.repo_name, "a") is None
+
+    target = SelectorTarget(repo_name=tracked_stack.repo_name, branch="a")
+    push_service.push(target, PushOptions(scope=ScopeSpec(only=True)))
+
+    # The title must be reset to this branch's bottom-commit subject, not
+    # left as the recycled feature's title.
+    title_syncs = [req.title for req, _body in backend.edited if req.title is not None]
+    assert title_syncs, "adopting a recycled PR must set the title"
+    assert title_syncs[-1] == "a: first commit", (
+        f"recycled PR title should be reset to the current branch's subject, "
+        f"got title_syncs={title_syncs}"
+    )
+
+    # The body's user content must no longer carry the other feature's
+    # stale description (its AUTH-5322 prose / co-author trailer).
+    final_body = backend.body_sent_for("a")
+    assert final_body is not None
+    assert "AUTH-5322" not in final_body, (
+        f"recycled PR body still carries the unrelated feature's description:\n{final_body}"
+    )
+    assert "Christopher Gravel" not in final_body

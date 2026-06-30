@@ -8,7 +8,7 @@ without shelling out to `gh`.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from project_manager.stacker import gh
@@ -89,6 +89,23 @@ class RecordingPRBackend:
     def edit_pr(self, request: gh.EditPRRequest) -> None:
         body = _read_body(request.body_file) if request.body_file else None
         self.edited.append((request, body))
+        # Reflect the edit into the live PR so a follow-up view_pr() reads the
+        # value we just wrote — exactly as `gh pr edit` then a REST GET would.
+        # Each EditPRRequest field is optional; only the ones actually sent are
+        # applied, so unset fields keep their prior value.
+        updates: dict[str, object] = {}
+        if request.title is not None:
+            updates["title"] = request.title
+        if body is not None:
+            updates["body"] = body
+        if request.base is not None:
+            updates["base_ref_name"] = request.base
+        if not updates:
+            return
+        for key, pr in list(self.prs_by_head.items()):
+            if pr.number == request.number:
+                self.prs_by_head[key] = replace(pr, **updates)  # type: ignore[arg-type]
+                break
 
     def view_pr(self, url: str) -> gh.PullRequest | None:
         for pr in self.prs_by_head.values():

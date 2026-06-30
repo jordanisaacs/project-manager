@@ -58,13 +58,18 @@ def create_or_update_current_pr(
     head_repo = head_repo_for_branch(ctx, tracked)
     title, first_body, worktree_path = first_commit_text(ctx, tracked)
     base = pr_base_for_current_branch(ctx, tracked, config, current_repo)
+    # Snapshot before find_open_pr (which caches search hits): a cached row
+    # here means pm already associated this PR with this branch on a prior
+    # run; its absence means find_open_pr is about to *adopt* a PR it found
+    # purely by head-ref search.
+    had_cached_pr = ctx.db.get_pr_state(tracked.repo_name, tracked.branch) is not None
     existing = find_open_pr(ctx, tracked, config, current_repo)
     head = head_ref_for_branch(config, current_repo, remote_branch)
     label = selectors.selector_for(tracked.repo_name, tracked.branch)
-    if existing:
-        # Don't ship a body — refresh_component_pr_bodies() runs next and
-        # rewrites only the managed stacker block, preserving any edits
-        # the user has made to the surrounding PR description.
+    if existing and had_cached_pr:
+        # PR pm already owns. Don't ship a body — refresh_component_pr_bodies()
+        # runs next and rewrites only the managed stacker block, preserving any
+        # edits the user has made to the surrounding PR description.
         #
         # Title gets the same treatment: only sync when the live title
         # still matches the bottom-commit subject pm computes. A
@@ -84,6 +89,33 @@ def create_or_update_current_pr(
                 base=base,
             )
         )
+        pr_url = existing.url
+    elif existing:
+        # Freshly-adopted PR: find_open_pr matched it by head ref alone, with
+        # no prior pr_state row. The head ref is recyclable — a `stack/*`
+        # branch reused for new work can land on a still-open PR from an
+        # unrelated prior feature (different title, different description).
+        # Without a cache row we have no evidence the PR's title/body belong
+        # to *this* branch, so the preserve-manual-edits assumption is unsafe.
+        # Claim it for the current branch the same way a create would: set the
+        # title to this branch's bottom-commit subject and reset the body to
+        # this branch's first commit. refresh_component_pr_bodies() then splices
+        # in the managed stack block on top.
+        fmt.record(ctx, logs, f"Adopting PR #{existing.number} for {label}")
+        template = load_pr_template(worktree_path)
+        body_seed = (
+            inject_body_into_template(first_body, template) if template is not None else first_body
+        )
+        with body_file(compose_body_with_block(body_seed, "")) as file_path:
+            ctx.pr_backend.edit_pr(
+                gh.EditPRRequest(
+                    repo=target_repo,
+                    number=existing.number,
+                    title=title,
+                    body_file=file_path,
+                    base=base,
+                )
+            )
         pr_url = existing.url
     else:
         fmt.record(ctx, logs, f"Creating PR for {label}")
