@@ -78,6 +78,8 @@
   "Non-nil while the sidebar should stay connected; cleared by `pm-sidebar-quit'.")
 (defvar pm-sidebar--reconnect-timer nil
   "Pending reconnect timer, so a dropped stream (e.g. daemon restart) recovers.")
+(defvar pm-sidebar--render-timer nil
+  "Pending coalesced-render timer, so an SSE burst collapses into one render.")
 
 ;; --- text helpers -----------------------------------------------------------
 (defun pm-sidebar--ellipsize (str width)
@@ -172,6 +174,14 @@
             (ws (and (window-live-p win) (window-start win))))
         (setq pm-sidebar--last-width width)
         (pm-table-reset-section-state)
+        ;; `erase-buffer' does NOT delete overlays — it only collapses them to
+        ;; point 1. Each render makes a fresh set (visibility indicators via
+        ;; `pm-table-show-root-section', plus magit highlight/selection overlays),
+        ;; so without this they pile up every refresh. The leaked overlays anchor
+        ;; markers near point 1, which turns every `insert' below into
+        ;; O(leaked-markers) and grows RSS without bound until the single-threaded
+        ;; daemon wedges. Drop them before rebuilding.
+        (remove-overlays (point-min) (point-max))
         (erase-buffer)
         (magit-insert-section (pm-sidebar-root)
           (insert (pm-table-banner "pm agents" (hash-table-count pm-sidebar--sessions)))
@@ -201,6 +211,20 @@
         (when (window-live-p win)
           (set-window-point win (point))
           (when ws (set-window-start win (min ws (point-max)) t)))))))
+
+(defun pm-sidebar--schedule-render ()
+  "Coalesce renders behind a single 0.2s timer instead of rendering inline.
+One event triggering a full `erase-buffer'+rebuild is cheap, but a burst
+(snapshot replay after a reconnect, rapid status updates, a resize storm)
+rendering synchronously per event starves the single-threaded daemon. The
+first event in a window arms the timer and later events fold into it, so we
+render at most once per 0.2s with the latest state."
+  (unless (timerp pm-sidebar--render-timer)
+    (setq pm-sidebar--render-timer
+          (run-with-timer 0.2 nil
+                          (lambda ()
+                            (setq pm-sidebar--render-timer nil)
+                            (pm-sidebar--render))))))
 
 ;; --- actions ----------------------------------------------------------------
 (defun pm-sidebar-visit ()
@@ -254,24 +278,36 @@ that project."
             ;; `agent'/`vendor_session_id' sit at the top level of the
             ;; remove payload, exactly the keys `session-key' reads.
             (remhash (pm-sidebar--session-key obj) pm-sidebar--sessions)))
-          (pm-sidebar--render))
+          (pm-sidebar--schedule-render))
       (error nil))))
+
+(defconst pm-sidebar--acc-limit (* 1 1024 1024)
+  "Hard cap on the SSE accumulator; reset it if a single line never terminates.")
 
 (defun pm-sidebar--proc-filter (_proc chunk)
   ;; Normalize CRLF→LF and key off \n; skip HTTP headers once.
-  (setq pm-sidebar--acc (concat pm-sidebar--acc (replace-regexp-in-string "\r" "" chunk)))
+  (setq pm-sidebar--acc (concat pm-sidebar--acc (string-replace "\r" "" chunk)))
   (unless pm-sidebar--headers-done
     (let ((idx (string-search "\n\n" pm-sidebar--acc)))
       (when idx
         (setq pm-sidebar--acc (substring pm-sidebar--acc (+ idx 2))
               pm-sidebar--headers-done t))))
   (when pm-sidebar--headers-done
-    (let (nl)
-      (while (setq nl (string-search "\n" pm-sidebar--acc))
-        (let ((line (string-trim (substring pm-sidebar--acc 0 nl))))
-          (setq pm-sidebar--acc (substring pm-sidebar--acc (1+ nl)))
+    ;; Walk complete lines with a running START index and substring the consumed
+    ;; prefix exactly once at the end. Substringing the whole accumulator per line
+    ;; (the old approach) is O(lines×length) and conses heavily; under a burst that
+    ;; floods GC and helps peg the single-threaded daemon.
+    (let ((start 0) nl)
+      (while (setq nl (string-search "\n" pm-sidebar--acc start))
+        (let ((line (string-trim (substring pm-sidebar--acc start nl))))
+          (setq start (1+ nl))
           (when (string-prefix-p "data:" line)
-            (pm-sidebar--handle (string-trim (substring line 5)))))))))
+            (pm-sidebar--handle (string-trim (substring line 5))))))
+      (when (> start 0)
+        (setq pm-sidebar--acc (substring pm-sidebar--acc start)))))
+  ;; Guard against an unbounded line on a malformed/runaway stream.
+  (when (> (length pm-sidebar--acc) pm-sidebar--acc-limit)
+    (setq pm-sidebar--acc "")))
 
 (defun pm-sidebar--schedule-reconnect ()
   "Arm a one-shot reconnect, unless we deliberately disconnected.
@@ -333,7 +369,7 @@ otherwise wedge the whole daemon)."
   "Re-fit the sidebar when its window's usable width changes."
   (let ((win (get-buffer-window pm-sidebar-buffer-name t)))
     (when (and win (/= (max 24 (window-max-chars-per-line win)) (or pm-sidebar--last-width -1)))
-      (pm-sidebar--render))))
+      (pm-sidebar--schedule-render))))
 
 ;; --- mode + entry points ----------------------------------------------------
 (defvar pm-sidebar-mode-map
@@ -398,6 +434,10 @@ live for an instant re-open).  `pm-sidebar-quit' tears the connection down."
   (when (timerp pm-sidebar--reconnect-timer)
     (cancel-timer pm-sidebar--reconnect-timer)
     (setq pm-sidebar--reconnect-timer nil))
+  ;; Drop any pending coalesced render so it can't resurrect the killed buffer.
+  (when (timerp pm-sidebar--render-timer)
+    (cancel-timer pm-sidebar--render-timer)
+    (setq pm-sidebar--render-timer nil))
   (remove-hook 'window-size-change-functions #'pm-sidebar--on-window-size-change)
   (when (process-live-p pm-sidebar--proc)
     (set-process-sentinel pm-sidebar--proc #'ignore)

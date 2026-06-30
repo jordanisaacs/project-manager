@@ -1153,6 +1153,95 @@ paused-op banner — and every position resolves to a non-nil section."
           (let ((kill-buffer-query-functions nil))
             (kill-buffer pm-sidebar-buffer-name))))))
 
+  (ert-deftest pm-test--sidebar-render-clears-stale-overlays ()
+    "Each render must drop overlays left in the buffer instead of stacking new
+ones on top.  This is the leak that grew the daemon's RSS into the gigabytes:
+`erase-buffer' only collapses overlays to point 1, so without an explicit
+`remove-overlays' they accumulate every refresh and turn each `insert' into
+O(stale-markers)."
+    (let ((pm-sidebar--sessions (make-hash-table :test 'equal)))
+      (puthash "claude\0s1"
+               '((agent . "claude") (vendor_session_id . "s1") (project . "p")
+                 (title . "Alpha") (status . "working"))
+               pm-sidebar--sessions)
+      (unwind-protect
+          (progn
+            (pm-sidebar--render)
+            ;; Stand in for the overlays a previous render leaves behind
+            ;; (visibility indicators, magit highlight/selection overlays).
+            (with-current-buffer pm-sidebar-buffer-name
+              (dotimes (_ 50) (make-overlay (point-min) (point-max)))
+              (should (>= (length (overlays-in (point-min) (point-max))) 50)))
+            ;; Re-rendering must clear them; the count stays bounded no matter
+            ;; how many times we refresh.
+            (pm-sidebar--render)
+            (pm-sidebar--render)
+            (with-current-buffer pm-sidebar-buffer-name
+              (should (< (length (overlays-in (point-min) (point-max))) 50))))
+        (when (get-buffer pm-sidebar-buffer-name)
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer pm-sidebar-buffer-name))))))
+
+  (ert-deftest pm-test--sidebar-schedule-render-coalesces ()
+    "A burst of schedule calls arms exactly one timer (not one per event), and
+firing it renders a single time — so an SSE flood can't peg the daemon with
+back-to-back full rebuilds."
+    (let ((pm-sidebar--render-timer nil)
+          (renders 0)
+          (timers-before (length timer-list)))
+      (cl-letf (((symbol-function 'pm-sidebar--render)
+                 (lambda () (cl-incf renders))))
+        (unwind-protect
+            (progn
+              (dotimes (_ 10) (pm-sidebar--schedule-render))
+              (should (timerp pm-sidebar--render-timer))
+              (should (= (1+ timers-before) (length timer-list))) ; one, not ten
+              (should (= 0 renders))                              ; debounced
+              (timer-event-handler pm-sidebar--render-timer)      ; fire it
+              (should (= 1 renders))                              ; burst -> 1
+              (should-not pm-sidebar--render-timer))              ; self-cleared
+          (when (timerp pm-sidebar--render-timer)
+            (cancel-timer pm-sidebar--render-timer))))))
+
+  (ert-deftest pm-test--sidebar-quit-cancels-render-timer ()
+    "`pm-sidebar-quit' cancels a pending coalesced render, so it can't fire
+after the buffer is killed and resurrect a dead sidebar."
+    (let ((pm-sidebar--render-timer nil)
+          (pm-sidebar--reconnect-timer nil)
+          (pm-sidebar--want-connection t)
+          (pm-sidebar--proc nil))
+      (cl-letf (((symbol-function 'pm-sidebar--render) #'ignore))
+        (pm-sidebar--schedule-render)
+        (should (timerp pm-sidebar--render-timer))
+        (let ((tm pm-sidebar--render-timer))
+          (pm-sidebar-quit)
+          (should-not pm-sidebar--render-timer)
+          (should-not (memq tm timer-list))))))
+
+  (ert-deftest pm-test--sidebar-proc-filter-parses-chunked-sse ()
+    "The filter skips HTTP headers once and dispatches each `data:' line, even
+when a line is split across chunk boundaries, and fully drains the accumulator."
+    (let ((pm-sidebar--acc "")
+          (pm-sidebar--headers-done nil)
+          (seen '()))
+      (cl-letf (((symbol-function 'pm-sidebar--handle)
+                 (lambda (json) (push json seen))))
+        (pm-sidebar--proc-filter
+         nil (concat "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+                     "data: {\"a\":1}\n"))
+        (pm-sidebar--proc-filter nil "data: {\"b\"")   ; split mid-line
+        (pm-sidebar--proc-filter nil ":2}\ndata: {\"c\":3}\n")
+        (should (equal (nreverse seen) '("{\"a\":1}" "{\"b\":2}" "{\"c\":3}")))
+        (should (equal pm-sidebar--acc "")))))
+
+  (ert-deftest pm-test--sidebar-proc-filter-caps-runaway-acc ()
+    "A never-terminating line can't grow the accumulator past its cap."
+    (let ((pm-sidebar--acc "")
+          (pm-sidebar--headers-done t))
+      (cl-letf (((symbol-function 'pm-sidebar--handle) #'ignore))
+        (pm-sidebar--proc-filter nil (make-string (1+ pm-sidebar--acc-limit) ?x))
+        (should (equal pm-sidebar--acc "")))))
+
   (ert-deftest pm-test--sidebar-visit-project-opens-dispatch ()
     "RET on a project heading opens `pm-project-dispatch' scoped to it."
     (let ((pm-sidebar--sessions (make-hash-table :test 'equal))
