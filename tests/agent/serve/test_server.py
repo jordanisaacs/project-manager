@@ -10,6 +10,7 @@ import json
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -42,7 +43,7 @@ def _conn(app: SessionServer) -> http.client.HTTPConnection:
     return http.client.HTTPConnection("127.0.0.1", app.port, timeout=2)
 
 
-def _post(app: SessionServer, payload: dict[str, object]) -> dict[str, object]:
+def _post(app: SessionServer, payload: dict[str, object]) -> dict[str, Any]:
     conn = _conn(app)
     try:
         conn.request(
@@ -56,7 +57,7 @@ def _post(app: SessionServer, payload: dict[str, object]) -> dict[str, object]:
         conn.close()
 
 
-def _snapshot(app: SessionServer, query: str = "") -> dict[str, object]:
+def _snapshot(app: SessionServer, query: str = "") -> dict[str, Any]:
     """Connect to the SSE stream and return the first (snapshot) event."""
     conn = _conn(app)
     try:

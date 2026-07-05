@@ -88,8 +88,11 @@ def test_empty_and_garbage() -> None:
 def _codex_user(text: str) -> dict:
     return {
         "type": "response_item",
-        "payload": {"type": "message", "role": "user",
-                    "content": [{"type": "input_text", "text": text}]},
+        "payload": {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": text}],
+        },
     }
 
 
@@ -100,9 +103,14 @@ def test_codex_rollout_first_real_prompt() -> None:
         # Codex injects its session context as the first user turn — skip it.
         _codex_user("<environment_context>\n  <cwd>/x</cwd>\n</environment_context>"),
         _codex_user("build me a thing"),
-        {"type": "response_item",
-         "payload": {"type": "message", "role": "assistant",
-                     "content": [{"type": "output_text", "text": "ok"}]}},
+        {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "ok"}],
+            },
+        },
     )
     assert transcript.title_from_lines(lines) == "build me a thing"
 

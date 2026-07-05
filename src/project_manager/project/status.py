@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
 from project_manager import check as check_mod
 from project_manager.paths import Paths
@@ -361,8 +362,8 @@ def _stacker_row_structured(
     return StackerRow(
         repo=repo,
         info="",
-        branches=tree["branches"],
-        current_branch=tree["current_branch"],
+        branches=cast("list[dict]", tree["branches"]),
+        current_branch=cast("str | None", tree["current_branch"]),
         operation=op.__pm_json__() if op is not None else None,
     )
 

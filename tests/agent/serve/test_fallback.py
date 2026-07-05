@@ -61,7 +61,9 @@ def test_source_titles_skip_transcript_owned_sessions(server: SessionServer) -> 
     server.transcript_titled.add(("claude", "s1"))
     n = fallback._apply_source_reader_titles(server, {("claude", "s1"): "Other"})
     assert n == 0
-    assert server.store.get("claude", "s1")["title"] == "Transcript Title"
+    s = server.store.get("claude", "s1")
+    assert s is not None
+    assert s["title"] == "Transcript Title"
 
 
 def test_source_titles_set_and_update_when_no_transcript(server: SessionServer) -> None:
@@ -77,10 +79,14 @@ def test_source_titles_set_and_update_when_no_transcript(server: SessionServer) 
         server.paths,
     )
     assert fallback._apply_source_reader_titles(server, {("cursor", "c1"): "First"}) == 1
-    assert server.store.get("cursor", "c1")["title"] == "First"
+    s = server.store.get("cursor", "c1")
+    assert s is not None
+    assert s["title"] == "First"
     # A rename in the vendor store propagates...
     assert fallback._apply_source_reader_titles(server, {("cursor", "c1"): "Renamed"}) == 1
-    assert server.store.get("cursor", "c1")["title"] == "Renamed"
+    s = server.store.get("cursor", "c1")
+    assert s is not None
+    assert s["title"] == "Renamed"
     # ...but an unchanged title is a no-op.
     assert fallback._apply_source_reader_titles(server, {("cursor", "c1"): "Renamed"}) == 0
 

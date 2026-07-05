@@ -32,7 +32,7 @@ def refresh(
     found = pr is not None
     message = (
         f"Linked '{target.branch}' to {pr.url}"
-        if found
+        if pr is not None
         else f"No open PR found for '{target.branch}'."
     )
     if json:

@@ -233,7 +233,8 @@ def _same_clear_scope(session: Session, event: dict[str, Any]) -> bool:
     """True when SESSION is the old row for EVENT's fresh clear-start row."""
     raw_meta = event.get("meta")
     meta = raw_meta if isinstance(raw_meta, dict) else {}
-    session_meta = session.get("meta") if isinstance(session.get("meta"), dict) else {}
+    raw_session_meta = session.get("meta")
+    session_meta = raw_session_meta if isinstance(raw_session_meta, dict) else {}
 
     # Emacs-launched agents carry a stable terminal-buffer id. Prefer it over
     # pid so a restarted Codex process in the same buffer is still scoped

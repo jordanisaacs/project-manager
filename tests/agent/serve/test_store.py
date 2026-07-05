@@ -128,7 +128,9 @@ def test_fallback_never_overrides_fresh_hook(store: Store, paths: Paths) -> None
     # A fresh hook row's status is untouched by the fallback (returns None).
     out = store.apply_fallback(_reading(status=st.IDLE), stale_ms=60_000, now_ms=1500)
     assert out is None
-    assert store.get("claude", "s1")["status"] == st.WORKING
+    s = store.get("claude", "s1")
+    assert s is not None
+    assert s["status"] == st.WORKING
 
 
 def test_fallback_applies_when_no_hook(store: Store) -> None:
@@ -155,7 +157,9 @@ def test_fallback_unknown_never_downgrades_known_status(store: Store, paths: Pat
         _reading(agent="cursor", status=st.UNKNOWN), stale_ms=500, now_ms=99_999
     )
     assert out is None
-    assert store.get("cursor", "s1")["status"] == st.IDLE
+    s = store.get("cursor", "s1")
+    assert s is not None
+    assert s["status"] == st.IDLE
 
 
 # -- titles (set_title) + transcript_path -------------------------------------
@@ -184,7 +188,9 @@ def test_delete(store: Store, paths: Paths) -> None:
 
 def test_set_title(store: Store, paths: Paths) -> None:
     store.ingest(_hook(), paths)
-    assert store.get("claude", "s1")["title"] is None
+    s = store.get("claude", "s1")
+    assert s is not None
+    assert s["title"] is None
     out = store.set_title("claude", "s1", "Wire up SSE")
     assert out is not None
     assert out["title"] == "Wire up SSE"

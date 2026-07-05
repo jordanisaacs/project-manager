@@ -107,10 +107,17 @@ def test_non_session_end_is_not_terminal(event: str | None) -> None:
 @pytest.mark.parametrize(
     "event",
     [
-        "preToolUse", "postToolUse", "beforeSubmitPrompt", "stop", "preCompact",
-        "beforeShellExecution", "afterShellExecution",
-        "beforeMCPExecution", "afterMCPExecution",
-        "afterAgentResponse", "afterAgentThought",
+        "preToolUse",
+        "postToolUse",
+        "beforeSubmitPrompt",
+        "stop",
+        "preCompact",
+        "beforeShellExecution",
+        "afterShellExecution",
+        "beforeMCPExecution",
+        "afterMCPExecution",
+        "afterAgentResponse",
+        "afterAgentThought",
     ],
 )
 def test_cursor_camelcase_events_count_as_activity(event: str) -> None:
