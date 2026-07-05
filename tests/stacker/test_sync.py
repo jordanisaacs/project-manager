@@ -666,6 +666,102 @@ def test_sync_offline_uses_cached_pr_state(
     assert tracked.managed_base_commit == squashed_main
 
 
+# --- Dirty-worktree gate ----------------------------------------------------
+
+
+def test_sync_dirty_worktree_blocks_merged_collapse(
+    pm_env: Paths,
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """Uncommitted tracked edits must abort before the merged-PR reset --hard.
+
+    Mirrors `test_sync_collapses_branch_to_parent_when_pr_merged_and_squash_present`
+    but dirties the worktree first: the collapse path does a
+    `git reset --hard parent_tip`, so without a dirty gate the edit is
+    silently destroyed and sync reports "Collapsed…". The gate must fire
+    first, raise, and leave the edit and DB untouched.
+    """
+    repo_name, repo_path = stacker_repo
+    feature_slot = three_slots[0]
+    _initialize(service, repo_name, feature_slot, "feature-merged-dirty")
+    commit_file(feature_slot.path, "feat.txt", "feat\n", "feat: own commit")
+    _apply_squash_to_main(repo_path, {"feat.txt": "feat\n"})
+
+    _seed_open_pr(service.db, repo_name, "feature-merged-dirty", number=1)
+    backend = RecordingPRBackend()
+    _mark_pr_merged(backend, number=1)
+    svc = _service_with_backend(pm_env, backend)
+
+    # Uncommitted tracked change that reset --hard would discard.
+    (feature_slot.path / "feat.txt").write_text("UNCOMMITTED WORK\n")
+
+    with pytest.raises(stacker_git.GitError, match="Tracked changes"):
+        svc.sync(SelectorTarget(repo_name=repo_name, branch="feature-merged-dirty"))
+
+    # The edit survived — the destructive reset never ran.
+    assert (feature_slot.path / "feat.txt").read_text() == "UNCOMMITTED WORK\n"
+    # No stale operation row left behind for the next invocation.
+    assert svc.db.get_operation(repo_name) is None
+
+
+def test_sync_dirty_worktree_blocks_parent_unchanged(
+    stacker_repo: tuple[str, Path],
+    three_slots: list[slot_mod.Slot],
+    service: StackerService,
+) -> None:
+    """A dirty idle branch must not slip through the "Nothing to sync" short-circuit.
+
+    With the parent unchanged, `_sync_one` returns before the old
+    `ensure_syncable` call at the tail of the cherry-pick setup — so a
+    dirty worktree silently "succeeds". Hoisting the gate into
+    `run_branch_gates` makes it fire first regardless.
+    """
+    repo_name, _ = stacker_repo
+    feature_slot = three_slots[0]
+    _initialize(service, repo_name, feature_slot, "feature-idle-dirty")
+    commit_file(feature_slot.path, "feat.txt", "feat\n", "feat: own commit")
+    # Parent (main) is deliberately not advanced → "Nothing to sync" path.
+
+    (feature_slot.path / "feat.txt").write_text("UNCOMMITTED WORK\n")
+
+    with pytest.raises(stacker_git.GitError, match="Tracked changes"):
+        service.sync(SelectorTarget(repo_name=repo_name, branch="feature-idle-dirty"))
+
+    assert service.db.get_operation(repo_name) is None
+
+
+def test_sync_dirty_worktree_blocks_downstream_queue(
+    tracked_stack: TrackedStack,
+    service: StackerService,
+) -> None:
+    """The multi-branch queue had no dirty gate at all before the fix.
+
+    `advance_downstream` runs `run_branch_gates` → `collapse_if_merged`
+    → `prepare_local_operation` (a destructive reset) with no
+    `ensure_syncable` anywhere. Dirtying the queue-head slot must abort
+    the whole queue at the gate. Mirrors
+    `test_sync_parent_modifications_gate_aborts_downstream_queue`.
+    """
+    repo_name = tracked_stack.repo_name
+    repo_path = tracked_stack.repo_path
+    _advance_main(repo_path)
+    # Queue order is parent-before-child: `a` is processed first.
+    a_slot = tracked_stack.slots["a"]
+    (a_slot.path / "a.txt").write_text("UNCOMMITTED WORK\n")
+
+    target = SelectorTarget(repo_name=repo_name, branch="d")
+    with pytest.raises(stacker_git.GitError, match="Tracked changes"):
+        service.sync(target)
+
+    # The queue-head edit survived — the reset in prepare_local_operation
+    # never ran.
+    assert (a_slot.path / "a.txt").read_text() == "UNCOMMITTED WORK\n"
+    # No leftover operation row after the gate aborts the queue.
+    assert service.db.get_operation(repo_name) is None
+
+
 # --- Chained no-commit branches ---------------------------------------------
 
 

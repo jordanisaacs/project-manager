@@ -116,7 +116,9 @@ def _sync_one(
                     f"Nothing to sync for {child_label}.\n"
                     f"Parent {parent_label} is unchanged at {fmt.short(parent_head)}."
                 )
-            ensure_syncable(acquired.path)
+            # No `ensure_syncable` here: `run_branch_gates` above already
+            # ran it as its first, unconditional check, and the collapse
+            # path only ever resets to a clean parent tip.
             logs: list[str] = []
             cp_driver.prepare_local_operation(
                 ctx,

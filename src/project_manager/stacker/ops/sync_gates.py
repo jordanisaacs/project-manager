@@ -1,6 +1,11 @@
 """Pre-sync safety gates and the merged-PR collapse decision.
 
-Two preflight checks run per branch before the cherry-pick path:
+Preflight checks run per branch before the cherry-pick path:
+
+- `ensure_syncable`: the first, unconditional gate. Errors when the
+  branch's worktree has tracked changes (or a cherry-pick is already
+  in progress), before any destructive `reset --hard`. No flag bypasses
+  it — sync never silently drops uncommitted tracked work.
 
 - `check_parent_modifications`: errors when the branch's
   `last_synced_parent_commit` is no longer an ancestor of the slot's
@@ -30,6 +35,7 @@ from typing import TYPE_CHECKING, Literal
 from project_manager.stacker import git, selectors
 from project_manager.stacker.models import SyncOptions, TrackedBranch
 from project_manager.stacker.render import format as fmt
+from project_manager.stacker.render.graph import ensure_syncable
 
 if TYPE_CHECKING:
     from project_manager.stacker.ctx import StackerCtx
@@ -134,12 +140,19 @@ def run_branch_gates(
 ) -> None:
     """Run all pre-cherry-pick gates for one branch.
 
+    The first, unconditional check is `ensure_syncable`: if the branch's
+    worktree has tracked changes (or a cherry-pick is mid-flight) it
+    raises before any destructive `reset --hard` in the collapse or
+    cherry-pick paths. There is no flag to bypass it — uncommitted
+    tracked work is never silently dropped.
+
     Raises `GitError` on a gate failure that the caller hasn't opted out
     of with the matching `--allow-drop-*` flag. Successful return means
     the caller may proceed to the collapse check and then the cherry-pick
     plan. Shared between `_sync_one` and the downstream-queue advance,
     so a multi-branch sync gets the same per-branch checks.
     """
+    ensure_syncable(slot_path)
     err = check_parent_modifications(ctx, tracked, slot_path)
     if err is not None and not options.allow_drop_parent_modifications:
         raise git.GitError(err)
