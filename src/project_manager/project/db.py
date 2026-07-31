@@ -26,6 +26,36 @@ CREATE TABLE worktrees (
 )
 """
 
+_CREATE_LEASES = """
+CREATE TABLE IF NOT EXISTS project_lease_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    deleting  INTEGER NOT NULL DEFAULT 0 CHECK (deleting IN (0, 1))
+);
+INSERT OR IGNORE INTO project_lease_state (singleton, deleting) VALUES (1, 0);
+
+CREATE TABLE IF NOT EXISTS project_leases (
+    holder      TEXT NOT NULL,
+    lease_id    TEXT NOT NULL,
+    acquired_at INTEGER NOT NULL,
+    state       TEXT NOT NULL DEFAULT 'finalized'
+                CHECK (state IN ('pending', 'finalized')),
+    expires_at  INTEGER,
+    PRIMARY KEY (holder, lease_id)
+);
+
+CREATE TABLE IF NOT EXISTS project_lease_worktrees (
+    holder    TEXT NOT NULL,
+    lease_id  TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    repo      TEXT NOT NULL,
+    slot_uuid TEXT NOT NULL,
+    PRIMARY KEY (holder, lease_id, name),
+    FOREIGN KEY (holder, lease_id)
+        REFERENCES project_leases (holder, lease_id)
+        ON DELETE CASCADE
+);
+"""
+
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Create/upgrade schema. Idempotent.
@@ -39,8 +69,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
     if "worktrees" in tables:
-        return
-    if "repos" in tables:
+        pass
+    elif "repos" in tables:
         conn.execute(_CREATE_WORKTREES)
         conn.execute(
             "INSERT INTO worktrees (name, repo, slot_uuid, branch) "
@@ -49,13 +79,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("DROP TABLE repos")
     else:
         conn.execute(_CREATE_WORKTREES)
+    conn.executescript(_CREATE_LEASES)
+    lease_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_leases)").fetchall()}
+    if "state" not in lease_columns:
+        conn.execute(
+            "ALTER TABLE project_leases ADD COLUMN state TEXT NOT NULL DEFAULT 'finalized'"
+        )
+    if "expires_at" not in lease_columns:
+        conn.execute("ALTER TABLE project_leases ADD COLUMN expires_at INTEGER")
     conn.commit()
 
 
 @contextmanager
-def transaction(db_path: Path) -> Iterator[sqlite3.Connection]:
-    with sqlite_db.transaction(db_path) as conn:
+def transaction(
+    db_path: Path,
+    *,
+    immediate: bool = False,
+) -> Iterator[sqlite3.Connection]:
+    with sqlite_db.transaction(db_path, busy_timeout_ms=5_000) as conn:
         _migrate(conn)
+        if immediate:
+            conn.execute("BEGIN IMMEDIATE")
         yield conn
 
 

@@ -77,7 +77,7 @@ ignore = [
 "src/project_manager/*/cli/**" = ["PLR0913"]
 "src/project_manager/cli/*" = ["PLR0913"]
 "src/project_manager/stacker/commands/*" = ["PLR0913", "C901", "FBT001", "FBT002"]
-# The `pm agent serve` fallback poller is a supervisor loop: it must catch any
+# The `pm serve` fallback poller is a supervisor loop: it must catch any
 # poll failure (IO, sqlite, asyncio TaskGroup) and keep going rather than let
 # the background thread die, so a blind `except Exception` is correct here.
 "src/project_manager/agent/serve/fallback.py" = ["BLE001"]

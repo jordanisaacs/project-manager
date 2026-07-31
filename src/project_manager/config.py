@@ -4,6 +4,7 @@ import zoneinfo
 from dataclasses import dataclass
 from datetime import tzinfo
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from project_manager.paths import Paths
 
@@ -64,7 +65,7 @@ _MAX_PORT = 65535
 
 @dataclass(frozen=True)
 class Serve:
-    """`[serve]` knobs for the `pm agent serve` session-tracking daemon.
+    """`[serve]` knobs for the `pm serve` project-manager daemon.
 
     `port` is the fixed loopback port the daemon binds and that hooks
     POST to (discovered by clients from config, not a lockfile, since the
@@ -80,6 +81,7 @@ class Serve:
     db_path: Path = Path("~/.pm/serve.db")
     forward_env_prefix: str = DEFAULT_FORWARD_ENV_PREFIX
     fallback_interval: float = DEFAULT_FALLBACK_INTERVAL
+    allowed_origins: tuple[str, ...] = ()
 
 
 def _expand(value: str) -> Path:
@@ -211,6 +213,7 @@ def serve() -> Serve:
         db_path = "~/.pm/serve.db"
         forward_env_prefix = "PM_META_"
         fallback_interval = 5.0
+        allowed_origins = ["https://omnigent.example.com"]
     """
     config_path = _resolve_config_path()
     if config_path is None:
@@ -231,9 +234,36 @@ def serve() -> Serve:
 
     db_path = section.get("db_path")
     prefix = section.get("forward_env_prefix", Serve.forward_env_prefix)
+    raw_origins = section.get("allowed_origins", [])
+    if not isinstance(raw_origins, list) or any(not isinstance(item, str) for item in raw_origins):
+        raise ValueError("[serve].allowed_origins must be an array of HTTP origin strings")
+    allowed_origins = tuple(_origin(item) for item in raw_origins)
     return Serve(
         port=port,
         db_path=_expand(db_path) if db_path else _expand(str(Serve.db_path)),
         forward_env_prefix=str(prefix),
         fallback_interval=float(interval),
+        allowed_origins=allowed_origins,
     )
+
+
+def _origin(value: str) -> str:
+    """Validate and normalize one configured browser origin."""
+    parsed = urlsplit(value.strip())
+    try:
+        _ = parsed.port
+    except ValueError as error:
+        raise ValueError(f"invalid [serve].allowed_origins entry: {value!r}") from error
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(
+            f"[serve].allowed_origins entry must be an HTTP origin without a path: {value!r}"
+        )
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), "", "", ""))

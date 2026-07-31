@@ -168,6 +168,31 @@ def test_concurrency_rejects_non_integer_limit(
         config.concurrency()
 
 
+def test_serve_reads_allowed_origins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[serve]\nallowed_origins = ["https://Omnigent.Example/", "http://localhost:5173"]\n'
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+
+    assert config.serve().allowed_origins == (
+        "https://omnigent.example",
+        "http://localhost:5173",
+    )
+
+
+def test_serve_rejects_allowed_origin_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text('[serve]\nallowed_origins = ["https://omnigent.example/path"]\n')
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+
+    with pytest.raises(ValueError, match="without a path"):
+        config.serve()
+
+
 def test_xdg_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("PM_CONFIG", raising=False)
     xdg = tmp_path / "xdg"

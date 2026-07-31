@@ -6,7 +6,7 @@ from project_manager.errors import ProjectError
 from project_manager.paths import Paths
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.project import branch as branch_mod
-from project_manager.project import db
+from project_manager.project import db, lease
 from project_manager.render import Column
 
 
@@ -26,7 +26,13 @@ DETACHED_COLUMNS: list[Column] = [
 ]
 
 
-def detach(paths: Paths, project: str, wts: list[str] | None) -> list[DetachedWt]:
+def detach(
+    paths: Paths,
+    project: str,
+    wts: list[str] | None,
+    *,
+    _allow_deleting: bool = False,
+) -> list[DetachedWt]:
     """Unlink forward symlinks and release pool-db rows for the given worktrees (or all).
 
     For each worktree with a live forward link: hard-block if the slot has
@@ -46,7 +52,8 @@ def detach(paths: Paths, project: str, wts: list[str] | None) -> list[DetachedWt
     owner = Owner(OwnerKind.PROJECT, project)
     released: list[DetachedWt] = []
 
-    with db.transaction(db_path) as conn:
+    with db.transaction(db_path, immediate=True) as conn:
+        lease.require_mutable(conn, project, allow_deleting=_allow_deleting)
         all_rows = db.list_wts(conn)
         if wts is None:
             to_detach = [(w, r) for w, r, _ in all_rows]

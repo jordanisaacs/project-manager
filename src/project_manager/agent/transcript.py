@@ -2,7 +2,7 @@
 
 Derives a human session title from a Claude Code (or Codex) JSONL
 transcript. Used by the source readers (`pm agent ls`) and by the
-`pm agent serve` daemon's fallback/title pass, so the rule lives in one
+`pm serve` daemon's fallback/title pass, so the rule lives in one
 place — including the daemon titling a Codex session from the rollout file
 its hook reports as `transcript_path`.
 

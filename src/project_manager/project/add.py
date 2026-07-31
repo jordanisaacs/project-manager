@@ -8,7 +8,7 @@ from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
-from project_manager.project import db
+from project_manager.project import db, lease
 from project_manager.render import Column
 
 _README_TEMPLATE = """\
@@ -125,7 +125,8 @@ def add(
     pooldb = PoolDB(paths.pool_db())
     claimed: list[AddedWt] = []
     try:
-        with db.transaction(db_path) as conn:
+        with db.transaction(db_path, immediate=True) as conn:
+            lease.require_mutable(conn, project)
             ctx = _AddCtx(paths=paths, pooldb=pooldb, conn=conn)
             for wt, repo in wts:
                 s = _claim_one(ctx, project, wt, repo)

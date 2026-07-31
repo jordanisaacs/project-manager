@@ -1,4 +1,4 @@
-"""Pure status-derivation functions for `pm agent serve`.
+"""Pure status-derivation functions for `pm serve`.
 
 Ported from the three reference trackers studied while planning:
 openui's `sessionStatus.ts` (activity-gating allowlist), tributary's

@@ -96,7 +96,7 @@ _CURSOR_EVENT_STATUS: tuple[tuple[str, str | None, str], ...] = (
 # `__PM_SERVE_PORT__` is substituted at install; the live env var still wins
 # so an operator can repoint it without reinstalling.
 _SCRIPT_TEMPLATE = '''#!/usr/bin/env python3
-"""pm agent serve status reporter. Args: <status-word> <agent>.
+"""pm serve status reporter. Args: <status-word> <agent>.
 
 Best-effort: never blocks, short timeout, debug-log on failure, exit 0.
 """

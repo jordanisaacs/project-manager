@@ -7,21 +7,28 @@ date, and the agent-session tracking daemon running.
 | -------------------------- | ------------------------------------------------------------------- |
 | `pm-repo-mgmt.service`     | Runs `pm repo pull` + `pm repo maintenance` (fetch, ff-only, gc).    |
 | `pm-repo-mgmt.timer`       | Fires the service 15s after boot and every 15 minutes thereafter.    |
-| `pm-serve.service`         | Long-running `pm agent serve` session-tracking daemon (auto-restart).|
+| `pm-serve.service`         | Long-running `pm serve` project/session daemon (auto-restart).|
 
 The services use `%h` so they work for any user; they expect `pm` at
 `~/.local/bin/pm` — adjust `ExecStart=` if your install lives elsewhere.
 
-## `pm-serve` (agent session tracker)
+## `pm-serve` (project manager and agent session tracker)
 
-`pm agent serve` is a loopback HTTP+SSE daemon that tracks live agent
+`pm serve` is a loopback HTTP+SSE daemon that tracks live agent
 session status. It ingests best-effort lifecycle-hook events
 (`POST /api/status`), keeps live state in an ephemeral WAL SQLite store
 (recreated on each start), backfills via a transcript-tailing poller, and
 pushes updates over SSE (`GET /api/stream`, with `?meta.<KEY>=<val>` /
-`?agent=` / `?project=` / `?status=` server-side filters). It is a pure
-observer — no action endpoints. Port and paths come from `[serve]` in the
-pm config (default port `8787`, db `~/.pm/serve.db`).
+`?agent=` / `?project=` / `?status=` server-side filters). It also exposes
+versioned project discovery and durable lease endpoints for configured web
+frontends. Port and paths come from `[serve]` in the pm config (default port
+`8787`, db `~/.pm/serve.db`). Cross-origin web clients must be listed in
+`[serve].allowed_origins`; loopback development origins are allowed by default.
+
+```toml
+[serve]
+allowed_origins = ["https://omnigent.example.com"]
+```
 
 Install the hooks that feed it (idempotent, user level):
 

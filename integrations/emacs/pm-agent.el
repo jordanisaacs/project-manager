@@ -80,7 +80,7 @@ emulator."
 
 ;;;; Session seeds injected into launched agents
 ;;
-;; `pm agent serve' forwards every `PM_META_*' env var into the session's
+;; `pm serve' forwards every `PM_META_*' env var into the session's
 ;; metadata.  We seed two on launch so the `pm-sidebar' sidebar can both filter
 ;; to this Emacs's agents and act on the exact buffer:
 ;;   PM_META_SOURCE — a tag (default "emacs") to filter on
@@ -122,7 +122,7 @@ buffer-local as `pm-agent-buffer-id' for the reverse lookup."
 (defun pm-agent--seed-environment (buffer-id)
   "Return `process-environment' with the PM_META_* launch seeds prepended.
 The agent inherits these from its environment (no visible `export'), and
-its hooks report them to `pm agent serve' as session metadata:
+its hooks report them to `pm serve' as session metadata:
   PM_META_SOURCE — `pm-agent-serve-source', a tag the sidebar filters on
   PM_META_EMACS  — this Emacs instance, so the sidebar shows only its own
   PM_META_BUF    — BUFFER-ID, for mapping a session back to its buffer"

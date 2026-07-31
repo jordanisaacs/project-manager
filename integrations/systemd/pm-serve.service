@@ -1,12 +1,12 @@
 [Unit]
-Description=pm agent serve (agent-session tracking daemon)
+Description=pm project and agent-session daemon
 
 [Service]
 # Long-running loopback daemon: ingests best-effort lifecycle hooks,
 # keeps live session state in an ephemeral WAL SQLite store, and pushes
 # updates over SSE. The store is recreated on each start, so a restart is
 # always safe.
-ExecStart=%h/.local/bin/pm agent serve
+ExecStart=%h/.local/bin/pm serve
 Restart=on-failure
 RestartSec=2
 

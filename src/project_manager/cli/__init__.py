@@ -21,6 +21,7 @@ from project_manager.stacker.commands import stacker_app as _stacker_app  # noqa
 from . import _complete as _complete  # registers `__complete`
 from . import cd as _cd  # noqa: F401  — registers the `cd` command
 from . import check as _check  # noqa: F401  — registers the `check` command
+from . import serve as _serve  # noqa: F401  — registers the daemon command
 from ._shared import fail, root
 
 

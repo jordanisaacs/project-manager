@@ -10,6 +10,7 @@ project_app = root.command(
 
 from . import create as _create  # noqa: F401,E402
 from . import delete as _delete  # noqa: F401,E402
+from . import lease as _lease  # noqa: F401,E402
 from . import ls as _ls  # noqa: F401,E402
 from . import status as _status  # noqa: F401,E402
 from . import wt as _wt  # noqa: F401,E402

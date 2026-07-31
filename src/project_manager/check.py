@@ -7,7 +7,7 @@ from pathlib import Path
 from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
-from project_manager.project import db, discovery
+from project_manager.project import db, discovery, lease
 from project_manager.render import Column
 from project_manager.stacker import git as stacker_git
 from project_manager.stacker import ops_slot
@@ -290,6 +290,38 @@ def check(paths: Paths) -> list[Finding]:
     return findings
 
 
+def _finding_project(paths: Paths, pooldb: PoolDB, finding: Finding) -> str | None:
+    """Return the project whose topology a fix would mutate, when known."""
+    if finding.forward_path is not None:
+        try:
+            return finding.forward_path.relative_to(paths.projects).parts[0]
+        except (IndexError, ValueError):
+            return None
+    if (
+        finding.kind == Kind.ORPHAN_OWNER
+        and finding.slot_path is not None
+        and finding.repo is not None
+    ):
+        owner = pooldb.get_owner(finding.repo, finding.slot_path.name)
+        if owner is not None and owner.kind == OwnerKind.PROJECT:
+            return owner.id
+    return None
+
+
+@contextlib.contextmanager
+def _topology_fix_guard(paths: Paths, pooldb: PoolDB, finding: Finding) -> Iterator[None]:
+    if finding.kind not in (Kind.BROKEN, Kind.ORPHAN_FORWARD, Kind.STALE, Kind.ORPHAN_OWNER):
+        yield
+        return
+    project = _finding_project(paths, pooldb, finding)
+    if project is None or not paths.project_db(project).is_file():
+        yield
+        return
+    with db.transaction(paths.project_db(project), immediate=True) as conn:
+        lease.require_mutable(conn, project)
+        yield
+
+
 def fix(paths: Paths, findings: list[Finding]) -> int:
     """Apply safe fixes. Returns count of applied fixes.
 
@@ -302,23 +334,27 @@ def fix(paths: Paths, findings: list[Finding]) -> int:
     pooldb = PoolDB(paths.pool_db())
     n = 0
     for f in findings:
-        if f.kind in (Kind.BROKEN, Kind.ORPHAN_FORWARD, Kind.STALE) and f.forward_path is not None:
-            with contextlib.suppress(FileNotFoundError):
-                f.forward_path.unlink()
+        with _topology_fix_guard(paths, pooldb, f):
+            if (
+                f.kind in (Kind.BROKEN, Kind.ORPHAN_FORWARD, Kind.STALE)
+                and f.forward_path is not None
+            ):
+                with contextlib.suppress(FileNotFoundError):
+                    f.forward_path.unlink()
+                    n += 1
+            elif f.kind == Kind.ORPHAN_OWNER and f.slot_path is not None:
+                pooldb.release(f.slot_path.parent.name, f.slot_path.name)
                 n += 1
-        elif f.kind == Kind.ORPHAN_OWNER and f.slot_path is not None:
-            pooldb.release(f.slot_path.parent.name, f.slot_path.name)
-            n += 1
-        elif f.kind == Kind.STALE_OPS and f.slot_path is not None and f.repo is not None:
-            # Re-check `has_resumable_state` here: the classification was
-            # observed earlier in the run, and a concurrent stacker op
-            # could have entered a paused state since. Cheap insurance
-            # against detaching from a worktree that's now mid-conflict.
-            if stacker_git.has_resumable_state(f.slot_path):
-                continue
-            ops_slot.release(
-                pooldb,
-                slot_mod.Slot(repo=f.repo, uuid=f.slot_path.name, path=f.slot_path),
-            )
-            n += 1
+            elif f.kind == Kind.STALE_OPS and f.slot_path is not None and f.repo is not None:
+                # Re-check `has_resumable_state` here: the classification was
+                # observed earlier in the run, and a concurrent stacker op
+                # could have entered a paused state since. Cheap insurance
+                # against detaching from a worktree that's now mid-conflict.
+                if stacker_git.has_resumable_state(f.slot_path):
+                    continue
+                ops_slot.release(
+                    pooldb,
+                    slot_mod.Slot(repo=f.repo, uuid=f.slot_path.name, path=f.slot_path),
+                )
+                n += 1
     return n

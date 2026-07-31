@@ -9,7 +9,7 @@ from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
 from project_manager.project import branch as branch_mod
-from project_manager.project import db
+from project_manager.project import db, lease
 from project_manager.project.branch import RestoreResult
 from project_manager.render import Column
 
@@ -190,7 +190,8 @@ def attach(
     attached: list[tuple[str, str, Slot]] = []  # (wt, repo, slot)
     warnings: list[str] = []
     try:
-        with db.transaction(db_path) as conn:
+        with db.transaction(db_path, immediate=True) as conn:
+            lease.require_mutable(conn, project)
             ctx = _AttachCtx(paths=paths, pooldb=pooldb, conn=conn)
             to_attach = _resolve_wts(project, wts, db.list_wts(conn))
             for wt, repo, remembered in to_attach:

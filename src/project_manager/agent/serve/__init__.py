@@ -1,4 +1,4 @@
-"""`pm agent serve`: a headless agent-session tracking daemon.
+"""`pm serve`: project management and headless agent-session tracking.
 
 It ingests best-effort lifecycle-hook events over a loopback HTTP
 endpoint, keeps live session state in an ephemeral WAL SQLite store

@@ -281,5 +281,5 @@ def run_loop(server: SessionServer, interval_s: float, stop: threading.Event) ->
         try:
             poll_once(server)
         except Exception as e:
-            print(f"pm agent serve: fallback poll failed: {e}")
+            print(f"pm serve: fallback poll failed: {e}")
         stop.wait(interval_s)

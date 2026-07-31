@@ -11,12 +11,14 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import pytest
 
 from project_manager.agent.serve.server import SessionServer, _HTTPServer
 from project_manager.agent.serve.store import Store
 from project_manager.paths import Paths
+from project_manager.project import add as add_mod
 
 
 @pytest.fixture
@@ -43,14 +45,19 @@ def _conn(app: SessionServer) -> http.client.HTTPConnection:
     return http.client.HTTPConnection("127.0.0.1", app.port, timeout=2)
 
 
-def _post(app: SessionServer, payload: dict[str, object]) -> dict[str, Any]:
+def _post(
+    app: SessionServer,
+    payload: dict[str, object],
+    path: str = "/api/status",
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     conn = _conn(app)
     try:
         conn.request(
             "POST",
-            "/api/status",
+            path,
             body=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **(headers or {})},
         )
         return json.loads(conn.getresponse().read())
     finally:
@@ -184,3 +191,94 @@ def test_placeholder_session_id_rejected(server: SessionServer) -> None:
     accepted = _post(server, {"agent": "claude", "session_id": "", "status": "running"})
     assert accepted == {"ok": True, "accepted": False}
     assert _snapshot(server)["sessions"] == []
+
+
+def test_project_api_requires_protocol_header(server: SessionServer) -> None:
+    conn = _conn(server)
+    try:
+        conn.request("GET", "/api/projects")
+        response = conn.getresponse()
+        body = json.loads(response.read())
+    finally:
+        conn.close()
+
+    assert response.status == 426
+    assert body["protocol_version"] == 1
+
+
+def test_project_lease_http_lifecycle(server: SessionServer) -> None:
+    add_mod.add(server.paths, "demo", [])
+    protocol = {"X-PM-Protocol-Version": "1"}
+    namespace = "https://omnigent.example"
+
+    pending = _post(
+        server,
+        {"project": "demo", "namespace": namespace, "pending_id": "pending-1"},
+        "/api/leases/acquire",
+        protocol,
+    )
+    assert pending["state"] == "pending"
+
+    finalized = _post(
+        server,
+        {
+            "project": "demo",
+            "namespace": namespace,
+            "pending_id": "pending-1",
+            "session_id": "session-1",
+        },
+        "/api/leases/finalize",
+        protocol,
+    )
+    assert finalized["state"] == "finalized"
+
+    conn = _conn(server)
+    try:
+        conn.request(
+            "GET",
+            f"/api/leases?{urlencode({'namespace': namespace})}",
+            headers=protocol,
+        )
+        leases = json.loads(conn.getresponse().read())
+    finally:
+        conn.close()
+    assert [(row["project"], row["lease_id"]) for row in leases["data"]] == [("demo", "session-1")]
+
+    released = _post(
+        server,
+        {"namespace": namespace, "session_id": "session-1"},
+        "/api/leases/release",
+        protocol,
+    )
+    assert released == {"released": True, "projects": ["demo"]}
+
+
+def test_project_api_cors_allows_loopback_and_configured_origins(server: SessionServer) -> None:
+    protocol = {"X-PM-Protocol-Version": "1"}
+    for origin in ("http://localhost:5173", "https://omnigent.example"):
+        server.allowed_origins = frozenset({"https://omnigent.example"})
+        conn = _conn(server)
+        try:
+            conn.request("GET", "/api/projects", headers={**protocol, "Origin": origin})
+            response = conn.getresponse()
+            response.read()
+        finally:
+            conn.close()
+        assert response.status == 200
+        assert response.getheader("Access-Control-Allow-Origin") == origin
+
+
+def test_project_api_cors_rejects_unconfigured_origin(server: SessionServer) -> None:
+    conn = _conn(server)
+    try:
+        conn.request(
+            "GET",
+            "/api/projects",
+            headers={"X-PM-Protocol-Version": "1", "Origin": "https://evil.example"},
+        )
+        response = conn.getresponse()
+        response.read()
+    finally:
+        conn.close()
+
+    assert response.status == 403

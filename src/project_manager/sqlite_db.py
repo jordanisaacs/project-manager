@@ -25,7 +25,7 @@ def _apply_pragmas(
 
     `busy_timeout` is set first so a concurrent writer is waited on rather
     than failing fast with SQLITE_BUSY. `wal` enables WAL journaling — the
-    right mode when a long-lived writer (the `pm agent serve` daemon) and
+    right mode when a long-lived writer (the `pm serve` daemon) and
     external readers share the file, since readers then get a non-blocking
     consistent snapshot. Both values are ints / a literal mode name, never
     user input, so the f-string is safe.

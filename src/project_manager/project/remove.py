@@ -4,7 +4,7 @@ from pathlib import Path
 
 from project_manager.errors import ProjectError
 from project_manager.paths import Paths
-from project_manager.project import db
+from project_manager.project import db, lease
 from project_manager.project import detach as detach_mod
 
 _DB_FILENAME = ".pm.db"
@@ -49,14 +49,18 @@ def _remove_wts(
     project: str,
     wts: list[str],
     db_path: Path,
+    *,
+    allow_deleting: bool = False,
 ) -> None:
     """Per-wt removal helper. Detach each wt (cleanliness-checked), drop rows."""
-    with db.transaction(db_path) as conn:
+    with db.readonly(db_path) as conn:
         known = {name for name, _, _ in db.list_wts(conn)}
         missing = [w for w in wts if w not in known]
         if missing:
             raise ProjectError(f"project '{project}' has no such worktree(s): {', '.join(missing)}")
-        detach_mod.detach(paths, project, wts=wts)
+    detach_mod.detach(paths, project, wts=wts, _allow_deleting=allow_deleting)
+    with db.transaction(db_path, immediate=True) as conn:
+        lease.require_mutable(conn, project, allow_deleting=allow_deleting)
         for w in wts:
             db.remove_wt(conn, w)
 
@@ -73,19 +77,30 @@ def _remove_whole(paths: Paths, project: str, project_dir: Path, db_path: Path) 
             + "\n  ".join(extras)
         )
 
-    with db.transaction(db_path) as conn:
-        all_wts = [name for name, _, _ in db.list_wts(conn)]
-    if all_wts:
-        _remove_wts(paths, project, all_wts, db_path)
-
-    with contextlib.suppress(FileNotFoundError):
-        (project_dir / _README_FILENAME).unlink()
-    with contextlib.suppress(FileNotFoundError):
-        db_path.unlink()
     try:
-        project_dir.rmdir()
-    except OSError as e:
-        raise ProjectError(f"could not rmdir {project_dir}: {e}") from e
+        lease.begin_delete(paths, project)
+        with db.readonly(db_path) as conn:
+            all_wts = [name for name, _, _ in db.list_wts(conn)]
+        if all_wts:
+            _remove_wts(
+                paths,
+                project,
+                all_wts,
+                db_path,
+                allow_deleting=True,
+            )
+
+        with contextlib.suppress(FileNotFoundError):
+            (project_dir / _README_FILENAME).unlink()
+        with contextlib.suppress(FileNotFoundError):
+            db_path.unlink()
+        try:
+            project_dir.rmdir()
+        except OSError as exc:
+            raise ProjectError(f"could not rmdir {project_dir}: {exc}") from exc
+    except BaseException:
+        lease.cancel_delete(paths, project)
+        raise
 
 
 @dataclass(frozen=True)

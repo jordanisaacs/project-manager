@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; A magit-section sidebar that streams live agent-session state from the
-;; `pm agent serve' daemon (GET /api/stream, server-side filtered to the
+;; `pm serve' daemon (GET /api/stream, server-side filtered to the
 ;; sessions this Emacs launched) and renders them grouped by project, with
 ;; status color-coded and the "waiting on you" states highlighted.
 ;;
@@ -29,11 +29,11 @@
 (declare-function pm-project-dispatch "pm-transient" (&optional arg))
 
 (defgroup pm-sidebar nil
-  "Live agent-session sidebar fed by `pm agent serve'."
+  "Live agent-session sidebar fed by `pm serve'."
   :group 'pm)
 
 (defcustom pm-sidebar-port 8787
-  "Loopback TCP port the `pm agent serve' daemon listens on."
+  "Loopback TCP port the `pm serve' daemon listens on."
   :type 'integer
   :group 'pm-sidebar)
 
@@ -352,7 +352,7 @@ otherwise wedge the whole daemon)."
   ;; `:nowait t' makes the connect asynchronous — make-network-process returns
   ;; immediately and the sentinel fires on open/failure. A blocking connect
   ;; (the default) stalls the entire Emacs main loop until it resolves, which
-  ;; wedges the daemon when reconnecting to a mid-restart `pm agent serve'.
+  ;; wedges the daemon when reconnecting to a mid-restart `pm serve'.
   (condition-case nil
       (setq pm-sidebar--proc
             (make-network-process
@@ -417,7 +417,7 @@ back open is instant and keeps the current session state."
 
 ;;;###autoload
 (defun pm-sidebar ()
-  "Toggle the live agent-session sidebar (streams from `pm agent serve').
+  "Toggle the live agent-session sidebar (streams from `pm serve').
 Open it if hidden; hide its window if already showing (the connection stays
 live for an instant re-open).  `pm-sidebar-quit' tears the connection down."
   (interactive)

@@ -1,4 +1,4 @@
-"""WAL SQLite store for `pm agent serve`.
+"""WAL SQLite session store for `pm serve`.
 
 Holds one row per live session plus an append-only `events` log. The DB
 is ephemeral — recreated on each serve start (`reset=True`) — so it is
