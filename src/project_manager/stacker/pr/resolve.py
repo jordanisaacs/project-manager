@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 def push_remote_slug(ctx: StackerCtx, repo_name: str) -> str:
-    return ctx.pr_backend.repo_info(cwd=ctx.paths.repo(repo_name)).name_with_owner
+    return ctx.pr_backend_for(repo_name).repo_info(cwd=ctx.paths.repo(repo_name)).name_with_owner
 
 
 def head_repo_for_branch(ctx: StackerCtx, tracked: TrackedBranch) -> str | None:

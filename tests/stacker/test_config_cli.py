@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from project_manager import config as pm_config
@@ -44,8 +46,6 @@ def test_list_prints_sorted_keys_and_values(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_list_json(capsys: pytest.CaptureFixture[str]) -> None:
-    import json
-
     _run(key="pr.trunk", value="master")
     _run(key="pr.mode", value="repo-pr")
     capsys.readouterr()
@@ -54,6 +54,16 @@ def test_list_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload == [
         {"key": "pr.mode", "value": "repo-pr"},
         {"key": "pr.trunk", "value": "master"},
+    ]
+
+
+def test_list_json_includes_github_config_dir(capsys: pytest.CaptureFixture[str]) -> None:
+    _run(key="github.config-dir", value="/var/lib/pm/gh-demo")
+    capsys.readouterr()
+
+    assert _run(list_=True, json=True) == 0
+    assert json.loads(capsys.readouterr().out) == [
+        {"key": "github.config-dir", "value": "/var/lib/pm/gh-demo"}
     ]
 
 

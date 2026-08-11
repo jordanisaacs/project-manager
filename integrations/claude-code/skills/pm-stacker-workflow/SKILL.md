@@ -48,7 +48,7 @@ PRs are cached per branch in pm's database — `pm stacker ls` shows them withou
 | `pm stacker ls --skip-ancestors` / `--skip-descendants` | Narrow the walk | ✓ |
 | `pm stacker ls --from <branch>` | Anchor the walk at a specific branch | ✓ |
 | `pm stacker log [--branch <b>]` | Commits since the branch's managed base |  |
-| `pm stacker config [<key> [<value>]]` | Per-repo config (`pr.mode`, `pr.trunk`, `pr.target-repo`) | ✓ |
+| `pm stacker config [<key> [<value>]]` | Per-repo config (`pr.*`, `github.config-dir`) | ✓ |
 
 ### Creating, naming, removing
 

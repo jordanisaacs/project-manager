@@ -69,7 +69,7 @@ pm stacker rename <new-name>
 pm stacker absorb [--continue | --abort]
 pm stacker log [<branch>]
 pm stacker continue | abort                # resume/cancel paused op
-pm stacker config [--list | --unset] [<key> [<value>]]   # pr.mode, pr.trunk, pr.target-repo
+pm stacker config [--list | --unset] [<key> [<value>]]   # pr.* and github.config-dir
 pm stacker pr refresh                      # re-look-up the PR for the current branch
 
 # agents — recent coding-agent sessions
@@ -105,6 +105,19 @@ gates protect that replay:
 By default sync refreshes cached `pr_state` once up front (one batched
 GraphQL call per repo). `--offline` skips that refresh and reads
 whatever's already cached.
+
+### Per-repo GitHub CLI identity
+
+Stacker can select a separate GitHub CLI configuration for each PM repo:
+
+```bash
+pm stacker config --repo frontend github.config-dir ~/.config/gh-frontend
+```
+
+The configured directory is passed as `GH_CONFIG_DIR` to Stacker's `gh`
+subprocesses. Git pushes keep using the repository's normal Git credential
+configuration. An inherited `GH_TOKEN` or `GITHUB_TOKEN` is preserved and
+therefore retains the GitHub CLI's usual precedence over stored credentials.
 
 ## Integrations
 

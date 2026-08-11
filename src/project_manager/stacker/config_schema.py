@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import get_args
 
 from . import git
@@ -11,6 +13,7 @@ from .models import PRMode
 PR_MODE = "pr.mode"
 PR_TRUNK = "pr.trunk"
 PR_TARGET_REPO = "pr.target-repo"
+GITHUB_CONFIG_DIR = "github.config-dir"
 
 PR_MODES: tuple[str, ...] = get_args(PRMode)
 DEFAULT_MODE: PRMode = "pr-pr"
@@ -33,6 +36,17 @@ def _validate_target_repo(value: str) -> None:
         raise git.GitError(f"pr.target-repo must be in 'owner/repo' form; got {value!r}.")
 
 
+def _validate_github_config_dir(value: str) -> None:
+    if not value.strip():
+        raise git.GitError("github.config-dir must be a non-empty path.")
+    expanded = Path(os.path.expandvars(value)).expanduser()
+    if not expanded.is_absolute():
+        raise git.GitError(
+            "github.config-dir must expand to an absolute path "
+            f"(for example, '~/.config/gh-work'); got {value!r}."
+        )
+
+
 @dataclass(frozen=True)
 class _KeySpec:
     key: str
@@ -41,6 +55,11 @@ class _KeySpec:
 
 
 CONFIG_KEYS: dict[str, _KeySpec] = {
+    GITHUB_CONFIG_DIR: _KeySpec(
+        key=GITHUB_CONFIG_DIR,
+        validator=_validate_github_config_dir,
+        description="GitHub CLI config directory used for this repo.",
+    ),
     PR_MODE: _KeySpec(
         key=PR_MODE,
         validator=_validate_mode,

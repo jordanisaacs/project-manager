@@ -53,11 +53,16 @@ class EditPRRequest:
     base: str | None = None
 
 
-def repo_info(*, cwd: Path | None = None, repo: str | None = None) -> RepoInfo:
+def repo_info(
+    *,
+    cwd: Path | None = None,
+    repo: str | None = None,
+    env: dict[str, str] | None = None,
+) -> RepoInfo:
     cmd = ["gh", "repo", "view", "--json", "name,owner"]
     if repo:
         cmd.extend(["--repo", repo])
-    proc = run(cmd, cwd=cwd)
+    proc = run(cmd, cwd=cwd, env=env)
     payload = json.loads(proc.stdout or "{}")
     owner = payload.get("owner", {})
     owner_login = owner.get("login", "") if isinstance(owner, dict) else str(owner)
@@ -68,7 +73,11 @@ def repo_info(*, cwd: Path | None = None, repo: str | None = None) -> RepoInfo:
 
 
 def list_open_prs(
-    repo: str, *, head: str | None = None, search: str | None = None
+    repo: str,
+    *,
+    head: str | None = None,
+    search: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> list[PullRequest]:
     cmd = [
         "gh",
@@ -85,14 +94,14 @@ def list_open_prs(
         cmd.extend(["--head", head])
     if search:
         cmd.extend(["--search", search])
-    proc = run(cmd)
+    proc = run(cmd, env=env)
     payload = json.loads(proc.stdout or "[]")
     return [_to_pr(item) for item in payload]
 
 
-def create_pr(request: CreatePRRequest) -> str:
+def create_pr(request: CreatePRRequest, *, env: dict[str, str] | None = None) -> str:
     if request.head_repo and request.head_repo != request.repo:
-        return _create_pr_rest(request)
+        return _create_pr_rest(request, env=env)
     cmd = [
         "gh",
         "pr",
@@ -110,10 +119,14 @@ def create_pr(request: CreatePRRequest) -> str:
     ]
     if request.draft:
         cmd.append("--draft")
-    return run(cmd).stdout.strip()
+    return run(cmd, env=env).stdout.strip()
 
 
-def _create_pr_rest(request: CreatePRRequest) -> str:
+def _create_pr_rest(
+    request: CreatePRRequest,
+    *,
+    env: dict[str, str] | None = None,
+) -> str:
     """Create a cross-fork same-owner PR via the REST API.
 
     The REST field `head_repo` is what `gh pr create` never exposes —
@@ -139,7 +152,7 @@ def _create_pr_rest(request: CreatePRRequest) -> str:
         "-F",
         f"draft={'true' if request.draft else 'false'}",
     ]
-    proc = run(cmd)
+    proc = run(cmd, env=env)
     payload = json.loads(proc.stdout or "{}")
     url = payload.get("html_url")
     if not url:
@@ -158,7 +171,7 @@ def parse_pr_url(url: str) -> tuple[str, str, int] | None:
     return match.group(1), match.group(2), int(match.group(3))
 
 
-def search_prs(query: str) -> list[PullRequest]:
+def search_prs(query: str, *, env: dict[str, str] | None = None) -> list[PullRequest]:
     """Search PRs via the GitHub GraphQL `search` endpoint.
 
     `gh pr list --search` is REST-backed and misses cross-fork
@@ -174,6 +187,7 @@ def search_prs(query: str) -> list[PullRequest]:
     )
     proc = run(
         ["gh", "api", "graphql", "-f", f"query={graphql_query}", "-f", f"q={query}"],
+        env=env,
     )
     payload = json.loads(proc.stdout or "{}")
     if payload.get("errors"):
@@ -196,7 +210,7 @@ def _graphql_pr(node: dict) -> PullRequest:
     )
 
 
-def view_pr(url: str) -> PullRequest | None:
+def view_pr(url: str, *, env: dict[str, str] | None = None) -> PullRequest | None:
     """Fetch the current state of a PR by URL. None if the PR can't be found.
 
     Stacker caches PR URLs on `tracked_branches` and calls this on
@@ -210,6 +224,7 @@ def view_pr(url: str) -> PullRequest | None:
     owner, repo, number = parsed
     proc = run(
         ["gh", "api", f"/repos/{owner}/{repo}/pulls/{number}"],
+        env=env,
         check=False,
     )
     if proc.returncode != 0:
@@ -260,6 +275,8 @@ class PRReviewSummary:
 
 def batch_pr_review(
     entries: Sequence[tuple[str, str, int]],
+    *,
+    env: dict[str, str] | None = None,
 ) -> dict[tuple[str, str, int], PRReviewSummary]:
     """Bulk-fetch review state for the PRs in `entries` (owner, repo, number).
 
@@ -289,6 +306,7 @@ def batch_pr_review(
         query = f'query {{ repository(owner: "{owner}", name: "{repo}") {{ {alias_body} }} }}'
         proc = run(
             ["gh", "api", "graphql", "-f", f"query={query}"],
+            env=env,
             check=False,
         )
         if proc.returncode != 0:
@@ -315,7 +333,7 @@ def _graphql_review(node: dict) -> PRReviewSummary:
     )
 
 
-def edit_pr(request: EditPRRequest) -> None:
+def edit_pr(request: EditPRRequest, *, env: dict[str, str] | None = None) -> None:
     cmd = ["gh", "pr", "edit", str(request.number), "--repo", request.repo]
     if request.title is not None:
         cmd.extend(["--title", request.title])
@@ -323,7 +341,7 @@ def edit_pr(request: EditPRRequest) -> None:
         cmd.extend(["--body-file", str(request.body_file)])
     if request.base is not None:
         cmd.extend(["--base", request.base])
-    run(cmd)
+    run(cmd, env=env)
 
 
 def _to_pr(item: dict) -> PullRequest:

@@ -51,6 +51,7 @@ def create_or_update_current_pr(
     draft: bool,
     logs: list[str],
 ) -> gh.PullRequest:
+    backend = ctx.pr_backend_for(tracked.repo_name)
     config = pr_ctx.config
     current_repo = pr_ctx.current_repo
     target_repo = target_repo_slug(config)
@@ -81,7 +82,7 @@ def create_or_update_current_pr(
         # will keep it in sync.
         fmt.record(ctx, logs, f"Updating PR #{existing.number} for {label}")
         synced_title = title if existing.title == title else None
-        ctx.pr_backend.edit_pr(
+        backend.edit_pr(
             gh.EditPRRequest(
                 repo=target_repo,
                 number=existing.number,
@@ -129,7 +130,7 @@ def create_or_update_current_pr(
         )
         body = compose_body_with_block(body_seed, "")
         with body_file(body) as file_path:
-            pr_url = ctx.pr_backend.create_pr(
+            pr_url = backend.create_pr(
                 gh.CreatePRRequest(
                     repo=target_repo,
                     base=base,
@@ -140,7 +141,7 @@ def create_or_update_current_pr(
                     head_repo=head_repo,
                 )
             )
-    refreshed = ctx.pr_backend.view_pr(pr_url)
+    refreshed = backend.view_pr(pr_url)
     if not refreshed:
         raise git.GitError(f"Could not fetch PR {pr_url} after create/update.")
     # Cache the full PR (url + state + draft + merged) so later runs can
@@ -179,7 +180,7 @@ def refresh_component_pr_bodies(
         block = render_stack_block(ctx, render_ctx, node)
         base_body = pr_base_body(pr)
         with body_file(compose_body_with_block(base_body, block)) as file_path:
-            ctx.pr_backend.edit_pr(
+            ctx.pr_backend_for(node.repo_name).edit_pr(
                 gh.EditPRRequest(
                     repo=target_repo_slug(config),
                     number=pr.number,
@@ -232,7 +233,7 @@ def erase_component_pr_bodies(
         if not pr:
             continue
         with body_file(pr_base_body(pr)) as file_path:
-            ctx.pr_backend.edit_pr(
+            ctx.pr_backend_for(node.repo_name).edit_pr(
                 gh.EditPRRequest(
                     repo=target_repo_slug(config),
                     number=pr.number,

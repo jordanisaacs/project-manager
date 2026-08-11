@@ -10,6 +10,7 @@ calls in the per-branch path.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from project_manager.stacker import gh
@@ -34,6 +35,7 @@ def refresh_review_state(
     """
     cached = {(pr.repo_name, pr.branch): pr for pr in ctx.db.list_pr_states()}
     entries: list[tuple[tuple[str, str, int], tuple[str, str]]] = []
+    entries_by_repo: dict[str, list[tuple[str, str, int]]] = {}
     for b in branches:
         pr = cached.get((b.repo_name, b.branch))
         if pr is None:
@@ -42,14 +44,17 @@ def refresh_review_state(
         if parsed is None:
             continue
         entries.append((parsed, (b.repo_name, b.branch)))
+        entries_by_repo.setdefault(b.repo_name, []).append(parsed)
     if not entries:
         return
-    try:
-        reviews = ctx.pr_backend.batch_pr_review([e[0] for e in entries])
-    except Exception:  # noqa: BLE001  # best-effort refresh; keep rendering on any failure
-        return
+    reviews_by_repo: dict[str, dict[tuple[str, str, int], gh.PRReviewSummary]] = {}
+    for repo_name, repo_entries in entries_by_repo.items():
+        # Best-effort refresh: a failure for one repo should not prevent
+        # differently-authenticated repos in the same walk from refreshing.
+        with contextlib.suppress(Exception):
+            reviews_by_repo[repo_name] = ctx.pr_backend_for(repo_name).batch_pr_review(repo_entries)
     for parsed, (repo, branch) in entries:
-        summary = reviews.get(parsed)
+        summary = reviews_by_repo.get(repo, {}).get(parsed)
         if summary is None:
             continue
         base = cached[(repo, branch)]

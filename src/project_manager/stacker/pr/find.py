@@ -60,9 +60,10 @@ def find_pr(
     (`repo:X head:Y is:pr is:open`) only when the cache is empty;
     writes the URL back on a hit so the next run is cache-only.
     """
+    backend = ctx.pr_backend_for(tracked.repo_name)
     cached_state = ctx.db.get_pr_state(tracked.repo_name, tracked.branch)
     if cached_state is not None:
-        cached = ctx.pr_backend.view_pr(cached_state.pr_url)
+        cached = backend.view_pr(cached_state.pr_url)
         if cached is not None:
             record_pr(ctx, tracked, cached)
             return cached
@@ -77,7 +78,7 @@ def find_pr(
     # same-owner PRs, which would render one stacked PR invisible to
     # another's body-rendering pass.
     query = f"repo:{target_repo} head:{remote_branch} is:pr is:open"
-    prs = ctx.pr_backend.search_prs(query)
+    prs = backend.search_prs(query)
     if not prs:
         return None
     found = prs[0]

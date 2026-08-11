@@ -36,10 +36,15 @@ class RecordingPRBackend:
         default_factory=dict,
     )
     review_calls: list[list[tuple[str, str, int]]] = field(default_factory=list)
+    scoped_envs: list[dict[str, str]] = field(default_factory=list)
     created: list[tuple[gh.CreatePRRequest, str]] = field(default_factory=list)
     edited: list[tuple[gh.EditPRRequest, str | None]] = field(default_factory=list)
     next_pr_number: int = 1
     next_pr_url_prefix: str = "https://github.com/acme/widgets/pull/"
+
+    def scoped(self, *, env: dict[str, str]) -> RecordingPRBackend:
+        self.scoped_envs.append(dict(env))
+        return self
 
     def repo_info(
         self,

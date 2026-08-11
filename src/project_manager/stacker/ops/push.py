@@ -60,7 +60,10 @@ def push(
     if not pushable:
         return fmt.finish(ctx, logs, "Nothing to push: every branch in scope is merged.")
     pr_ctx: PrContext | None = (
-        PrContext(config=config, current_repo=ctx.pr_backend.repo_info(cwd=repo_path))
+        PrContext(
+            config=config,
+            current_repo=ctx.pr_backend_for(target.repo_name).repo_info(cwd=repo_path),
+        )
         if options.create_pr
         else None
     )

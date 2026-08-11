@@ -463,6 +463,7 @@ def _render_ansi(s: str) -> str:
     Console(
         file=buf,
         force_terminal=True,
+        no_color=False,
         color_system="truecolor",
         width=120,
         highlight=False,

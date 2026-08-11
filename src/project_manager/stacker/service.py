@@ -267,5 +267,5 @@ class StackerService:
         tracked = track_ops.require_tracked(self._ctx, target)
         repo_config = pr_get_repo_config(self._ctx, target.repo_name)
         repo_path = self._ctx.paths.repo(target.repo_name)
-        current_repo = self._ctx.pr_backend.repo_info(cwd=repo_path)
+        current_repo = self._ctx.pr_backend_for(target.repo_name).repo_info(cwd=repo_path)
         return pr_find.refresh_pr(self._ctx, tracked, repo_config, current_repo)

@@ -31,7 +31,8 @@ def config(
     """Get/set per-repo stacker config.
 
     Without arguments: `config --list`. With a single key: read. With key + value:
-    set. `--unset <key>` removes.
+    set. `--unset <key>` removes. Supported keys are `github.config-dir`, `pr.mode`,
+    `pr.target-repo`, and `pr.trunk`.
     """
     if list_ and unset:
         raise ValueError("--list and --unset are mutually exclusive.")

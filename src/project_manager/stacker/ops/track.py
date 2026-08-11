@@ -96,7 +96,7 @@ def _try_link_existing_pr(ctx: StackerCtx, tracked: TrackedBranch) -> None:
     try:
         repo_config = pr_config(ctx, tracked.repo_name)
         repo_path = ctx.paths.repo(tracked.repo_name)
-        current_repo = ctx.pr_backend.repo_info(cwd=repo_path)
+        current_repo = ctx.pr_backend_for(tracked.repo_name).repo_info(cwd=repo_path)
     except Exception:  # noqa: BLE001
         return
     try:

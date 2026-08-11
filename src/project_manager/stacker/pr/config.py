@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from project_manager.paths import Paths
@@ -85,6 +87,14 @@ def unset_config(ctx: StackerCtx, repo_name: str, key: str) -> bool:
 
 def list_config(ctx: StackerCtx, repo_name: str) -> list[tuple[str, str]]:
     return ctx.db.list_config(repo_name)
+
+
+def github_config_dir(ctx: StackerCtx, repo_name: str) -> Path | None:
+    """Return the expanded per-repo GitHub CLI config directory, if configured."""
+    value = ctx.db.get_config(repo_name, config_schema.GITHUB_CONFIG_DIR)
+    if value is None:
+        return None
+    return Path(os.path.expandvars(value)).expanduser()
 
 
 def configured_trunk(paths: Paths, repo_name: str) -> str | None:

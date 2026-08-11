@@ -25,6 +25,17 @@ class StackerCtx:
     pr_backend: PRBackend
     git: GitClient
 
+    def pr_backend_for(self, repo_name: str) -> PRBackend:
+        """Return the PR backend scoped to this PM repo's GitHub CLI config."""
+        # Imported lazily to keep the dependency bundle independent from the
+        # PR config module at import time.
+        from .pr.config import github_config_dir  # noqa: PLC0415
+
+        config_dir = github_config_dir(self, repo_name)
+        if config_dir is None:
+            return self.pr_backend
+        return self.pr_backend.scoped(env={"GH_CONFIG_DIR": str(config_dir)})
+
     @classmethod
     def default(
         cls,
