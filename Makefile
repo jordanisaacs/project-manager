@@ -40,7 +40,7 @@ fmt:
 # point that env var at the global hook's directory before committing.
 hooks-install:
 	git config core.hooksPath .githooks
-	@echo "pre-commit hook installed (runs 'make lint')."
+	@echo "pre-commit hook installed (runs 'make check')."
 	@echo "If you had a global core.hooksPath, set PM_PRE_COMMIT_CHAIN=<old path>"
 	@echo "in your shell so .githooks/pre-commit chains to it."
 

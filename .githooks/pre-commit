@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Project pre-commit hook.
 #
-# Runs `make lint` against the whole tree. Chains to a previous hooks
-# directory if `$PM_PRE_COMMIT_CHAIN` is set so a global Databricks (or
-# similar) pre-commit can still run its secret-scan and friends.
+# Runs `make check` (ruff lint + format, ty typecheck, pytest, emacs ERT)
+# against the whole tree. Chains to a previous hooks directory if
+# `$PM_PRE_COMMIT_CHAIN` is set so a global Databricks (or similar)
+# pre-commit can still run its secret-scan and friends.
 #
 # Install with `make hooks-install` (sets `core.hooksPath` to `.githooks`).
 set -euo pipefail
@@ -18,4 +19,4 @@ if [[ -n "${PM_PRE_COMMIT_CHAIN:-}" ]]; then
 fi
 
 cd "$repo_root"
-make lint
+make check
