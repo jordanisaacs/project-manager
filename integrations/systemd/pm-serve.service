@@ -1,11 +1,8 @@
 [Unit]
-Description=pm project and agent-session daemon
+Description=pm project integration daemon
 
 [Service]
-# Long-running loopback daemon: ingests best-effort lifecycle hooks,
-# keeps live session state in an ephemeral WAL SQLite store, and pushes
-# updates over SSE. The store is recreated on each start, so a restart is
-# always safe.
+# Long-running loopback daemon for project discovery and durable leases.
 ExecStart=%h/.local/bin/pm serve
 Restart=on-failure
 RestartSec=2

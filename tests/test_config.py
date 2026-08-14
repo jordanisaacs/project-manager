@@ -181,6 +181,20 @@ def test_serve_reads_allowed_origins(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     )
 
 
+def test_serve_ignores_legacy_agent_tracking_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        '[serve]\nport = 8788\ndb_path = ["invalid", "but ignored"]\n'
+        'forward_env_prefix = 42\nfallback_interval = "invalid"\n'
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+
+    assert config.serve() == config.Serve(port=8788)
+
+
 def test_serve_rejects_allowed_origin_paths(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

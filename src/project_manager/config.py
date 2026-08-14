@@ -57,8 +57,6 @@ class Agents:
 
 
 DEFAULT_SERVE_PORT = 8787
-DEFAULT_FORWARD_ENV_PREFIX = "PM_META_"
-DEFAULT_FALLBACK_INTERVAL = 5.0
 _MIN_PORT = 1
 _MAX_PORT = 65535
 
@@ -67,20 +65,12 @@ _MAX_PORT = 65535
 class Serve:
     """`[serve]` knobs for the `pm serve` project-manager daemon.
 
-    `port` is the fixed loopback port the daemon binds and that hooks
-    POST to (discovered by clients from config, not a lockfile, since the
-    daemon is systemd-managed and always up). `db_path` is the ephemeral
-    WAL store, recreated on each serve start — it holds working state for
-    the lifetime of the process, not durable history. `forward_env_prefix`
-    is the env-var prefix hooks forward into a session's `meta` (so a
-    client can tag/filter, e.g. `PM_META_SOURCE=emacs`). `fallback_interval`
-    is the Tier-2 transcript-poll cadence in seconds.
+    `port` is the fixed loopback port the daemon binds. Browser clients may
+    call from loopback origins or an origin explicitly listed in
+    `allowed_origins`.
     """
 
     port: int = DEFAULT_SERVE_PORT
-    db_path: Path = Path("~/.pm/serve.db")
-    forward_env_prefix: str = DEFAULT_FORWARD_ENV_PREFIX
-    fallback_interval: float = DEFAULT_FALLBACK_INTERVAL
     allowed_origins: tuple[str, ...] = ()
 
 
@@ -210,14 +200,14 @@ def serve() -> Serve:
     Schema:
         [serve]
         port = 8787
-        db_path = "~/.pm/serve.db"
-        forward_env_prefix = "PM_META_"
-        fallback_interval = 5.0
         allowed_origins = ["https://omnigent.example.com"]
+
+    Unknown keys are ignored for forward/backward compatibility. In
+    particular, legacy agent-tracker keys do not affect the project server.
     """
     config_path = _resolve_config_path()
     if config_path is None:
-        return Serve(db_path=_expand(str(Serve.db_path)))
+        return Serve()
     with config_path.open("rb") as f:
         data = tomllib.load(f)
     section = data.get("serve", {})
@@ -228,21 +218,12 @@ def serve() -> Serve:
             f"[serve].port must be a port number ({_MIN_PORT}-{_MAX_PORT}), got {port!r}"
         )
 
-    interval = section.get("fallback_interval", Serve.fallback_interval)
-    if not isinstance(interval, (int, float)) or isinstance(interval, bool) or interval <= 0:
-        raise ValueError(f"[serve].fallback_interval must be a positive number, got {interval!r}")
-
-    db_path = section.get("db_path")
-    prefix = section.get("forward_env_prefix", Serve.forward_env_prefix)
     raw_origins = section.get("allowed_origins", [])
     if not isinstance(raw_origins, list) or any(not isinstance(item, str) for item in raw_origins):
         raise ValueError("[serve].allowed_origins must be an array of HTTP origin strings")
     allowed_origins = tuple(_origin(item) for item in raw_origins)
     return Serve(
         port=port,
-        db_path=_expand(db_path) if db_path else _expand(str(Serve.db_path)),
-        forward_env_prefix=str(prefix),
-        fallback_interval=float(interval),
         allowed_origins=allowed_origins,
     )
 

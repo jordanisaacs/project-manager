@@ -1,48 +1,33 @@
 # pm — systemd user units
 
 Units that keep the canonical-repo store warm, its pinned branches up to
-date, and the agent-session tracking daemon running.
+date, and the project integration daemon running.
 
 | File                       | Role                                                                |
 | -------------------------- | ------------------------------------------------------------------- |
 | `pm-repo-mgmt.service`     | Runs `pm repo pull` + `pm repo maintenance` (fetch, ff-only, gc).    |
 | `pm-repo-mgmt.timer`       | Fires the service 15s after boot and every 15 minutes thereafter.    |
-| `pm-serve.service`         | Long-running `pm serve` project/session daemon (auto-restart).|
+| `pm-serve.service`         | Long-running `pm serve` project integration daemon (auto-restart). |
 
 The services use `%h` so they work for any user; they expect `pm` at
 `~/.local/bin/pm` — adjust `ExecStart=` if your install lives elsewhere.
 
-## `pm-serve` (project manager and agent session tracker)
+## `pm-serve` (project integrations)
 
-`pm serve` is a loopback HTTP+SSE daemon that tracks live agent
-session status. It ingests best-effort lifecycle-hook events
-(`POST /api/status`), keeps live state in an ephemeral WAL SQLite store
-(recreated on each start), backfills via a transcript-tailing poller, and
-pushes updates over SSE (`GET /api/stream`, with `?meta.<KEY>=<val>` /
-`?agent=` / `?project=` / `?status=` server-side filters). It also exposes
-versioned project discovery and durable lease endpoints for configured web
-frontends. Port and paths come from `[serve]` in the pm config (default port
-`8787`, db `~/.pm/serve.db`). Cross-origin web clients must be listed in
+`pm serve` is a loopback HTTP daemon exposing versioned project discovery,
+durable project leases, and health endpoints for web integrations. Port and
+allowed browser origins come from `[serve]` in the pm config; the default port
+is `8787`. Cross-origin web clients must be listed in
 `[serve].allowed_origins`; loopback development origins are allowed by default.
+
+Agent status tracking is local to the Emacs/Ghostel integration. `pm serve`
+does not ingest lifecycle status, poll transcripts, persist agent state, or
+provide an event stream. Existing `~/.pm/serve.db` files are left untouched.
 
 ```toml
 [serve]
 allowed_origins = ["https://omnigent.example.com"]
 ```
-
-Install the hooks that feed it (idempotent, user level):
-
-```sh
-pm agent install-hooks            # both Claude + Codex
-pm agent install-hooks --no-codex # Claude only
-```
-
-This writes a fire-and-forget reporter to `~/.pm/hooks/status-reporter.sh`
-and registers it in `~/.claude/settings.json` and `~/.codex/hooks.json`
-(backing each up to `*.pm-bak`). Hook failures are logged to
-`~/.pm/hook-debug.log` and never block the agent. Sessions launched with
-`PM_META_*` env vars carry those into the session's `meta` for filtering
-(e.g. an Emacs client sets `PM_META_SOURCE=emacs`).
 
 ## Install
 
