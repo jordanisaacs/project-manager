@@ -23,12 +23,6 @@
 ;; Default behavior (`pm-agent-dispatch-function' = nil) stages the
 ;; command on the kill-ring and prints a hint, so the package is
 ;; harmless out of the box.
-;;
-;; Independently of the dispatchers, `pm-agent-setup-ghostel' (run
-;; automatically once `ghostel' loads) installs a `ghostel-pre-spawn-hook'
-;; that injects the PM_META_* launch seeds into *every* ghostel session, so
-;; an agent started by hand in any ghostel buffer is tracked by `pm-sidebar'
-;; just the same.
 
 ;;; Code:
 
@@ -77,91 +71,6 @@ emulator."
   :type '(choice (const  :tag "Disabled (kill-ring stage)" nil)
                  (function :tag "Custom dispatcher"))
   :group 'pm)
-
-;;;; Session seeds injected into launched agents
-;;
-;; `pm serve' forwards every `PM_META_*' env var into the session's
-;; metadata.  We seed two on launch so the `pm-sidebar' sidebar can both filter
-;; to this Emacs's agents and act on the exact buffer:
-;;   PM_META_SOURCE — a tag (default "emacs") to filter on
-;;   PM_META_BUF    — a stable per-buffer id (not the mutable buffer name)
-
-;;;###autoload
-(defcustom pm-agent-serve-source "emacs"
-  "Value injected as `PM_META_SOURCE' into agents launched from Emacs.
-Lets the `pm-sidebar' sidebar filter to sessions this Emacs started
-\(meta.SOURCE = this value)."
-  :type 'string
-  :group 'pm)
-
-(defvar-local pm-agent-buffer-id nil
-  "Stable id of this agent buffer, also injected as `PM_META_BUF'.
-Lets the `pm-sidebar' sidebar map a session row back to its buffer without
-relying on the mutable, possibly-duplicated buffer name.  Set once at
-launch and never changed, so it survives the terminal renaming itself.")
-
-(defvar pm-agent--buffer-seq 0
-  "Monotonic counter behind `pm-agent--new-buffer-id'.")
-
-(defun pm-agent--emacs-id ()
-  "Identifier for this Emacs instance, injected as `PM_META_EMACS'.
-The `pm-sidebar' sidebar filters on it so it shows only the sessions *this*
-Emacs launched — not those of other Emacs instances that share the daemon
-\(they all tag `PM_META_SOURCE' the same, so SOURCE alone can't tell them
-apart).  The process id is unique per running Emacs, which is exactly the
-granularity we want."
-  (number-to-string (emacs-pid)))
-
-(defun pm-agent--new-buffer-id ()
-  "Return a fresh agent-buffer id, unique within this Emacs process.
-Generated *before* the buffer exists so it can be injected via
-`process-environment' (no shell `export'); the same value is stamped
-buffer-local as `pm-agent-buffer-id' for the reverse lookup."
-  (format "%s-%d" (pm-agent--emacs-id) (cl-incf pm-agent--buffer-seq)))
-
-(defun pm-agent--seed-environment (buffer-id)
-  "Return `process-environment' with the PM_META_* launch seeds prepended.
-The agent inherits these from its environment (no visible `export'), and
-its hooks report them to `pm serve' as session metadata:
-  PM_META_SOURCE — `pm-agent-serve-source', a tag the sidebar filters on
-  PM_META_EMACS  — this Emacs instance, so the sidebar shows only its own
-  PM_META_BUF    — BUFFER-ID, for mapping a session back to its buffer"
-  (append (list (format "PM_META_SOURCE=%s" pm-agent-serve-source)
-                (format "PM_META_EMACS=%s" (pm-agent--emacs-id))
-                (format "PM_META_BUF=%s" buffer-id))
-          process-environment))
-
-(defun pm-agent-buffer-for-id (id)
-  "Return the live buffer whose `pm-agent-buffer-id' equals ID, or nil."
-  (and id (seq-find (lambda (b) (equal (buffer-local-value 'pm-agent-buffer-id b) id))
-                    (buffer-list))))
-
-(defun pm-agent--seed-ghostel-environment ()
-  "Inject the PM_META_* launch seeds into the ghostel process about to spawn.
-Written for `ghostel-pre-spawn-hook', which runs in the buffer that will
-host the new process with `process-environment' dynamically bound to the
-child's env.  Unlike the per-dispatch seeding, this tags *every* ghostel
-session — including a `pm agent' a user starts by hand in any ghostel
-buffer — so the `pm-sidebar' sidebar still sees it and can map it back to
-its buffer:
-  PM_META_SOURCE — `pm-agent-serve-source', the tag the sidebar filters on
-  PM_META_EMACS  — this Emacs instance, so the sidebar shows only its own
-  PM_META_BUF    — this buffer's stable `pm-agent-buffer-id'
-The id is minted once and reused if the buffer ever respawns its shell, so
-the buffer keeps a single identity across restarts."
-  (let ((buffer-id (or pm-agent-buffer-id (pm-agent--new-buffer-id))))
-    (setq-local pm-agent-buffer-id buffer-id)
-    (setenv "PM_META_SOURCE" pm-agent-serve-source)
-    (setenv "PM_META_EMACS" (pm-agent--emacs-id))
-    (setenv "PM_META_BUF" buffer-id)))
-
-;;;###autoload
-(defun pm-agent-setup-ghostel ()
-  "Tag every ghostel session with PM_META_* for the `pm-sidebar' sidebar.
-Adds `pm-agent--seed-ghostel-environment' to `ghostel-pre-spawn-hook'.
-Idempotent, and run automatically once `ghostel' loads (see end of file);
-exposed so you can wire or unwire it explicitly."
-  (add-hook 'ghostel-pre-spawn-hook #'pm-agent--seed-ghostel-environment))
 
 ;;;; Dispatch implementation
 
@@ -230,17 +139,11 @@ coexist."
          (project (plist-get plist :project))
          (name (format "pm-agent: %s/%s" project agent))
          (default-directory cwd)
-         (buffer-id (pm-agent--new-buffer-id))
-         ;; Create the buffer first (mirrors `make-term': get-buffer-create +
-         ;; term-mode + term-exec), then seed PM_META_* via the environment
-         ;; before exec'ing the program.
          (buf (generate-new-buffer (concat "*" name "*"))))
     (with-current-buffer buf
-      (setq-local pm-agent-buffer-id buffer-id)
       (term-mode)
-      (let ((process-environment (pm-agent--seed-environment buffer-id)))
-        ;; `term-exec' takes (BUFFER NAME PROGRAM STARTFILE SWITCHES).
-        (term-exec buf name (car argv) nil (cdr argv)))
+      ;; `term-exec' takes (BUFFER NAME PROGRAM STARTFILE SWITCHES).
+      (term-exec buf name (car argv) nil (cdr argv))
       (term-char-mode))
     (pop-to-buffer buf)))
 
@@ -256,14 +159,10 @@ users get a clear hint instead of a void-function backtrace."
          (cwd  (plist-get plist :cwd))
          (agent (plist-get plist :agent))
          (project (plist-get plist :project))
-         (buffer-id (pm-agent--new-buffer-id))
          (default-directory cwd)
-         (buffer-name (format "*pm-agent: %s/%s*" project agent))
-         ;; Seed the env before vterm starts its shell (no visible `export').
-         (process-environment (pm-agent--seed-environment buffer-id)))
+         (buffer-name (format "*pm-agent: %s/%s*" project agent)))
     (let ((vterm-buffer-name buffer-name))
       (vterm))
-    (setq-local pm-agent-buffer-id buffer-id)
     (vterm-send-string (mapconcat #'shell-quote-argument argv " "))
     (vterm-send-return)))
 
@@ -291,10 +190,6 @@ under the hood); repeated launches of the same agent/project get
          (project (plist-get plist :project))
          (default-directory (plist-get plist :cwd))
          (ghostel-buffer-name (format "*pm-agent: %s/%s*" project agent))
-         ;; PM_META_* (SOURCE + a fresh per-buffer BUF id) is injected for us by
-         ;; `pm-agent--seed-ghostel-environment' on `ghostel-pre-spawn-hook'
-         ;; (installed when ghostel loads), which also stamps the buffer-local
-         ;; `pm-agent-buffer-id'.  So no manual env seeding here.
          ;; Non-numeric, non-nil prefix arg → ghostel branches to
          ;; `generate-new-buffer', so we never paste into an existing
          ;; agent session by reusing its buffer name.
@@ -515,10 +410,6 @@ project to scope to."
                (container-name default-directory)
                (pm--read-project "Sessions for: "))))
       (pm-agent-list name nil))))
-
-;; Tag every ghostel session (not just `pm-agent-launch' dispatches) so
-;; hand-started agents are tracked by the `pm-sidebar' sidebar too.
-(with-eval-after-load 'ghostel (pm-agent-setup-ghostel))
 
 (provide 'pm-agent)
 

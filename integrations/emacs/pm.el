@@ -116,8 +116,6 @@ when set, else the user's home directory."
 (autoload 'pm-agent-dispatch-term "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-vterm "pm-agent" nil t)
 (autoload 'pm-agent-dispatch-ghostel "pm-agent" nil t)
-(autoload 'pm-sidebar "pm-sidebar" nil t)
-
 (provide 'pm)
 
 ;;; pm.el ends here
