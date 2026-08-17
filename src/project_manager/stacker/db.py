@@ -192,6 +192,23 @@ class StackerDB:
             rows = conn.execute("SELECT * FROM operations ORDER BY repo_name").fetchall()
         return [_row_to_operation(row) for row in rows]
 
+    def try_put_operation(self, op: OperationState) -> bool:
+        """Atomically create a repo operation without replacing an active one."""
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO operations (
+                    repo_name, op_type, status, branch, parent_branch, root_branch,
+                    queue_json, current_index, start_head, target_parent_head,
+                    commit_list_json, next_commit_index, error_message,
+                    allow_drop_parent_modifications, allow_drop_merge, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(repo_name) DO NOTHING
+                """,
+                _operation_values(op),
+            )
+            return cursor.rowcount == 1
+
     def put_operation(self, op: OperationState) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -220,23 +237,7 @@ class StackerDB:
                     allow_drop_merge = excluded.allow_drop_merge,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (
-                    op.repo_name,
-                    op.op_type,
-                    op.status,
-                    op.branch,
-                    op.parent_branch,
-                    op.root_branch,
-                    json.dumps(op.queue),
-                    op.current_index,
-                    op.start_head,
-                    op.target_parent_head,
-                    json.dumps(op.commit_list),
-                    op.next_commit_index,
-                    op.error_message,
-                    int(op.allow_drop_parent_modifications),
-                    int(op.allow_drop_merge),
-                ),
+                _operation_values(op),
             )
 
     def clear_operation(self, repo_name: str) -> None:
@@ -431,4 +432,24 @@ def _row_to_operation(row: sqlite3.Row) -> OperationState:
         error_message=row["error_message"],
         allow_drop_parent_modifications=bool(row["allow_drop_parent_modifications"]),
         allow_drop_merge=bool(row["allow_drop_merge"]),
+    )
+
+
+def _operation_values(op: OperationState) -> tuple[object, ...]:
+    return (
+        op.repo_name,
+        op.op_type,
+        op.status,
+        op.branch,
+        op.parent_branch,
+        op.root_branch,
+        json.dumps(op.queue),
+        op.current_index,
+        op.start_head,
+        op.target_parent_head,
+        json.dumps(op.commit_list),
+        op.next_commit_index,
+        op.error_message,
+        int(op.allow_drop_parent_modifications),
+        int(op.allow_drop_merge),
     )

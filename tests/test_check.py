@@ -7,7 +7,9 @@ from project_manager.project import add as add_mod
 from project_manager.project import attach as attach_mod
 from project_manager.project import db as project_db
 from project_manager.project import detach as detach_mod
-from tests.helpers import git_pool
+from project_manager.stacker.db import StackerDB
+from project_manager.stacker.models import OperationState
+from tests.helpers import git_in_slot, git_pool
 
 
 def _mk_pool(paths: Paths, repo: str, uuids: list[str]) -> None:
@@ -150,3 +152,32 @@ def test_stale_ops_slot_is_classified_and_fixed(pm_env: Paths) -> None:
     assert _kinds(findings) == [check.Kind.STALE_OPS]
     assert check.fix(pm_env, findings) == 1
     assert pooldb.get_owner(slot_obj.repo, slot_obj.uuid) is None
+
+
+def test_clean_slot_for_paused_operation_is_not_reclaimed(pm_env: Paths) -> None:
+    """The operation row can be resumable even without dirty Git state.
+
+    A post-cherry-pick submodule failure has this shape: HEAD and the index
+    are clean, but continue still needs the branch checkout named by the
+    paused operation. ``pm check --fix`` must not detach it as stale.
+    """
+    [slot_obj] = git_pool(pm_env, "foo", n=1)
+    git_in_slot(slot_obj.path, "checkout", "-b", "feature")
+    pooldb = PoolDB(pm_env.pool_db())
+    pooldb.claim(slot_obj.repo, slot_obj.uuid, OWNER_STACKER_OPS)
+    StackerDB(pm_env.stacker_db()).put_operation(
+        OperationState(
+            repo_name="foo",
+            op_type="local_sync",
+            status="paused",
+            branch="feature",
+            parent_branch="main",
+            error_message="submodule update failed",
+        )
+    )
+
+    findings = check.check(pm_env)
+
+    assert _kinds(findings) == [check.Kind.OPS_OWNED]
+    assert check.fix(pm_env, findings) == 0
+    assert pooldb.get_owner(slot_obj.repo, slot_obj.uuid) == OWNER_STACKER_OPS

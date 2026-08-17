@@ -193,7 +193,14 @@ def advance_downstream(
             f"Tracked branch disappeared from state: "
             f"{selectors.selector_for(repo_name, next_branch)}"
         )
-    acquired = worktree.acquire(ctx, repo_name, next_branch)
+    try:
+        acquired = worktree.acquire_for_sync(ctx, repo_name, next_branch)
+    except BaseException:
+        # Acquisition can reject an unsafe existing checkout before the
+        # branch-gate block below. No resumable Git state exists yet, so the
+        # downstream operation row must not survive the failed preflight.
+        ctx.db.clear_operation(repo_name)
+        raise
     # Bridge the acquire → return handoff: an interrupt or raise here
     # would orphan the just-claimed slot, since the caller's outer
     # finally only sees the new slot after this returns.

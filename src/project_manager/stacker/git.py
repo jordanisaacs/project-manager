@@ -305,8 +305,10 @@ def in_progress_operation(path: Path) -> str | None:
     directory is consulted in both main repos and worktrees.
     """
     for name, marker in _IN_PROGRESS_MARKERS:
-        resolved = git(path, "rev-parse", "--git-path", marker).stdout.strip()
-        if Path(resolved).exists():
+        resolved = Path(git(path, "rev-parse", "--git-path", marker).stdout.strip())
+        if not resolved.is_absolute():
+            resolved = path / resolved
+        if resolved.exists():
             return name
     return None
 

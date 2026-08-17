@@ -10,7 +10,8 @@ from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.project import db, discovery, lease
 from project_manager.render import Column
 from project_manager.stacker import git as stacker_git
-from project_manager.stacker import ops_slot
+from project_manager.stacker import locate, ops_slot
+from project_manager.stacker.db import StackerDB
 
 
 class Kind(StrEnum):
@@ -183,8 +184,9 @@ def _classify_pool_rows(
             # leaked the claim — `--fix` can safely release it. OPS_OWNED
             # means there's a paused cherry-pick or uncommitted change
             # that `pm stacker continue` will pick up; we must hold.
-            stale = slot_path.is_dir() and not stacker_git.has_resumable_state(
-                slot_path,
+            paused = _paused_operation_uses_slot(paths, repo, slot_path)
+            stale = (
+                slot_path.is_dir() and not paused and not stacker_git.has_resumable_state(slot_path)
             )
             yield Finding(
                 kind=Kind.STALE_OPS if stale else Kind.OPS_OWNED,
@@ -308,6 +310,14 @@ def _finding_project(paths: Paths, pooldb: PoolDB, finding: Finding) -> str | No
     return None
 
 
+def _paused_operation_uses_slot(paths: Paths, repo: str, slot_path: Path) -> bool:
+    op = StackerDB(paths.stacker_db()).get_operation(repo)
+    if op is None or op.status != "paused" or op.branch is None:
+        return False
+    checked_out = locate.locate_worktree(paths, repo, op.branch)
+    return checked_out is not None and checked_out.resolve() == slot_path.resolve()
+
+
 @contextlib.contextmanager
 def _topology_fix_guard(paths: Paths, pooldb: PoolDB, finding: Finding) -> Iterator[None]:
     if finding.kind not in (Kind.BROKEN, Kind.ORPHAN_FORWARD, Kind.STALE, Kind.ORPHAN_OWNER):
@@ -350,6 +360,8 @@ def fix(paths: Paths, findings: list[Finding]) -> int:
                 # observed earlier in the run, and a concurrent stacker op
                 # could have entered a paused state since. Cheap insurance
                 # against detaching from a worktree that's now mid-conflict.
+                if _paused_operation_uses_slot(paths, f.repo, f.slot_path):
+                    continue
                 if stacker_git.has_resumable_state(f.slot_path):
                     continue
                 ops_slot.release(

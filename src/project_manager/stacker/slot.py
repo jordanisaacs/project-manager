@@ -212,6 +212,15 @@ def try_release_ops_slot(ctx: StackerCtx, repo: str, uuid: str) -> bool:
     a missing pool row.
     """
     slot_path = ctx.paths.slot(repo, uuid)
+    op = ctx.db.get_operation(repo)
+    if op is not None and op.status == "paused" and op.branch is not None:
+        checked_out = locate.locate_worktree(ctx.paths, repo, op.branch)
+        if checked_out is not None and checked_out.resolve() == slot_path.resolve():
+            # Some resumable failures (notably a submodule update after the
+            # cherry-pick commit landed) leave a clean index and no
+            # CHERRY_PICK_HEAD. The durable operation row is still state that
+            # `pm stacker continue` needs, so do not detach its branch.
+            return False
     if git.has_resumable_state(slot_path):
         return False
     ops_slot.release(

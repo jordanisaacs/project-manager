@@ -44,11 +44,7 @@ def sync(
     per-branch gate decisions then read freshly-cached `pr_state` rows
     without further network calls.
     """
-    if ctx.db.get_operation(target.repo_name):
-        raise git.GitError(
-            "Another stacker operation is active for this repo. "
-            "Use `pm stacker continue` or `pm stacker abort`."
-        )
+    _ensure_no_operation(ctx, target.repo_name)
     resolved = resolve_scope(ctx, target.repo_name, target.branch, spec)
     if not resolved:
         return "No tracked branches to sync."
@@ -56,7 +52,8 @@ def sync(
         refresh_review_state(ctx, resolved)
     if len(resolved) == 1:
         return _sync_one(ctx, resolved[0], options=options)
-    ctx.db.put_operation(
+    _start_operation(
+        ctx,
         OperationState(
             repo_name=target.repo_name,
             op_type="downstream_sync",
@@ -66,7 +63,7 @@ def sync(
             current_index=0,
             allow_drop_parent_modifications=options.allow_drop_parent_modifications,
             allow_drop_merge=options.allow_drop_merge,
-        )
+        ),
     )
     return cp_driver.run_until_pause_or_finish(ctx, target.repo_name, logs=[])
 
@@ -78,7 +75,8 @@ def _sync_one(
     options: SyncOptions,
 ) -> str:
     """Single-branch sync path: local_sync op with up-to-date short-circuit."""
-    ctx.db.put_operation(
+    _start_operation(
+        ctx,
         OperationState(
             repo_name=tracked.repo_name,
             op_type="local_sync",
@@ -87,14 +85,14 @@ def _sync_one(
             parent_branch=tracked.parent_branch,
             allow_drop_parent_modifications=options.allow_drop_parent_modifications,
             allow_drop_merge=options.allow_drop_merge,
-        )
+        ),
     )
     # The context manager releases the slot iff the worktree is clean on
     # exit — covers success, exception, and `KeyboardInterrupt` in one
     # place. A pause-on-conflict mid-cherry-pick keeps the slot (predicate
     # sees `CHERRY_PICK_HEAD`) so `pm stacker continue` can resume.
     try:
-        with worktree.acquired_for_op(ctx, tracked.repo_name, tracked.branch) as acquired:
+        with worktree.acquired_for_sync(ctx, tracked.repo_name, tracked.branch) as acquired:
             sync_gates.run_branch_gates(ctx, tracked, acquired.path, options=options)
             collapse_msg = sync_gates.collapse_if_merged(
                 ctx,
@@ -181,6 +179,23 @@ def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:
         f"Stored base ref: {base_ref} -> {fmt.short(actual_base)}\n"
         f"Managed base: {fmt.short(tracked.managed_base_commit)} -> "
         f"{fmt.short(actual_base)}"
+    )
+
+
+def _ensure_no_operation(ctx: StackerCtx, repo_name: str) -> None:
+    if ctx.db.get_operation(repo_name) is not None:
+        _raise_operation_active()
+
+
+def _start_operation(ctx: StackerCtx, op: OperationState) -> None:
+    if not ctx.db.try_put_operation(op):
+        _raise_operation_active()
+
+
+def _raise_operation_active() -> None:
+    raise git.GitError(
+        "Another stacker operation is active for this repo. "
+        "Use `pm stacker continue` or `pm stacker abort`."
     )
 
 
