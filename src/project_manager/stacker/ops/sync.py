@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from project_manager.stacker import git, selectors
+from project_manager.stacker import git, locate, selectors
 from project_manager.stacker.cherry_pick import driver as cp_driver
 from project_manager.stacker.models import (
     DEFAULT_SCOPE,
@@ -149,10 +149,13 @@ def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:
             "Another stacker operation is active for this repo. "
             "Use `pm stacker continue` or `pm stacker abort`."
         )
-    path = worktree.require_checked_out(ctx, target.repo_name, target.branch)
-    ensure_syncable(path)
-    actual_base = git.rev_parse(path, base_ref)
-    current_head = git.rev_parse(path, "HEAD")
+    checked_out = locate.locate_worktree(ctx.paths, target.repo_name, target.branch)
+    if checked_out is not None:
+        # Do not record a dirty worktree as the branch's last-clean state.
+        ensure_syncable(checked_out)
+    repo_path = ctx.paths.repo(target.repo_name)
+    actual_base = git.rev_parse(repo_path, _repair_ref(target.branch, base_ref))
+    current_head = git.rev_parse(repo_path, target.branch)
     label = selectors.selector_for(tracked.repo_name, tracked.branch)
     if (
         actual_base == tracked.managed_base_commit
@@ -179,3 +182,12 @@ def repair(ctx: StackerCtx, target: SelectorTarget, base_ref: str) -> str:
         f"Managed base: {fmt.short(tracked.managed_base_commit)} -> "
         f"{fmt.short(actual_base)}"
     )
+
+
+def _repair_ref(branch: str, base_ref: str) -> str:
+    """Resolve checkout-relative shorthand against an explicitly targeted branch."""
+    if base_ref == "HEAD" or base_ref.startswith(("HEAD~", "HEAD^", "HEAD@{", "HEAD:")):
+        return f"{branch}{base_ref.removeprefix('HEAD')}"
+    if base_ref.startswith("@{"):
+        return f"{branch}{base_ref}"
+    return base_ref

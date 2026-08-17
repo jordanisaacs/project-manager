@@ -47,7 +47,7 @@ PRs are cached per branch in pm's database — `pm stacker ls` shows them withou
 | `pm stacker ls -a / --all` | Show every tracked branch in the repo (default: current lineage only) | ✓ |
 | `pm stacker ls --skip-ancestors` / `--skip-descendants` | Narrow the walk | ✓ |
 | `pm stacker ls --from <branch>` | Anchor the walk at a specific branch | ✓ |
-| `pm stacker log [--branch <b>]` | Commits since the branch's managed base |  |
+| `pm stacker log [--branch <b>]` | Commits since the branch's managed base; explicit branches need not be checked out | ✓ |
 | `pm stacker config [<key> [<value>]]` | Per-repo config (`pr.*`, `github.config-dir`) | ✓ |
 
 ### Creating, naming, removing
@@ -87,15 +87,28 @@ PRs are cached per branch in pm's database — `pm stacker ls` shows them withou
 
 | Command | Description |
 |---|---|
-| `pm stacker pr refresh` | Look up the current branch's GitHub PR and cache it |
-| `pm stacker pr unlink [--all]` | Clear the cached PR association (use after deleting a PR or rerouting) |
+| `pm stacker pr refresh [--branch <b>]` | Look up a branch's GitHub PR and cache it; explicit branches need not be checked out |
+| `pm stacker pr unlink [--branch <b>\|--all]` | Clear cached PR associations without requiring a target checkout |
 
 ### Recovery / guard
 
 | Command | Description |
 |---|---|
-| `pm stacker repair --base-ref <ref>` | Reset stored managed-base / last-synced / last-clean-head to match git (use after manual surgery) |
+| `pm stacker repair --base-ref <ref> [--branch <b>]` | Reset stored managed-base / last-synced / last-clean-head to match git; explicit branches need not be checked out (use after manual surgery) |
 | `pm stacker guard no-rebase` | Internal — used by `pm-git-guard` to block `git pull` / `git rebase`. Don't invoke directly. |
+
+### Checkout requirements
+
+- `log --branch`, `repair --branch`, `ls`, and explicit PR-cache operations
+  read refs/metadata without checking out the target. A live checkout must be
+  clean before `repair` records it as the last-clean state.
+- Explicitly targeted `sync`, `push`, `absorb`, and `reparent` locate or acquire
+  the checkout they need, so cwd may be detached or on another branch.
+- `rename` and `split` retain a target-checkout requirement because they
+  deliberately mutate that working tree. `continue`/`abort` likewise need the
+  worktree holding paused conflict state.
+- Outside a pm slot, pass `--repo`; inside a detached pm slot, `--branch` is
+  sufficient to identify the target branch.
 
 ## Stack Direction Reference
 

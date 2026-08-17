@@ -23,6 +23,7 @@ def split(
     """Move commits [<commit>..HEAD] onto a new child branch.
 
     --stay: skip claiming a pool slot for the new branch (ref + DB row still land).
+    The source branch must be checked out because split resets its worktree.
     """
     paths = config.load()
     svc = _common.service(paths)

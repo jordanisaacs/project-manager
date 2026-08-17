@@ -8,6 +8,7 @@ from project_manager.paths import Paths
 from project_manager.pool import slot as slot_mod
 from project_manager.pool.db import Owner, OwnerKind, PoolDB
 from project_manager.pool.slot import PoolExhaustedError, Slot, SlotBusyError
+from project_manager.project import branch as branch_mod
 from project_manager.project import db, lease
 from project_manager.render import Column
 
@@ -91,6 +92,9 @@ def _claim_one(
     owner = Owner(OwnerKind.PROJECT, project)
     s = _claim_any_free(ctx.paths, ctx.pooldb, owner, repo)
     try:
+        # Repair legacy/external gitlink drift before exposing a free slot to
+        # a new project owner. No-op for repos without `.gitmodules`.
+        branch_mod.synchronize_submodules(s.path)
         forward.symlink_to(s.path)
         db.add_wt(ctx.conn, wt, repo, s.uuid)
     except BaseException:

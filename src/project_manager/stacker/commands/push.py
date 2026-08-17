@@ -25,7 +25,8 @@ def push(
     """Force-push + create/update PRs for a scope.
 
     `--draft` / `--publish` are mutually exclusive. `--no-create-pr` force-pushes
-    without touching PRs.
+    without touching PRs. An explicit `--branch` need not be checked out;
+    stacker locates or acquires the worktree it needs.
     """
     if draft and publish:
         raise ValueError("--draft and --publish are mutually exclusive.")

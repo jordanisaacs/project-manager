@@ -111,6 +111,7 @@ _pm() {
               local -a commands
               commands=(
                 'add:Mint a new pool slot.'
+                'delete:Delete one exact, unclaimed pool slot.'
                 'ls:List pool slots with claim status, grouped by repo.'
               )
               _describe -t commands 'command' commands
@@ -121,6 +122,20 @@ _pm() {
                   _arguments \
                     '1:repo:_pm_repos' \
                     '--repo[--repo]:repo:_pm_repos' \
+                    '--json[--json]' \
+                    '--help[Display this message and exit.]' \
+                    '-h[Display this message and exit.]' \
+                    '--version[Display application version.]'
+
+                  ;;
+                delete)
+                  _arguments \
+                    '1:repo:_pm_repos' \
+                    '2:--uuid' \
+                    '--repo[--repo]:repo:_pm_repos' \
+                    '--uuid[--uuid]:uuid' \
+                    '--dry-run[show safety checks and planned deletion without changing anything]' \
+                    '--no-dry-run[show safety checks and planned deletion without changing anything]' \
                     '--json[--json]' \
                     '--help[Display this message and exit.]' \
                     '-h[Display this message and exit.]' \
@@ -803,4 +818,3 @@ _pm_wt_for_cd() {
 }
 
 _pm "$@"
-

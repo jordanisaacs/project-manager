@@ -189,7 +189,7 @@ _SIMPLE_SUBS: tuple[tuple[str, str], ...] = (
         "'-p[project name (defaults to current project)]:p'",
         "'-p[project name (defaults to current project)]:p:_pm_projects'",
     ),
-    # `pm pool {ls,add}` positional → repos.
+    # `pm pool {ls,add,delete}` first positional → repos.
     ("'1:--repo'", "'1:repo:_pm_repos'"),
     # `pm project wt add` positional spec defaults to `<repo>` (or
     # `<wt>:<repo>`). Completing repo names covers the common case.

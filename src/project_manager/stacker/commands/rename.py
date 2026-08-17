@@ -21,6 +21,7 @@ def rename(
     """Rename the current branch.
 
     --branch picks a different source branch (defaults to cwd's current branch).
+    The source must be checked out because rename updates that worktree's HEAD.
     """
     paths = config.load()
     svc = _common.service(paths)

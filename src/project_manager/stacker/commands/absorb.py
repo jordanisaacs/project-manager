@@ -30,6 +30,8 @@ def absorb(
     One level only. The parent's ref advances by the child's commits (minus
     any already on the parent by patch-id); the child branch is untouched.
     --continue / --abort are shortcuts for `pm stacker continue` / `abort`.
+    An explicit `--branch` need not be checked out; stacker acquires the
+    parent worktree that absorb mutates.
     """
     paths = config.load()
     svc = _common.service(paths)

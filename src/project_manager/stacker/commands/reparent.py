@@ -55,6 +55,8 @@ def reparent(
 
     The `--allow-drop-*` and `--offline` flags are forwarded to the
     downstream sync (see `pm stacker sync`).
+    An explicit `--branch` need not be checked out; downstream sync locates
+    or acquires the worktrees it mutates.
     """
     paths = config.load()
     svc = _common.service(paths)

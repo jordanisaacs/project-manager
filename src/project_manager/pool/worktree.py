@@ -31,6 +31,20 @@ def worktree_add_detached(repo: Path, slot: Path, branch: str) -> None:
     _git(repo, "worktree", "add", "--detach", str(slot), branch)
 
 
+def update_submodules(worktree: Path) -> None:
+    """Synchronize URLs and recursively check out the gitlinks at HEAD.
+
+    URL synchronization matters when a branch changes `.gitmodules`; the
+    recursive update handles both newly-added and nested submodules. The
+    explicit checkout mode avoids inheriting a per-submodule `update`
+    strategy that would leave a reusable slot on the wrong commit.
+    """
+    if not (worktree / ".gitmodules").is_file():
+        return
+    _git(worktree, "submodule", "sync", "--recursive")
+    _git(worktree, "submodule", "update", "--init", "--recursive", "--checkout")
+
+
 # git ls-tree -r HEAD lines are "<mode> <type> <sha>\t<path>" — 4 whitespace-separated fields.
 _LS_TREE_FIELDS = 4
 _SUBMODULE_MODE = "160000"
@@ -100,6 +114,10 @@ def init_submodules(main_repo: Path, worktree: Path) -> None:
             # try fetching the specific commit
             _git(worktree_sub, "fetch", "origin", sha, "--depth=1", check=False)
             _git(worktree_sub, "checkout", "--quiet", sha)
+    # The reference clones above cover top-level submodules efficiently;
+    # finish with Git's recursive machinery so nested modules are initialized
+    # and every configured URL matches the checked-out `.gitmodules` file.
+    update_submodules(worktree)
 
 
 def copy_claude_files(main_repo: Path, worktree: Path) -> None:

@@ -17,7 +17,11 @@ def log(
     *,
     json: Annotated[bool, Parameter(negative="")] = False,
 ) -> int:
-    """Show commits since the branch's managed base."""
+    """Show commits since the branch's managed base.
+
+    `--branch` reads the named ref directly; it need not be checked out and
+    the current worktree may be on another branch or detached.
+    """
     paths = config.load()
     svc = _common.service(paths)
     target = _common.target(flag.repo, branch, paths)

@@ -79,9 +79,21 @@ def submodule_state(repo: Path) -> str:
 
 
 def submodule_update(repo: Path) -> None:
-    """Recursively init and check out submodules to match the parent's gitlinks."""
+    """Sync URLs, then recursively check out submodules to match gitlinks."""
     run(
-        ["git", "-C", str(repo), "submodule", "update", "--init", "--recursive"],
+        ["git", "-C", str(repo), "submodule", "sync", "--recursive"],
+    )
+    run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--checkout",
+        ],
         stream=True,
     )
 

@@ -148,6 +148,11 @@ def _maybe_restore_branch(
     """
     saved = db.get_branch(ctx.conn, wt)
     if saved is None:
+        # A free slot may predate submodule-aware release or may have been
+        # advanced by another lifecycle path. Repair it even when there is
+        # no saved branch to restore, so attach never surfaces gitlink-only
+        # dirtiness to the new project owner.
+        branch_mod.synchronize_submodules(slot_path)
         return None
     warning: str | None = None
     if not no_branch:
@@ -159,6 +164,10 @@ def _maybe_restore_branch(
             )
         elif outcome.result == RestoreResult.SKIPPED_MISSING_BRANCH:
             warning = f"{wt}: saved branch '{saved}' no longer exists; slot left on default"
+        if outcome.result != RestoreResult.RESTORED:
+            branch_mod.synchronize_submodules(slot_path)
+    else:
+        branch_mod.synchronize_submodules(slot_path)
     db.set_branch(ctx.conn, wt, None)
     return warning
 

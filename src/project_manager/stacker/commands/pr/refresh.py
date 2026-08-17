@@ -24,6 +24,7 @@ def refresh(
     persists the hit in the pr_state cache so `pm stacker ls` shows the
     URL. Useful right after `pm stacker create --replace`, or any time
     a PR was opened by another tool and you want stacker to know.
+    An explicit `--branch` is resolved from refs and need not be checked out.
     """
     paths = config.load()
     svc = _common.service(paths)

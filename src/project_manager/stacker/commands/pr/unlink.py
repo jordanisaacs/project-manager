@@ -25,6 +25,7 @@ def unlink(
 
     Only touches the local pr_state cache; the GitHub PR is untouched.
     The next push/sync will re-resolve the PR for the branch.
+    An explicit `--branch` need not be checked out.
     """
     if all_ and branch is not None:
         raise ValueError("--all takes no branch argument.")

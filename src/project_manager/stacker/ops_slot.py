@@ -110,7 +110,7 @@ def acquire(
     """
     target = claim(paths, pooldb, repo_name, wait=wait)
     try:
-        git.git(target.path, "checkout", branch)
+        git.checkout(target.path, branch)
     except BaseException:
         pooldb.release(repo_name, target.uuid)
         raise

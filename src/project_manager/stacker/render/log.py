@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from project_manager.stacker import git, selectors
 from project_manager.stacker.models import SelectorTarget
 from project_manager.stacker.ops.track import require_tracked
-from project_manager.stacker.ops.worktree import require_checked_out
 
 from . import format as fmt
 
@@ -15,8 +14,13 @@ if TYPE_CHECKING:
 
 def log_text(ctx: StackerCtx, target: SelectorTarget) -> str:
     tracked = require_tracked(ctx, target)
-    path = require_checked_out(ctx, target.repo_name, target.branch)
-    entries = git.log_subject_and_author(path, f"{tracked.managed_base_commit}..HEAD")
+    # Log refs directly from the canonical repo. Rendering history is
+    # read-only and must not require (or disturb) a branch checkout.
+    repo_path = ctx.paths.repo(target.repo_name)
+    entries = git.log_subject_and_author(
+        repo_path,
+        f"{tracked.managed_base_commit}..{target.branch}",
+    )
     if not entries:
         return (
             f"No commits since "

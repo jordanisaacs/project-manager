@@ -58,6 +58,7 @@ When you detach a worktree the symlink disappears but the slot stays in the pool
 |---|---|---|
 | `pm pool ls [<repo>]` | List slots with claim status (FREE or owning project) | ✓ |
 | `pm pool add <repo>` | Mint a fresh slot for a repo (pre-warm before claiming) | ✓ |
+| `pm pool delete <repo> <uuid> [--dry-run]` | Delete one exact free, clean, registered slot | ✓ |
 
 ### Repos (canonical clones)
 
@@ -129,10 +130,17 @@ Detach preserves the branch (saved in `.pm.db`); attach restores it.
 ```bash
 pm project wt remove -p my-feature --wt scratch --dry-run   # preview
 pm project wt remove -p my-feature --wt scratch
+# Remove a free pool slot by the full repo/UUID from `pm pool ls --json`:
+pm pool delete frontend <uuid> --dry-run --json
+pm pool delete frontend <uuid> --json
 # Or wipe the whole project:
 pm project delete my-feature --dry-run
 pm project delete my-feature
 ```
+
+`pm pool delete` refuses claimed, locked, unregistered, dirty, or in-progress
+slots, plus detached HEADs whose commits are not reachable from a ref. Dry-run
+exits 1 on a blocker and never reserves or removes the slot.
 
 ### Launching an AI agent in a project
 
@@ -178,6 +186,7 @@ pm stacker ls --json     # see the pm-stacker-workflow skill
 | `pm cd` prints help instead of cd'ing | The zsh wrapper isn't sourced | Source `<install>/integrations/pm-cd.zsh` in zshrc; or use `pm cd --print` for the path |
 | `PoolExhaustedError` on create/attach | No free slots for that repo and the pool can't grow on demand | `pm pool add <repo>` to mint a slot, or `pm project wt detach` an unused worktree to free one |
 | "slot busy" on detach/remove | Slot has a paused `pm stacker` operation holding it | `pm stacker continue` or `pm stacker abort` in the affected worktree first |
+| `pm pool delete` reports a blocker | The exact slot is claimed or has state that deletion could lose | Release/clean the slot, retain any detached commit with a branch/tag, then rerun `--dry-run` |
 
 ## Output Samples (for parsing)
 

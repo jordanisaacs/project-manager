@@ -21,6 +21,8 @@ def repair(
     """Reset stored managed-base / last-synced / last-clean-head to match git.
 
     <base_ref>'s tip becomes the new managed_base (e.g. master, HEAD~3).
+    With `--branch`, refs are resolved against that branch without checking
+    it out. A live target checkout must still be clean.
     """
     paths = config.load()
     svc = _common.service(paths)

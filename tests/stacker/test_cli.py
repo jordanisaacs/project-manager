@@ -148,6 +148,12 @@ def test_reparent_accepts_new_parent_positional() -> None:
     assert bound.arguments["branch"] == "feature-a"
 
 
+def test_log_accepts_explicit_branch_option() -> None:
+    _, bound = _parse("log", "--branch", "feature-a", "--repo", "demo")
+    assert bound.arguments["branch"] == "feature-a"
+    assert bound.arguments["flag"].repo == "demo"
+
+
 def test_reparent_continue_abort_flags() -> None:
     _, cont = _parse("reparent", "--continue")
     _, abrt = _parse("reparent", "--abort")

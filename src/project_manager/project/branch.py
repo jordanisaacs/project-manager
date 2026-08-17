@@ -57,9 +57,14 @@ def read_current_branch(slot_path: Path) -> str | None:
     return name or None
 
 
+def synchronize_submodules(slot_path: Path) -> None:
+    """Repair stale/new/nested submodule checkouts for the slot's current HEAD."""
+    git.update_submodules(slot_path)
+
+
 def park_to_default(slot_path: Path, main_repo: Path) -> None:
     default = wt.default_branch(main_repo)
-    git.git(slot_path, "checkout", "--detach", default)
+    git.checkout(slot_path, "--detach", default)
 
 
 def _branch_in_use_elsewhere(
@@ -80,5 +85,5 @@ def restore(slot_path: Path, main_repo: Path, branch: str) -> RestoreOutcome:
         return RestoreOutcome(RestoreResult.SKIPPED_IN_USE, branch, conflict)
     if not git.branch_exists(main_repo, branch):
         return RestoreOutcome(RestoreResult.SKIPPED_MISSING_BRANCH, branch)
-    git.git(slot_path, "checkout", branch)
+    git.checkout(slot_path, branch)
     return RestoreOutcome(RestoreResult.RESTORED, branch)

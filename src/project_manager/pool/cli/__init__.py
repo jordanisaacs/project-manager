@@ -9,4 +9,5 @@ pool_app = root.command(
 )
 
 from . import add as _add  # noqa: F401,E402
+from . import delete as _delete  # noqa: F401,E402
 from . import ls as _ls  # noqa: F401,E402

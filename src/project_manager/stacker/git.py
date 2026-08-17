@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from project_manager.errors import CommandError
+from project_manager.pool import worktree as pool_worktree
 from project_manager.subprocess_run import run
 
 # Re-export `run` so `git.run(...)` call sites keep working.
@@ -229,6 +230,17 @@ def has_tracked_changes(path: Path) -> bool:
     return bool(out.strip())
 
 
+def update_submodules(path: Path) -> None:
+    """Bring initialized/new/nested submodules in line with the current HEAD."""
+    pool_worktree.update_submodules(path)
+
+
+def checkout(path: Path, *args: str) -> None:
+    """Checkout a ref/branch, then synchronize all submodule working trees."""
+    git(path, "checkout", *args)
+    update_submodules(path)
+
+
 def detach_head(path: Path) -> None:
     """`git checkout --detach HEAD` — drop the slot's branch attachment.
 
@@ -240,7 +252,7 @@ def detach_head(path: Path) -> None:
       - `stacker.ops.remove` (free the branch ref so `git branch -D` works).
       - `pm check --fix` for stale stacker-ops claims.
     """
-    git(path, "checkout", "--detach", "HEAD")
+    checkout(path, "--detach", "HEAD")
 
 
 def has_resumable_state(path: Path) -> bool:
@@ -301,6 +313,7 @@ def in_progress_operation(path: Path) -> str | None:
 
 def reset_hard(path: Path, target: str) -> None:
     git(path, "reset", "--hard", target)
+    update_submodules(path)
 
 
 def cherry_pick(path: Path, commit: str) -> subprocess.CompletedProcess[str]:
@@ -311,7 +324,7 @@ def cherry_pick(path: Path, commit: str) -> subprocess.CompletedProcess[str]:
     # empty merge still goes through `empty.is_empty_cherry_pick_message`
     # → `resume_skip_empty`; `--empty=drop` only affects the pre-merge
     # auto-detected case.
-    return run(
+    result = run(
         [
             "git",
             "-C",
@@ -326,14 +339,18 @@ def cherry_pick(path: Path, commit: str) -> subprocess.CompletedProcess[str]:
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
     )
+    _update_submodules_after_cherry_pick(path, result)
+    return result
 
 
 def cherry_pick_continue(path: Path) -> subprocess.CompletedProcess[str]:
-    return run(
+    result = run(
         ["git", "-C", str(path), "-c", "core.editor=true", "cherry-pick", "--continue"],
         env={"GIT_EDITOR": "true", "GIT_MERGE_AUTOEDIT": "no"},
         check=False,
     )
+    _update_submodules_after_cherry_pick(path, result)
+    return result
 
 
 def cherry_pick_skip(path: Path) -> subprocess.CompletedProcess[str]:
@@ -346,6 +363,28 @@ def cherry_pick_skip(path: Path) -> subprocess.CompletedProcess[str]:
 
 def cherry_pick_abort(path: Path) -> subprocess.CompletedProcess[str]:
     return git(path, "cherry-pick", "--abort", check=False)
+
+
+def _update_submodules_after_cherry_pick(
+    path: Path,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    """Turn a post-commit submodule failure into resumable driver state.
+
+    The cherry-pick has already advanced HEAD, so raising here would bypass
+    the driver's progress bookkeeping. Report a failed result instead: the
+    driver persists a paused operation, and `continue` recomputes how many
+    commits landed before retrying the final submodule synchronization.
+    """
+    if result.returncode != 0:
+        return
+    try:
+        update_submodules(path)
+    except CommandError as exc:
+        result.returncode = 1
+        prefix = result.stderr.rstrip()
+        detail = f"submodule update failed after cherry-pick completed: {exc}"
+        result.stderr = f"{prefix}\n{detail}" if prefix else detail
 
 
 def pp_force(path: Path) -> subprocess.CompletedProcess[str]:

@@ -74,6 +74,9 @@ def sync(
 
     `--continue` / `--abort` are shortcuts for `pm stacker continue` /
     `abort`.
+
+    An explicit `--branch` need not be checked out; sync locates or acquires
+    the worktree it needs. Pass `--repo` when cwd cannot identify the repo.
     """
     paths = config.load()
     svc = _common.service(paths)

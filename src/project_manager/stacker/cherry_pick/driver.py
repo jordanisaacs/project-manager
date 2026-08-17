@@ -271,6 +271,16 @@ def drive_local(
 
 def finalize_local_op(ctx: StackerCtx, op: OperationState, slot_path: Path) -> str | None:
     assert op.branch
+    try:
+        # One final pass covers empty/skipped commits and makes completion
+        # retryable if an earlier successful cherry-pick advanced HEAD but
+        # could not fetch or check out its new gitlinks.
+        git.update_submodules(slot_path)
+    except git.GitError as exc:
+        op.status = "paused"
+        op.error_message = f"submodule update failed: {exc}"
+        ctx.db.put_operation(op)
+        return failure_message(op, slot_path)
     if op.op_type == "local_absorb":
         return _finalize_absorb(ctx, op, slot_path)
     tracked = require_tracked(ctx, SelectorTarget(repo_name=op.repo_name, branch=op.branch))

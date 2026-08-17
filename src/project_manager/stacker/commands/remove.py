@@ -24,6 +24,8 @@ def remove(
 
     --parent also removes all tracked ancestors. --keep-branch untracks
     without deleting the git branch (old `untrack` behavior).
+    The target need not be checked out; deletion detaches a live target
+    worktree before removing the branch ref.
     """
     paths = config.load()
     svc = _common.service(paths)

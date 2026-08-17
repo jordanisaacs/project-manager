@@ -50,6 +50,7 @@ pm project delete <name> [--repos …]       # per-repo or whole project
 # pool — worktree slots
 pm pool ls [<repo>]                        # slots with claim status
 pm pool add <repo>                         # mint a slot
+pm pool delete <repo> <uuid> [--dry-run]   # safely delete one exact free slot
 
 # repo — canonical clones
 pm repo ls                                 # repos with branch + upstream
@@ -67,7 +68,8 @@ pm stacker reparent <new-parent> [--branch <b>] [--continue | --abort]
 pm stacker split <new-name> <commit> [--stay]
 pm stacker rename <new-name>
 pm stacker absorb [--continue | --abort]
-pm stacker log [<branch>]
+pm stacker log [--branch <branch>] [--repo <repo>]
+pm stacker repair <base-ref> [--branch <branch>] [--repo <repo>]
 pm stacker continue | abort                # resume/cancel paused op
 pm stacker config [--list | --unset] [<key> [<value>]]   # pr.* and github.config-dir
 pm stacker pr refresh                      # re-look-up the PR for the current branch
@@ -81,6 +83,49 @@ pm cd <project> [<wt>]                     # cd into a project (or worktree); ne
 pm cd --print <project> [<wt>]             # print path instead — wrap with `cd "$(pm cd --print …)"`
 pm check [--fix]                           # invariant scan across pool, projects, repos
 ```
+
+### Safe pool slot deletion
+
+Use the full repo and UUID from `pm pool ls --json`; deletion never does
+prefix or fuzzy matching. Preview it first when removing a warm slot:
+
+```bash
+pm pool delete frontend 01234567-89ab-cdef-0123-456789abcdef --dry-run --json
+pm pool delete frontend 01234567-89ab-cdef-0123-456789abcdef --json
+```
+
+The dry-run exits 0 when deletion is safe and 1 when it reports a blocker.
+The live command atomically reserves the slot, then refuses project/stacker
+claims, unregistered or locked worktrees, in-progress operations, tracked or
+untracked files, and detached commits not reachable from a branch, remote ref,
+or tag. On success it removes both the Git worktree registration and slot path.
+
+### Stacker branch targeting and checkouts
+
+Explicit branch selection does not imply that the branch must already be in
+the current worktree. The command audit follows these rules:
+
+| Commands | Checkout behavior |
+|---|---|
+| `ls`, `log --branch`, `pr refresh --branch`, `pr unlink --branch`, `remove --keep-branch` | Read refs or local metadata directly; the target need not be checked out. |
+| `repair --branch` | Resolves refs (including `HEAD~N`) against the target branch without checkout. If the target is checked out, that worktree must be clean. |
+| `sync --branch`, `push --branch`, `absorb --branch`, `reparent --branch` | Work while cwd is detached or on another branch; they locate or acquire the worktree needed for mutations. |
+| `remove --branch` | Does not require a prior checkout; if the branch is live elsewhere, removal detaches that worktree before deleting the ref. |
+| `rename --branch`, `split --branch` | Require the target checkout because they deliberately rename/reset that working tree. |
+| `create --on current\|parent`, `guard no-rebase` | Require current-checkout context by definition. Literal `--on <branch>` with `--repo` does not. |
+| `continue`, `abort` | Require the worktree holding the active operation so conflict state can be resumed or restored. |
+
+Outside a pm slot, pass `--repo`; a detached pm slot can still supply the repo
+while an explicit `--branch` supplies the target.
+
+### Submodule lifecycle
+
+PM-managed checkouts, hard resets, successful cherry-picks, project
+add/detach/attach/remove/delete, and stacker slot acquisition/release synchronize
+`.gitmodules` URLs and run recursive `submodule update --init --checkout`.
+This includes nested and newly-added submodules, so changing a parent gitlink
+does not leave a released or reattached slot falsely dirty. Genuine submodule
+work remains protected by the existing dirty-worktree checks.
 
 ### Sync semantics
 

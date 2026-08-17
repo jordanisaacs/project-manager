@@ -84,7 +84,7 @@ def resolve_slot(
         return AcquiredSlot(path=existing, ops=None)
     cwd_path = _cwd_reuse_path(ctx, repo_name, cwd_reuse)
     if cwd_path is not None:
-        git.git(cwd_path, "checkout", branch)
+        git.checkout(cwd_path, branch)
         return AcquiredSlot(path=cwd_path, ops=None)
     pooldb = PoolDB(ctx.paths.pool_db())
     try:
@@ -103,7 +103,7 @@ def resolve_slot(
         )
         if fallback is None:
             raise
-        git.git(fallback, "checkout", branch)
+        git.checkout(fallback, branch)
         return AcquiredSlot(path=fallback, ops=None)
     return AcquiredSlot(path=claimed.path, ops=claimed)
 
