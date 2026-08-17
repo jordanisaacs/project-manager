@@ -1,7 +1,9 @@
-import contextlib
+import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from project_manager.errors import CommandError
 from project_manager.subprocess_run import run
@@ -45,78 +47,276 @@ def update_submodules(worktree: Path) -> None:
     _git(worktree, "submodule", "update", "--init", "--recursive", "--checkout")
 
 
-# git ls-tree -r HEAD lines are "<mode> <type> <sha>\t<path>" — 4 whitespace-separated fields.
-_LS_TREE_FIELDS = 4
 _SUBMODULE_MODE = "160000"
+_LS_TREE_FIELD_COUNT = 3
+_SUBMODULE_PATH_KEY = re.compile(r"^submodule\.(?P<name>.+)\.path$")
+_SCP_LIKE_URL = re.compile(r"^(?:[^/@:]+@)?[^/:]+:.+")
 
 
-def _submodule_entries(worktree: Path) -> list[tuple[str, str]]:
-    """Return [(commit, path), ...] for every submodule pinned at HEAD."""
-    result = _git(worktree, "ls-tree", "-r", "HEAD")
-    entries: list[tuple[str, str]] = []
-    for line in result.stdout.splitlines():
-        parts = line.split(None, 3)
-        if len(parts) < _LS_TREE_FIELDS:
+@dataclass(frozen=True)
+class _Submodule:
+    name: str
+    path: str
+    commit: str
+
+
+def _submodule_entries(worktree: Path) -> list[_Submodule]:
+    """Return configured submodules and their gitlinks at the current HEAD."""
+    gitmodules = worktree / ".gitmodules"
+    if not gitmodules.is_file():
+        return []
+
+    tree = _git(worktree, "ls-tree", "-rz", "HEAD")
+    commits: dict[str, str] = {}
+    for record in tree.stdout.split("\0"):
+        metadata, separator, path = record.partition("\t")
+        if not separator:
             continue
-        mode, _obj_type, sha, path = parts
-        if mode == _SUBMODULE_MODE:
-            entries.append((sha, path))
+        fields = metadata.split()
+        if len(fields) == _LS_TREE_FIELD_COUNT and fields[0] == _SUBMODULE_MODE:
+            commits[path] = fields[2]
+
+    configured = _git(
+        worktree,
+        "config",
+        "--file",
+        str(gitmodules),
+        "--get-regexp",
+        r"^submodule\..*\.path$",
+        check=False,
+    )
+    entries: list[_Submodule] = []
+    for line in configured.stdout.splitlines():
+        key, separator, path = line.partition(" ")
+        match = _SUBMODULE_PATH_KEY.fullmatch(key)
+        if not separator or match is None or path not in commits:
+            continue
+        entries.append(_Submodule(name=match.group("name"), path=path, commit=commits[path]))
     return entries
 
 
-def init_submodules(main_repo: Path, worktree: Path) -> None:
-    """For each submodule pinned at HEAD in the worktree:
+def _git_dir(repo: Path) -> Path | None:
+    result = _git(repo, "rev-parse", "--absolute-git-dir", check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return Path(result.stdout.strip()).resolve()
 
-    git clone --reference <main_repo>/<path> --no-checkout <url> <worktree>/<path>
-    git -C <worktree>/<path> checkout <sha>
 
-    Skips if main repo has not initialized the submodule.
-    """
-    entries = _submodule_entries(worktree)
-    for sha, path in entries:
-        main_sub = main_repo / path
-        worktree_sub = worktree / path
-        if not (main_sub / ".git").exists():
-            # Orphan gitlink: gitlink in HEAD with no `.gitmodules` URL (so it
-            # can never be initialized). Common when a submodule was removed
-            # in the upstream tree but the gitlink entry survived. Skip it —
-            # `git submodule update --init` would fail too.
-            gitmodules_url = _git(
-                main_repo,
-                "config",
-                "--file",
-                ".gitmodules",
-                f"submodule.{path}.url",
-                check=False,
-            )
-            if gitmodules_url.returncode != 0 or not gitmodules_url.stdout.strip():
+def _module_git_dir(superproject: Path, name: str) -> Path | None:
+    result = _git(
+        superproject,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        f"modules/{name}",
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    path = Path(result.stdout.strip())
+    return path if _git_dir(path) is not None else None
+
+
+def _pool_superprojects(main_repo: Path, worktree: Path) -> list[Path]:
+    """Return canonical then existing slot checkouts that can seed submodules."""
+    sources = [main_repo]
+    if not worktree.parent.is_dir():
+        return sources
+    destination = worktree.resolve()
+    for candidate in sorted(worktree.parent.iterdir()):
+        if not candidate.is_dir() or candidate.resolve() == destination:
+            continue
+        if _git_dir(candidate) is not None:
+            sources.append(candidate)
+    return sources
+
+
+def _candidate_repositories(
+    superprojects: list[Path],
+    submodule: _Submodule,
+) -> list[Path]:
+    """Find checkout and stored-gitdir candidates at the corresponding path."""
+    candidates: list[Path] = []
+    seen_git_dirs: set[Path] = set()
+    for superproject in superprojects:
+        stored = _module_git_dir(superproject, submodule.name)
+        for candidate in (superproject / submodule.path, stored):
+            if candidate is None:
                 continue
-            raise CommandError(
-                f"submodule '{path}' is not initialized in main repo {main_repo}; "
-                f"run `git -C {main_repo} submodule update --init --recursive` first"
-            )
-        url = _git(main_sub, "remote", "get-url", "origin").stdout.strip()
-        worktree_sub.parent.mkdir(parents=True, exist_ok=True)
-        if worktree_sub.is_dir():
-            with contextlib.suppress(OSError):
-                worktree_sub.rmdir()
-        _git(
-            worktree,
-            "clone",
-            "--reference",
-            str(main_sub),
-            "--no-checkout",
-            url,
-            str(worktree_sub),
+            git_dir = _git_dir(candidate)
+            if git_dir is None or git_dir in seen_git_dirs:
+                continue
+            seen_git_dirs.add(git_dir)
+            candidates.append(candidate)
+    return candidates
+
+
+def _url_identity(repo: Path, url: str) -> tuple[str, str]:
+    """Normalize URL rewrites and local paths without contacting the remote."""
+    expanded = _git(repo, "ls-remote", "--get-url", url, check=False)
+    value = expanded.stdout.strip() if expanded.returncode == 0 else url
+    if value.startswith("file://"):
+        parsed = urlsplit(value)
+        if parsed.netloc in {"", "localhost"}:
+            return "file", str(Path(unquote(parsed.path)).resolve())
+    if "://" not in value and _SCP_LIKE_URL.fullmatch(value) is None:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = repo / path
+        return "file", str(path.resolve())
+    return "remote", value.rstrip("/")
+
+
+def _configured_url(superproject: Path, submodule: _Submodule) -> str:
+    """Register and return Git's resolved URL for one submodule."""
+    _git(superproject, "submodule", "sync", "--", submodule.path)
+    _git(superproject, "submodule", "init", "--", submodule.path)
+    result = _git(
+        superproject,
+        "config",
+        "--get",
+        f"submodule.{submodule.name}.url",
+        check=False,
+    )
+    url = result.stdout.strip()
+    if result.returncode != 0 or not url:
+        raise CommandError(
+            f"submodule '{submodule.path}' has no configured URL in {superproject / '.gitmodules'}"
         )
-        checkout = _git(worktree_sub, "checkout", "--quiet", sha, check=False)
-        if checkout.returncode != 0:
-            # try fetching the specific commit
-            _git(worktree_sub, "fetch", "origin", sha, "--depth=1", check=False)
-            _git(worktree_sub, "checkout", "--quiet", sha)
-    # The reference clones above cover top-level submodules efficiently;
-    # finish with Git's recursive machinery so nested modules are initialized
-    # and every configured URL matches the checked-out `.gitmodules` file.
+    return url
+
+
+def _compatible_sources(
+    superprojects: list[Path],
+    submodule: _Submodule,
+    configured_url: str,
+    target_superproject: Path,
+) -> list[Path]:
+    wanted = _url_identity(target_superproject, configured_url)
+    compatible: list[Path] = []
+    for candidate in _candidate_repositories(superprojects, submodule):
+        remote = _git(candidate, "remote", "get-url", "origin", check=False)
+        if remote.returncode != 0 or not remote.stdout.strip():
+            continue
+        if _url_identity(candidate, remote.stdout.strip()) == wanted:
+            compatible.append(candidate)
+    return compatible
+
+
+def _has_commit(repo: Path, commit: str) -> bool:
+    result = run(
+        ["git", "-C", str(repo), "cat-file", "-e", f"{commit}^{{commit}}"],
+        env={"GIT_NO_LAZY_FETCH": "1"},
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _prepare_submodule(destination: Path, configured_url: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if not destination.is_dir() or destination.is_symlink():
+            raise CommandError(f"refusing to replace non-directory submodule path {destination}")
+        try:
+            destination.rmdir()
+        except OSError as error:
+            message = f"refusing to replace non-empty submodule path {destination}"
+            raise CommandError(message) from error
+    run(["git", "init", "--quiet", str(destination)])
+    _git(destination, "remote", "add", "origin", configured_url)
+
+
+def _fetch_local_commit(destination: Path, source: Path, commit: str) -> bool:
+    """Copy one committed object graph locally, without refs or worktree state."""
+    result = run(
+        [
+            "git",
+            "-C",
+            str(destination),
+            "-c",
+            "protocol.file.allow=always",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            str(source),
+            commit,
+        ],
+        env={"GIT_NO_LAZY_FETCH": "1"},
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _fetch_remote_commit(destination: Path, commit: str) -> None:
+    exact = _git(
+        destination,
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "origin",
+        commit,
+        check=False,
+    )
+    if exact.returncode != 0:
+        _git(destination, "fetch", "--quiet", "--no-tags", "origin")
+
+
+def _initialize_submodule(
+    superproject: Path,
+    submodule: _Submodule,
+    configured_url: str,
+    sources: list[Path],
+) -> Path:
+    """Initialize one standalone submodule from a local source or its origin."""
+    destination = superproject / submodule.path
+    try:
+        _prepare_submodule(destination, configured_url)
+        reused = any(
+            _fetch_local_commit(destination, source, submodule.commit)
+            for source in sources
+            if _has_commit(source, submodule.commit)
+        )
+        if not reused:
+            _fetch_remote_commit(destination, submodule.commit)
+        _git(destination, "checkout", "--quiet", "--detach", submodule.commit)
+    except BaseException:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+    return destination
+
+
+def _init_submodules_recursive(superproject: Path, source_superprojects: list[Path]) -> None:
+    for submodule in _submodule_entries(superproject):
+        configured_url = _configured_url(superproject, submodule)
+        compatible = _compatible_sources(
+            source_superprojects,
+            submodule,
+            configured_url,
+            superproject,
+        )
+        destination = _initialize_submodule(
+            superproject,
+            submodule,
+            configured_url,
+            compatible,
+        )
+        _init_submodules_recursive(destination, compatible)
+
+
+def init_submodules(main_repo: Path, worktree: Path) -> None:
+    """Initialize exact submodule commits, preferring compatible local repositories.
+
+    The superproject itself is a linked worktree and already shares its object
+    store with ``main_repo``. Git does not propagate that sharing to separate
+    submodule repositories, so seed each submodule with an exact-SHA fetch from
+    the canonical checkout/object store or an existing pool slot. A local fetch
+    transfers committed objects only; it cannot copy a source index, worktree,
+    or untracked files, and leaves no alternate dependency on a deletable slot.
+    """
+    _init_submodules_recursive(worktree, _pool_superprojects(main_repo, worktree))
+    # Use Git's recursive machinery as a final invariant check and URL sync.
+    # Every configured submodule is already initialized at its pinned commit,
+    # so this does not contact a remote after successful local reuse.
     update_submodules(worktree)
 
 

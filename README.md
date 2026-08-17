@@ -127,6 +127,13 @@ This includes nested and newly-added submodules, so changing a parent gitlink
 does not leave a released or reattached slot falsely dirty. Genuine submodule
 work remains protected by the existing dirty-worktree checks.
 
+When a pool slot is first created, PM checks the canonical checkout and existing
+slots for URL-compatible submodule repositories (including stored module
+gitdirs). It fetches the exact pinned commit locally when available, recursively,
+without copying worktree/index state or retaining an alternate dependency. The
+configured submodule remote is used only when no usable local store has that
+commit.
+
 ### Sync semantics
 
 `pm stacker sync` always cherry-picks exactly the commits the branch

@@ -11,7 +11,7 @@ def add(paths: Paths, repo: str) -> Slot:
     """Mint a new UUID slot under the pool for `repo`.
 
     1. git worktree add --detach <slot> <default-branch>
-    2. init_submodules (--reference sharing)
+    2. init_submodules (exact-commit local reuse, then remote fallback)
     3. copy untracked CLAUDE.md / CLAUDE.local.md
     4. run init.sh if present
     """
