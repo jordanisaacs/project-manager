@@ -263,23 +263,100 @@ def _fetch_remote_commit(destination: Path, commit: str) -> None:
         _git(destination, "fetch", "--quiet", "--no-tags", "origin")
 
 
+def _seed_canonical_module(module_dir: Path, commit: str, sources: list[Path]) -> bool:
+    """Fetch `commit` into the canonical module store and keep it reachable.
+
+    A branch can pin a submodule commit the canonical checkout has not fetched.
+    Seed it — preferring a local source that already has it, else the origin —
+    so slots can borrow it via alternates. Anchor it under `refs/pm/pinned/` so
+    a later gc in the canonical module store cannot prune objects that live
+    slots now depend on.
+    """
+    seeded = any(
+        _fetch_local_commit(module_dir, source, commit)
+        for source in sources
+        if _has_commit(source, commit)
+    )
+    if not seeded:
+        _fetch_remote_commit(module_dir, commit)
+    if not _has_commit(module_dir, commit):
+        return False
+    _git(module_dir, "update-ref", f"refs/pm/pinned/{commit}", commit)
+    return True
+
+
+def _canonical_module_objects(
+    main_repo: Path,
+    submodule: _Submodule,
+    configured_url: str,
+    sources: list[Path],
+) -> Path | None:
+    """Return the canonical repo's module object store to borrow, or None.
+
+    A slot is a linked worktree of `main_repo` and already borrows its object
+    store — so the slot is already unusable if `main_repo` is deleted. Pointing
+    a submodule's `objects/info/alternates` at the canonical module store under
+    `main_repo` therefore adds no *new* durability dependency, while avoiding a
+    full object copy per slot. This targets only the canonical repo — never a
+    sibling pool slot, which can be removed independently.
+
+    Returns None (caller falls back to copying) when the canonical module store
+    is absent, tracks a different origin, or cannot be seeded with the pinned
+    commit.
+    """
+    module_dir = _module_git_dir(main_repo, submodule.name)
+    if module_dir is None:
+        return None
+    origin = _git(module_dir, "remote", "get-url", "origin", check=False)
+    if origin.returncode != 0 or not origin.stdout.strip():
+        return None
+    if _url_identity(module_dir, origin.stdout.strip()) != _url_identity(main_repo, configured_url):
+        return None
+    if not _has_commit(module_dir, submodule.commit) and not _seed_canonical_module(
+        module_dir, submodule.commit, sources
+    ):
+        return None
+    return module_dir / "objects"
+
+
+def _set_submodule_alternate(destination: Path, objects: Path) -> None:
+    """Borrow committed objects from `objects` instead of copying them in."""
+    git_dir = _git_dir(destination)
+    if git_dir is None:
+        raise CommandError(f"submodule {destination} has no git directory")
+    info = git_dir / "objects" / "info"
+    info.mkdir(parents=True, exist_ok=True)
+    (info / "alternates").write_text(f"{objects}\n")
+
+
 def _initialize_submodule(
     superproject: Path,
     submodule: _Submodule,
     configured_url: str,
     sources: list[Path],
+    main_repo: Path,
 ) -> Path:
-    """Initialize one standalone submodule from a local source or its origin."""
+    """Initialize one standalone submodule, borrowing or copying its objects.
+
+    Prefer borrowing the canonical repo's module object store via alternates —
+    no copy, no new durability dependency (see `_canonical_module_objects`).
+    Fall back to copying committed objects from a compatible local source or
+    the origin when the canonical store cannot serve the pinned commit.
+    """
     destination = superproject / submodule.path
     try:
         _prepare_submodule(destination, configured_url)
-        reused = any(
-            _fetch_local_commit(destination, source, submodule.commit)
-            for source in sources
-            if _has_commit(source, submodule.commit)
-        )
-        if not reused:
-            _fetch_remote_commit(destination, submodule.commit)
+        canonical_objects = _canonical_module_objects(main_repo, submodule, configured_url, sources)
+        if canonical_objects is not None:
+            _set_submodule_alternate(destination, canonical_objects)
+        else:
+            reused = any(
+                _fetch_local_commit(destination, source, submodule.commit)
+                for source in sources
+                if _has_commit(source, submodule.commit)
+            )
+            if not reused:
+                _fetch_remote_commit(destination, submodule.commit)
         _git(destination, "checkout", "--quiet", "--detach", submodule.commit)
     except BaseException:
         shutil.rmtree(destination, ignore_errors=True)
@@ -291,6 +368,7 @@ async def _init_submodules_recursive(
     superproject: Path,
     source_superprojects: list[Path],
     semaphore: asyncio.Semaphore,
+    main_repo: Path,
 ) -> None:
     """Seed every submodule of ``superproject``, fanning out across the tree.
 
@@ -326,8 +404,9 @@ async def _init_submodules_recursive(
                 submodule,
                 configured_url,
                 compatible,
+                main_repo,
             )
-        await _init_submodules_recursive(destination, compatible, semaphore)
+        await _init_submodules_recursive(destination, compatible, semaphore, main_repo)
 
     async with asyncio.TaskGroup() as tg:
         for submodule, configured_url, compatible in prepared:
@@ -335,18 +414,22 @@ async def _init_submodules_recursive(
 
 
 def init_submodules(main_repo: Path, worktree: Path) -> None:
-    """Initialize exact submodule commits, preferring compatible local repositories.
+    """Initialize exact submodule commits, borrowing the canonical object store.
 
     The superproject itself is a linked worktree and already shares its object
     store with ``main_repo``. Git does not propagate that sharing to separate
-    submodule repositories, so seed each submodule with an exact-SHA fetch from
-    the canonical checkout/object store or an existing pool slot. A local fetch
-    transfers committed objects only; it cannot copy a source index, worktree,
-    or untracked files, and leaves no alternate dependency on a deletable slot.
+    submodule repositories, so each submodule points its
+    ``objects/info/alternates`` at the canonical repo's module object store —
+    borrowing, not copying, the committed objects (see
+    ``_canonical_module_objects``). Because the slot already depends on
+    ``main_repo`` as a linked worktree, this adds no new durability dependency
+    and skips a multi-gigabyte copy. When the canonical store cannot serve the
+    pinned commit, fall back to an exact-SHA copy from a compatible local
+    source or the origin — never an alternate onto a deletable sibling slot.
 
     Submodules are seeded in parallel (bounded by ``[concurrency].limit``);
     a repo that vendors several large source trees (e.g. hadron's per-version
-    Postgres subrepos) otherwise pays for each fetch and checkout end to end.
+    Postgres subrepos) otherwise pays for each seed and checkout end to end.
     """
 
     async def _run() -> None:
@@ -355,6 +438,7 @@ def init_submodules(main_repo: Path, worktree: Path) -> None:
             worktree,
             _pool_superprojects(main_repo, worktree),
             semaphore,
+            main_repo,
         )
 
     try:

@@ -102,12 +102,29 @@ def _origin(repo: Path) -> str:
     return _run(repo, "remote", "get-url", "origin").stdout.strip()
 
 
+def _alternate_targets(submodule: Path) -> list[str]:
+    alternates = submodule / ".git" / "objects" / "info" / "alternates"
+    if not alternates.exists():
+        return []
+    return [line.strip() for line in alternates.read_text().splitlines() if line.strip()]
+
+
+def _canonical_module_objects_dir(parent_path: Path, submodule_name: str) -> Path:
+    module_dir = _run(
+        parent_path,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-path",
+        f"modules/{submodule_name}",
+    ).stdout.strip()
+    return Path(module_dir) / "objects"
+
+
 def _assert_initialized(slot: Path, parent: ParentRepo, commit: str | None = None) -> Path:
     submodule = slot / parent.submodule_path
     assert git.rev_parse(submodule, "HEAD") == (commit or parent.submodule_commit)
     assert _origin(submodule) == str(parent.submodule_origin)
     assert git.git(slot, "status", "--porcelain").stdout == ""
-    assert not (submodule / ".git" / "objects" / "info" / "alternates").exists()
     return submodule
 
 
@@ -122,7 +139,29 @@ def test_pool_add_reuses_canonical_submodule_object_store_when_remote_is_unavail
     slot = pool_add.add(pm_env, parent.name)
 
     assert object_store.is_dir()
-    _assert_initialized(slot.path, parent)
+    submodule = _assert_initialized(slot.path, parent)
+    # Offline, but the canonical module store still has the commit, so the slot
+    # borrows it via an alternate rather than copying.
+    assert _alternate_targets(submodule) == [str(object_store / "objects")]
+
+
+def test_pool_add_borrows_canonical_object_store_and_never_a_sibling_slot(
+    pm_env: Paths,
+    tmp_path: Path,
+) -> None:
+    parent = _parent_repo(pm_env, tmp_path)
+    canonical_objects = _canonical_module_objects_dir(parent.path, parent.submodule_path)
+
+    first = pool_add.add(pm_env, parent.name)
+    second = pool_add.add(pm_env, parent.name)
+
+    pool_root = pm_env.pool(parent.name)
+    for slot in (first, second):
+        submodule = _assert_initialized(slot.path, parent)
+        # Every slot borrows the canonical module store, so removing any one
+        # slot cannot corrupt another — alternates never point into the pool.
+        assert _alternate_targets(submodule) == [str(canonical_objects)]
+        assert all(str(pool_root) not in target for target in _alternate_targets(submodule))
 
 
 def test_pool_add_reuses_dirty_pool_submodule_without_copying_uncommitted_state(
@@ -130,20 +169,26 @@ def test_pool_add_reuses_dirty_pool_submodule_without_copying_uncommitted_state(
     tmp_path: Path,
 ) -> None:
     parent = _parent_repo(pm_env, tmp_path)
-    source_slot = pool_add.add(pm_env, parent.name)
+    # Drop the canonical module store up front so slots cannot borrow it and
+    # instead copy self-contained object graphs — the path this test exercises.
     _remove_canonical_submodule(parent, keep_object_store=False)
-    parent.submodule_origin.rename(tmp_path / "offline-origin")
+    source_slot = pool_add.add(pm_env, parent.name)
 
     source = source_slot.path / parent.submodule_path
     (source / "tracked.txt").write_text("dirty source content\n")
     (source / "untracked.txt").write_text("source-only\n")
     _run(source, "add", "tracked.txt")
+    # Only now sever the origin, so the new slot must reuse the dirty sibling.
+    parent.submodule_origin.rename(tmp_path / "offline-origin")
 
     new_slot = pool_add.add(pm_env, parent.name)
 
     initialized = _assert_initialized(new_slot.path, parent)
     assert initialized.joinpath("tracked.txt").read_text() == "submodule-origin v1\n"
     assert not initialized.joinpath("untracked.txt").exists()
+    # With no canonical store to borrow, the slot copies committed objects from
+    # the sibling and never sets an alternate onto that deletable slot.
+    assert _alternate_targets(initialized) == []
 
 
 def test_pool_add_falls_back_to_remote_when_local_store_lacks_required_commit(
@@ -170,6 +215,11 @@ def test_pool_add_falls_back_to_remote_when_local_store_lacks_required_commit(
 
     initialized = _assert_initialized(slot.path, parent, new_commit)
     assert initialized.joinpath("v2.txt").read_text() == "remote v2\n"
+    # The canonical module store lacked v2, so it was seeded from the origin
+    # and the slot borrows it via an alternate.
+    assert _alternate_targets(initialized) == [
+        str(_canonical_module_objects_dir(parent.path, parent.submodule_path))
+    ]
 
 
 def test_pool_add_rejects_mismatched_local_source_and_cleans_failed_slot(
@@ -230,14 +280,21 @@ def test_pool_add_reuses_existing_slot_recursively_when_all_remotes_are_unavaila
     tmp_path: Path,
 ) -> None:
     nested = _nested_repo(pm_env, tmp_path)
-    source_slot = pool_add.add(pm_env, nested.name)
 
+    # Drop the canonical module store before minting any slot, so slots copy
+    # self-contained object graphs (recursively) rather than borrowing it —
+    # this test covers the copy fallback and its recursion, not borrowing.
     canonical_middle = nested.parent / "modules/middle"
     canonical_git_dir = Path(
         _run(canonical_middle, "rev-parse", "--absolute-git-dir").stdout.strip()
     )
     _run(nested.parent, "submodule", "deinit", "-f", "--", "modules/middle")
     shutil.rmtree(canonical_git_dir)
+
+    # Source slot copies middle + leaf from the (still online) origins.
+    source_slot = pool_add.add(pm_env, nested.name)
+
+    # Now sever the origins so the next slot must reuse the source slot.
     nested.middle_origin.rename(tmp_path / "offline-middle")
     nested.leaf_origin.rename(tmp_path / "offline-leaf")
 
