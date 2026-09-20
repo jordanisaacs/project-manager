@@ -1,3 +1,4 @@
+import asyncio
 import re
 import shutil
 import subprocess
@@ -5,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from project_manager import config
 from project_manager.errors import CommandError
 from project_manager.subprocess_run import run
 
@@ -285,7 +287,22 @@ def _initialize_submodule(
     return destination
 
 
-def _init_submodules_recursive(superproject: Path, source_superprojects: list[Path]) -> None:
+async def _init_submodules_recursive(
+    superproject: Path,
+    source_superprojects: list[Path],
+    semaphore: asyncio.Semaphore,
+) -> None:
+    """Seed every submodule of ``superproject``, fanning out across the tree.
+
+    Registration (``git submodule sync``/``init``) mutates the superproject's
+    ``.git/config``, which Git guards with a ``config.lock`` — running it for
+    sibling submodules concurrently would race. So each level first registers
+    its submodules sequentially, then seeds their object stores and working
+    trees in parallel. Nested submodules recurse under the *same* shared
+    semaphore, so in-flight git children stay bounded by ``[concurrency].limit``
+    across the whole tree, not per level.
+    """
+    prepared: list[tuple[_Submodule, str, list[Path]]] = []
     for submodule in _submodule_entries(superproject):
         configured_url = _configured_url(superproject, submodule)
         compatible = _compatible_sources(
@@ -294,13 +311,27 @@ def _init_submodules_recursive(superproject: Path, source_superprojects: list[Pa
             configured_url,
             superproject,
         )
-        destination = _initialize_submodule(
-            superproject,
-            submodule,
-            configured_url,
-            compatible,
-        )
-        _init_submodules_recursive(destination, compatible)
+        prepared.append((submodule, configured_url, compatible))
+    if not prepared:
+        return
+
+    async def _seed(submodule: _Submodule, configured_url: str, compatible: list[Path]) -> None:
+        # `_initialize_submodule` is a blocking pipeline of git subprocesses on
+        # a private destination repo; a thread keeps the event loop free while
+        # it fetches and checks out. The semaphore caps concurrent children.
+        async with semaphore:
+            destination = await asyncio.to_thread(
+                _initialize_submodule,
+                superproject,
+                submodule,
+                configured_url,
+                compatible,
+            )
+        await _init_submodules_recursive(destination, compatible, semaphore)
+
+    async with asyncio.TaskGroup() as tg:
+        for submodule, configured_url, compatible in prepared:
+            tg.create_task(_seed(submodule, configured_url, compatible))
 
 
 def init_submodules(main_repo: Path, worktree: Path) -> None:
@@ -312,12 +343,39 @@ def init_submodules(main_repo: Path, worktree: Path) -> None:
     the canonical checkout/object store or an existing pool slot. A local fetch
     transfers committed objects only; it cannot copy a source index, worktree,
     or untracked files, and leaves no alternate dependency on a deletable slot.
+
+    Submodules are seeded in parallel (bounded by ``[concurrency].limit``);
+    a repo that vendors several large source trees (e.g. hadron's per-version
+    Postgres subrepos) otherwise pays for each fetch and checkout end to end.
     """
-    _init_submodules_recursive(worktree, _pool_superprojects(main_repo, worktree))
+
+    async def _run() -> None:
+        semaphore = asyncio.Semaphore(config.concurrency().limit)
+        await _init_submodules_recursive(
+            worktree,
+            _pool_superprojects(main_repo, worktree),
+            semaphore,
+        )
+
+    try:
+        asyncio.run(_run())
+    except BaseExceptionGroup as group:
+        # `TaskGroup` reports child failures as an `ExceptionGroup`, but callers
+        # (and `pool.add`'s cleanup) expect the original `CommandError`. The
+        # group cancels siblings on the first failure, so surfacing the first
+        # leaf matches the old sequential behavior of stopping at that error.
+        raise _first_leaf_exception(group) from None
     # Use Git's recursive machinery as a final invariant check and URL sync.
     # Every configured submodule is already initialized at its pinned commit,
     # so this does not contact a remote after successful local reuse.
     update_submodules(worktree)
+
+
+def _first_leaf_exception(error: BaseException) -> BaseException:
+    """Descend nested `ExceptionGroup`s to the first underlying exception."""
+    while isinstance(error, BaseExceptionGroup):
+        error = error.exceptions[0]
+    return error
 
 
 def copy_claude_files(main_repo: Path, worktree: Path) -> None:
