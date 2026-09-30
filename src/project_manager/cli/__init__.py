@@ -10,6 +10,7 @@ import sys
 
 from project_manager.agent.cli import agent_app as _agent_app  # noqa: F401
 from project_manager.errors import CommandError, ProjectError
+from project_manager.omnigent.cli import omnigent_app as _omnigent_app  # noqa: F401
 from project_manager.pool.cli import pool_app as _pool_app  # noqa: F401
 from project_manager.pool.slot import PoolExhaustedError
 from project_manager.project.cli import project_app as _project_app  # noqa: F401

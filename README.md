@@ -175,6 +175,98 @@ therefore retains the GitHub CLI's usual precedence over stored credentials.
 
 `integrations/` holds optional plug-ins for the surrounding tooling.
 
+### Omnigent project sync
+
+PM can mirror its named projects into an Omnigent server. The integration is
+off unless an `[omnigent]` table is present in PM's normal config file
+(`$PM_CONFIG`, `$XDG_CONFIG_HOME/pm/config.toml`, or
+`~/.config/pm/config.toml`):
+
+```toml
+[omnigent]
+server_url = "http://localhost:6767"
+host_id = "0123456789abcdef0123456789abcdef"
+```
+
+`host_id` is the Omnigent host that can access the PM project directories. For
+a local `omnigent host`, it is `host.host_id` in
+`~/.omnigent/config.yaml`; it is also returned by `GET /v1/hosts`. Each synced
+Omnigent project receives these defaults:
+
+```json
+{
+  "host_id": "<configured host_id>",
+  "workspace": "<absolute path to ~/.projects/project-name>"
+}
+```
+
+PM merges those two keys into the project's existing Omnigent config, so
+defaults managed in Omnigent (such as `agent_id`, `model`, or `base_branch`)
+survive later syncs.
+
+For a server requiring a bearer token, keep the secret out of TOML and name an
+environment variable:
+
+```toml
+[omnigent]
+server_url = "https://omnigent.example.com"
+host_id = "0123456789abcdef0123456789abcdef"
+token_env = "PM_OMNIGENT_TOKEN"
+```
+
+```bash
+export PM_OMNIGENT_TOKEN="..."
+```
+
+For renewable credentials, configure an argv-style command instead. PM accepts
+either a plain token on stdout or JSON containing `access_token` / `token`:
+
+```toml
+[omnigent]
+server_url = "https://workspace.example.com/api/2.0/omnigent"
+host_id = "0123456789abcdef0123456789abcdef"
+token_command = ["databricks", "auth", "token", "--profile", "YOUR_PROFILE"]
+timeout_seconds = 15
+```
+
+`token_env` and `token_command` are mutually exclusive. Omit both for an
+unauthenticated local server. To disable a retained configuration without
+deleting it, set `enabled = false`.
+
+Backfill existing projects and verify the result:
+
+```bash
+pm omnigent sync --json
+pm project create omnigent-sync-check
+pm omnigent sync --json
+```
+
+The first command creates or adopts same-name Omnigent projects. The second
+demonstrates automatic sync for future CLI-created projects; `pm project
+delete` automatically removes its mapped Omnigent project. Automatic sync is
+best-effort: a network/auth failure prints a warning but never rolls back a
+successful local create/delete. The explicit sync exits non-zero when any item
+fails and retries pending work.
+
+Identity mappings and deletion tombstones live in
+`<projects-root>/.pm-omnigent.db`. This makes repeated syncs idempotent and
+allows a failed remote deletion to be retried after the local directory is
+gone. PM only deletes remote IDs recorded in this database; unrelated
+Omnigent-only projects are never pruned. If a mapped project is renamed or
+deleted in Omnigent, the next sync restores the PM name or recreates it. PM
+does not currently support renaming local projects; use its supported
+create/delete lifecycle rather than moving a project directory by hand.
+
+Check the Omnigent UI or query the API after setup:
+
+```bash
+curl -sS \
+  -H "Authorization: Bearer $PM_OMNIGENT_TOKEN" \
+  "$OMNIGENT_URL/v1/projects" | jq '.data[] | {name, config}'
+```
+
+For an unauthenticated local server, omit the `Authorization` header.
+
 ### Shell (zsh)
 
 - **`pm-git-guard.zsh`** — source from `~/.zshrc`. Blocks `git pull` /

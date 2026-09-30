@@ -32,3 +32,7 @@ class Paths:
 
     def pool_db(self) -> Path:
         return self.worktrees / "pool.db"
+
+    def omnigent_db(self) -> Path:
+        """Durable PM-to-Omnigent identity mappings and deletion tombstones."""
+        return self.projects / ".pm-omnigent.db"

@@ -4,6 +4,7 @@ import zoneinfo
 from dataclasses import dataclass
 from datetime import tzinfo
 from pathlib import Path
+from typing import Never
 from urllib.parse import urlsplit, urlunsplit
 
 from project_manager.paths import Paths
@@ -72,6 +73,21 @@ class Serve:
 
     port: int = DEFAULT_SERVE_PORT
     allowed_origins: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Omnigent:
+    """Optional Omnigent project-sync settings.
+
+    Authentication is deliberately indirect: secrets come from an environment
+    variable or an argv-style command, never from PM's TOML file.
+    """
+
+    server_url: str
+    host_id: str
+    token_env: str | None = None
+    token_command: tuple[str, ...] | None = None
+    timeout_seconds: float = 10.0
 
 
 def _expand(value: str) -> Path:
@@ -228,6 +244,88 @@ def serve() -> Serve:
     )
 
 
+def omnigent() -> Omnigent | None:
+    """Load the optional `[omnigent]` project-sync integration.
+
+    Omitting the table (or setting ``enabled = false``) keeps PM entirely
+    offline. ``token_env`` and ``token_command`` are mutually exclusive;
+    either may be omitted for an unauthenticated local Omnigent server.
+    """
+    config_path = _resolve_config_path()
+    if config_path is None:
+        return None
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    raw = data.get("omnigent")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        _invalid_config("[omnigent] must be a table")
+
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        _invalid_config("[omnigent].enabled must be a boolean")
+    if not enabled:
+        return None
+
+    return _parse_omnigent(raw)
+
+
+def _parse_omnigent(raw: dict[object, object]) -> Omnigent:
+    """Validate an enabled `[omnigent]` table."""
+
+    server_url = raw.get("server_url")
+    host_id = raw.get("host_id")
+    if not isinstance(server_url, str) or not server_url.strip():
+        _invalid_config("[omnigent].server_url must be a non-empty HTTP(S) URL")
+    if not isinstance(host_id, str) or not host_id.strip():
+        _invalid_config("[omnigent].host_id must be a non-empty string")
+
+    token_env = raw.get("token_env")
+    if token_env is not None and (not isinstance(token_env, str) or not token_env.strip()):
+        _invalid_config("[omnigent].token_env must be a non-empty environment variable name")
+
+    token_command = _token_command(raw.get("token_command"))
+    if token_env is not None and token_command is not None:
+        raise ValueError("[omnigent] accepts only one of token_env or token_command")
+
+    timeout = _positive_number(
+        raw.get("timeout_seconds", Omnigent.timeout_seconds),
+        field="[omnigent].timeout_seconds",
+    )
+
+    return Omnigent(
+        server_url=_http_base_url(server_url, field="[omnigent].server_url"),
+        host_id=host_id.strip(),
+        token_env=token_env.strip() if token_env is not None else None,
+        token_command=token_command,
+        timeout_seconds=timeout,
+    )
+
+
+def _token_command(raw: object) -> tuple[str, ...] | None:
+    if raw is None:
+        return None
+    if (
+        not isinstance(raw, list)
+        or not raw
+        or any(not isinstance(part, str) or not part for part in raw)
+    ):
+        _invalid_config("[omnigent].token_command must be a non-empty array of strings")
+    return tuple(part for part in raw if isinstance(part, str))
+
+
+def _positive_number(raw: object, *, field: str) -> float:
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool) or raw <= 0:
+        _invalid_config(f"{field} must be a positive number")
+    return float(raw)
+
+
+def _invalid_config(message: str) -> Never:
+    """Raise the CLI's standard error type for user-edited config values."""
+    raise ValueError(message)
+
+
 def _origin(value: str) -> str:
     """Validate and normalize one configured browser origin."""
     parsed = urlsplit(value.strip())
@@ -248,3 +346,23 @@ def _origin(value: str) -> str:
             f"[serve].allowed_origins entry must be an HTTP origin without a path: {value!r}"
         )
     return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), "", "", ""))
+
+
+def _http_base_url(value: str, *, field: str) -> str:
+    """Validate an HTTP(S) base URL while preserving an API mount path."""
+    parsed = urlsplit(value.strip())
+    try:
+        _ = parsed.port
+    except ValueError as error:
+        raise ValueError(f"invalid {field}: {value!r}") from error
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"{field} must be an HTTP(S) URL without credentials, query, or fragment")
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, "", ""))

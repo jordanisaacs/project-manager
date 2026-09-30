@@ -71,6 +71,7 @@ ignore = [
     "SLF001",   # tests may poke at privates
     "PLC0415",  # inline imports are fine in tests
 ]
+"tests/omnigent/test_client.py" = ["N802"]  # stdlib HTTP handler verb name
 # Cyclopts handlers naturally take many typed parameters (scope dataclass +
 # individual flags) and receive bool flags via keyword-only args; the lint
 # rules below are designed for conventional functions and produce noise here.

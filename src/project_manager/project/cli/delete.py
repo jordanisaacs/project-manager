@@ -5,6 +5,7 @@ from typing import Annotated
 from cyclopts import Parameter
 
 from project_manager import config
+from project_manager.omnigent.sync import best_effort_sync
 from project_manager.project import remove as remove_mod
 
 from . import project_app
@@ -28,4 +29,5 @@ def delete(
         emit_remove_plan(plan, paths, as_json=json)
         return 1 if plan.has_blocker else 0
     remove_mod.remove(paths, project, None)
+    best_effort_sync(paths)
     return 0

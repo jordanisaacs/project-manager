@@ -219,3 +219,70 @@ def test_xdg_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     paths = config.load()
     assert paths.repos == tmp_path / "r"
     assert paths.stacker_root == tmp_path / "s"
+
+
+def test_omnigent_is_optional(pm_env) -> None:
+    assert pm_env.projects.is_dir()
+    assert config.omnigent() is None
+
+
+def test_omnigent_reads_and_normalizes_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(
+        "[omnigent]\n"
+        'server_url = "HTTPS://Omnigent.Example/api/2.0/omnigent/"\n'
+        'host_id = " host_abc "\n'
+        'token_env = "OMNIGENT_TOKEN"\n'
+        "timeout_seconds = 4.5\n"
+    )
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+
+    credential_source = "OMNIGENT_TOKEN"
+    assert config.omnigent() == config.Omnigent(
+        server_url="https://omnigent.example/api/2.0/omnigent",
+        host_id="host_abc",
+        token_env=credential_source,
+        timeout_seconds=4.5,
+    )
+
+
+def test_omnigent_disabled_ignores_incomplete_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text("[omnigent]\nenabled = false\n")
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    assert config.omnigent() is None
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ("server_url = 'file:///tmp/server'\nhost_id = 'h'", "HTTP.*URL"),
+        ("server_url = 'http://localhost:6767'", "host_id"),
+        (
+            "server_url = 'http://localhost:6767'\n"
+            "host_id = 'h'\ntoken_env = 'TOKEN'\ntoken_command = ['token-helper']",
+            "only one",
+        ),
+        (
+            "server_url = 'http://localhost:6767'\nhost_id = 'h'\ntoken_command = []",
+            "non-empty array",
+        ),
+    ],
+)
+def test_omnigent_rejects_invalid_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    body: str,
+    message: str,
+) -> None:
+    cfg = tmp_path / "pm.toml"
+    cfg.write_text(f"[omnigent]\n{body}\n")
+    monkeypatch.setenv("PM_CONFIG", str(cfg))
+    with pytest.raises(ValueError, match=message):
+        config.omnigent()
